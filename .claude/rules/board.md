@@ -24,7 +24,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira Detail's session card `Stop` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with ten composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`), the board sheet's roots
-  search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraDetail.tsx`) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
+  search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraTicketStrip.tsx`, the Status chip in the ticket body's strip) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
   only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still ten dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
@@ -123,7 +123,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   (#367) — never while the unvetted rung speaks, since approving a plan does not vet it. Why:
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
 - **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.** `JiraRunMenu`
-  (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column, and it reads `runChipState` (`lib/jira.ts`)
+  (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail frame's head (and, for a failed pipeline, the Delivery tab's next row), and it reads `runChipState` (`lib/jira.ts`)
   alone: `no-repo` draws a dashed chip that opens nothing, a `live` key (a `starting` reservation, or a live `run` link on it that does not yield — `runYields`, `shared/jira-sessions.ts`) a disabled one titled by `runBlockTitle`, anything else a `Popover` — and with agents off it still draws and still
   opens, because the launch sheet's `Copy prompt` needs no dashboard. `JiraLaunchSheet` asks `projectDispatchGate` and draws `Start` only on a `disabled` or
   `enabled` answer, never on `hidden`, and draws none before the agents status has landed; `Copy prompt` waits on the preview and a clipboard and on nothing

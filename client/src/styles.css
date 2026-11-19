@@ -1475,10 +1475,13 @@ button.rail-count { cursor: pointer }
 .jira-detail-crumb-parent { display: inline-flex; align-items: baseline; gap: .25em; min-width: 0 }
 .jira-detail-crumb-in { flex: none; white-space: nowrap }
 .jira-detail-out {
-  margin-left: auto; display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
+  display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
   border: 1px solid var(--hairline2); border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--ink); text-decoration: none; white-space: nowrap
 }
 .jira-detail-out:hover { background: var(--strip-hi) }
+/* The frame's actions (Jira detail tabs spec §7.1, `B-Modal.html`): `Open full page ↗`, `Open in Jira ↗` and `Run ▾`, pushed to the head's right edge. The
+   wrapper is `Run ▾`'s row too, so its popover hangs under the chip, right-anchored as the base popover is, inside the dialog's head. */
+.jira-detail-acts { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0 }
 .jira-detail-title { flex-basis: 100%; margin: 0; font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -.02em; color: var(--ink); text-wrap: balance }
 .jira-detail-agent, .jira-detail-ticket { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
 .jira-detail-lbl {
@@ -4642,6 +4645,21 @@ button.rail-count { cursor: pointer }
 .ui-modal-split.ui-modal-narrow .ui-modal-facts { max-height: none; overflow: visible; border-bottom: none; padding: 16px 16px 0 }
 .ui-modal-split.ui-modal-narrow .ui-modal-body { overflow: visible; padding: 16px }
 .ui-modal-split.ui-modal-narrow .ui-modal-head { padding: 16px 52px 16px 16px }
+/* The single shape (Modal's header, "`head` with no `facts`"): Jira Detail since its tabs (spec §7.1, `B-Modal.html`) — the split's head band and its
+   width, and under it ONE column, the ticket body, which brought its own strip and tabs. The row track is the head's `auto` over the clamped
+   `minmax(0, 1fr)` the `.ui-modal` comment explains, so the body scrolls under a head that stays put — the head holds the exits. Folded, the head and
+   the body stack and the body stays the one scroller: there is no second column to fold above it, so the split's whole-panel scroll buys nothing. */
+.ui-modal-single {
+  width: min(1320px, calc(100vw / var(--font-scale, 1) - 48px));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--board);
+}
+.ui-modal-single .ui-modal-close { top: 18px; right: 18px }
+.ui-modal-single .ui-modal-body { padding: 20px 24px 24px }
+.ui-modal-single.ui-modal-narrow { width: calc(100vw / var(--font-scale, 1)) }
+.ui-modal-single.ui-modal-narrow .ui-modal-head { padding: 16px 52px 16px 16px }
+.ui-modal-single.ui-modal-narrow .ui-modal-body { padding: 16px }
 /* `foot` (Modal's header): a full-width band under both columns. It adds an `auto` ROW after the clamped `minmax(0, 1fr)` content row rather than
    replacing it — the content row keeps the clamp the `.ui-modal` comment explains, so the columns still scroll and the band stays in view below them.
    One rule per shape, after every shape's own row template, so each wins by order at equal specificity; the folded split has no row template (one

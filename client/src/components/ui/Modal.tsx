@@ -51,6 +51,15 @@ import { useNarrow } from '../../hooks/useNarrow';
  * this one shell, not a second shell — scrim, exit, Escape and the 700 px fold are unchanged, and under 700 px the head, the facts and the body stack in
  * that order. The item modal passes none and keeps the sidecar exactly.
  *
+ * **`head` with no `facts` is the single shape** (`.ui-modal-single`; Jira detail tabs spec §7.1, `B-Modal.html`), and Jira Detail is its one composer: the
+ * ticket body brought its own strip and tabs, so a second column would only split one reading in two. The head band is the split shape's, drawn across the
+ * one column; under it the body alone, on the board's ground and at the split shape's width (spec §7.1 keeps today's), scrolling under the head so the
+ * head's exits stay in reach. Scrim, exit, Escape and the 700 px fold are the shell's here too — under 700 px the head and the body stack, the body the one
+ * scroller. The mention modal and the reply editor pass `facts` and keep the split; nothing about `lead` changes.
+ *
+ * **`labelledBy` names the dialog by one element of its own** instead of `label`: Detail's body draws the ticket's title as its one `<h2>`, so the dialog
+ * points at that heading rather than repeating its text in a string that could drift from it (or name the dialog twice). Exactly one of the two is passed.
+ *
  * **`lead` weights the split toward the facts slot** (1.6 : 1 rather than Detail's 1.05 : 1), for the mention modal, whose facts slot is the comment thread
  * — the thing the reader opened it for — and whose body is a short ticket summary (`ModalA.dc.html`). A class on the shell, so the 700 px fold, which
  * comes later in the sheet at the same specificity, still collapses it to one column.
@@ -66,6 +75,7 @@ import { useNarrow } from '../../hooks/useNarrow';
  */
 export function Modal({
   label,
+  labelledBy,
   head,
   lead = false,
   facts,
@@ -73,13 +83,13 @@ export function Modal({
   over = false,
   children,
   onClose
-}: {
-  label: string;
-  /** The split shape's full-width head (see the header); absent, the shell is the sidecar. */
+}: ({ label: string; labelledBy?: never } | { labelledBy: string; label?: never }) & {
+  /** The split shape's full-width head (see the header); absent, the shell is the sidecar. With no `facts`, the single shape. */
   head?: ReactNode;
   /** The split shape only: give the facts slot the wider column (see the header). */
   lead?: boolean;
-  facts: ReactNode;
+  /** The facts column. Absent only with a `head` — the single shape, which draws no facts slot at all. */
+  facts?: ReactNode;
   /** A full-width action band after the body (see the header); absent, no band and no extra row. */
   foot?: ReactNode;
   /** Stack above another open modal (see the header). */
@@ -89,12 +99,15 @@ export function Modal({
 }) {
   const narrow = useNarrow();
   useDialogEscape(onClose);
-  const split = head !== undefined;
+  // `head` alone is the single shape; `head` with `facts` the split. With no head the facts slot is always drawn — the sidecar's two columns.
+  const single = head !== undefined && facts === undefined;
+  const split = head !== undefined && !single;
   const footed = foot !== undefined;
   const className = [
     'ui-modal',
     split ? 'ui-modal-split' : null,
     split && lead ? 'ui-modal-lead' : null,
+    single ? 'ui-modal-single' : null,
     narrow ? 'ui-modal-narrow' : null,
     footed ? 'ui-modal-footed' : null,
     over ? 'ui-modal-over' : null
@@ -108,7 +121,7 @@ export function Modal({
           below is the one a keyboard reaches. Both, because neither alone is
           "a real exit" (§6.1) for both kinds of reader. */}
       <div className={over ? 'ui-modal-scrim ui-modal-over' : 'ui-modal-scrim'} data-testid="modal-scrim" onClick={onClose} />
-      <div className={className} role="dialog" aria-modal="true" aria-label={label}>
+      <div className={className} role="dialog" aria-modal="true" aria-label={label} aria-labelledby={labelledBy}>
         <button type="button" className="ui-modal-close" aria-label="close" onClick={onClose}>
           ✕
         </button>
@@ -116,8 +129,8 @@ export function Modal({
             always the facts and a body that is always the content is what lets
             the 290 px / fold-above geometry live in one stylesheet rule instead
             of in whatever order a composer happened to pass its children in. */}
-        {split && <div className="ui-modal-head">{head}</div>}
-        <div className="ui-modal-facts">{facts}</div>
+        {head !== undefined && <div className="ui-modal-head">{head}</div>}
+        {!single && <div className="ui-modal-facts">{facts}</div>}
         <div className="ui-modal-body">{children}</div>
         {footed && <div className="ui-modal-foot">{foot}</div>}
       </div>

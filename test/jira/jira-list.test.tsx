@@ -10,6 +10,7 @@ import { JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext
 import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
+import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { resetJiraListFilters, setJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
 import { sessionsEmptyTitle, stubIssue } from '../../client/src/lib/jira-list';
 import { NoGitlab } from '../helpers/no-gitlab';
@@ -143,6 +144,8 @@ const ok = (body: unknown) =>
 beforeEach(() => {
   localStorage.clear();
   resetJiraListFilters();
+  // The Detail's tab is a module store that outlives a mount (and the storage clear above): every case opens on Ticket, as a first open does.
+  setJiraDetailTab('ticket');
   statusAnswer = status();
   lists = { [ALPHA.id]: Object.values(ISSUES), [BETA.id]: [ISSUES['PAY-131']] };
   links = [];
@@ -377,7 +380,7 @@ describe('the Sessions page', () => {
 
     // A plain cell — the branch, nowhere near the summary — opens Detail for that row's ticket.
     await userEvent.click(within(group('Live')).getByText('feat/refund-partial'));
-    expect(await screen.findByRole('dialog', { name: /^PAY-131 / })).toHaveAttribute('aria-modal', 'true');
+    expect(await screen.findByRole('dialog', { name: 'Refund partial captures' })).toHaveAttribute('aria-modal', 'true');
   });
 
   it('the Repository and Run cells carry their full text as a title, since both ellipsise (ui-verify D14, D15)', async () => {
@@ -557,8 +560,10 @@ describe('the Sessions page', () => {
     await renderList();
     await waitFor(() => expect(rowTags()).toEqual(['PAY-120:working']));
     await userEvent.click(within(screen.getByRole('row', { name: 'Session on PAY-120' })).getByRole('button', { name: 'Refund flows' }));
-    const dialog = await screen.findByRole('dialog', { name: /^PAY-120 / });
-    await within(dialog).findByRole('heading', { name: 'Children' });
+    const dialog = await screen.findByRole('dialog', { name: 'Refund flows' });
+    // The Children rows are the Children & comments tab's since Jira detail tabs; the tree draws once the detail read has landed.
+    await userEvent.click(within(dialog).getByRole('tab', { name: /^Children/ }));
+    await waitFor(() => expect(dialog.querySelectorAll('.jira-tree > li').length).toBeGreaterThan(0));
     const tree = Array.from(dialog.querySelectorAll<HTMLElement>('.jira-tree > li')).map((li) => `${li.querySelector('.jira-tree-key')?.textContent}/${li.dataset.depth}`);
     expect(tree).toEqual(['PAY-140/0', 'PAY-141/1']);
   });
@@ -632,7 +637,7 @@ describe('the Sessions page', () => {
     await renderList();
     await waitFor(() => expect(rowTags().length).toBe(1));
     await userEvent.click(within(screen.getByRole('row', { name: 'Session on PAY-131' })).getByRole('button', { name: 'Refund partial captures' }));
-    const dialog = await screen.findByRole('dialog', { name: /^PAY-131 / });
+    const dialog = await screen.findByRole('dialog', { name: 'Refund partial captures' });
     const before = reads();
     await userEvent.click(await within(dialog).findByRole('button', { name: 'Assign to me' }));
     await waitFor(() => expect(reads()).toBe(before + 1));
@@ -652,7 +657,7 @@ describe('the Sessions page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-131' }));
     await userEvent.click(await within(await screen.findByRole('dialog', { name: 'Run menu' })).findByRole('button', { name: /Work it end to end/ }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: /^PAY-131 / })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Refund partial captures' })).toBeNull();
   });
 
   it("a Sessions row's `Run` opens the launch sheet directly, with no menu", async () => {

@@ -11,6 +11,7 @@ import { JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext
 import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
+import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
 import { elapsedSince } from '../../client/src/lib/item-age';
 import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, JIRA_LANE_FOLDS_KEY, LANE_INDENT_CAP, bandSub } from '../../client/src/lib/jira';
@@ -194,6 +195,8 @@ const AGENTS: AgentsStatus = {
 
 beforeEach(() => {
   localStorage.clear();
+  // The Detail's tab is a module store that outlives a mount (and the storage clear above): every case opens on Ticket, as a first open does.
+  setJiraDetailTab('ticket');
   statusAnswer = status();
   lists = { [ALPHA.id]: ALPHA_ISSUES, [BETA.id]: BETA_ISSUES };
   requested = [];
@@ -1611,7 +1614,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
     expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'Ticket loaded' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Refund partial captures' })).not.toBeInTheDocument();
     // The menu closed behind the pick.
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
   });
@@ -1757,7 +1760,9 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
     // The deck card's summary opens Detail on the ticket.
     await userEvent.click(within(deckCards('PAY-131')[0]).getByRole('button', { name: 'Refund partial captures' }));
-    const modal = await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    const modal = await screen.findByRole('dialog', { name: 'Refund partial captures' });
+    // The session cards are the Agent tab's since Jira detail tabs (spec §5); the dialog opens on Ticket.
+    await userEvent.click(within(modal).getByRole('tab', { name: /^Agent/ }));
     await userEvent.click(await within(modal).findByRole('button', { name: 'More for PAY-131' }));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Session actions' })).getByRole('button', { name: 'Stop session' }));
     const statusBefore = statusReads();
@@ -1794,30 +1799,32 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     const back = (): HTMLElement | null => within(dialog()).queryByRole('button', { name: /^Back to / });
 
     await userEvent.click(card('Refund partial captures'));
-    await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    await screen.findByRole('dialog', { name: 'Refund partial captures' });
     expect(back()).toBeNull();
+    // The Children rows are the Children & comments tab's since Jira detail tabs; the tab then stays selected for the whole walk (§9 case 16).
+    await userEvent.click(within(dialog()).getByRole('tab', { name: /^Children/ }));
 
     await userEvent.click(await within(dialog()).findByRole('button', { name: /PAY-200 Child story/ }));
-    await screen.findByRole('dialog', { name: /PAY-200 Child story/ });
+    await screen.findByRole('dialog', { name: 'Child story' });
     expect(back()).toHaveAccessibleName('Back to PAY-131');
     await userEvent.click(await within(dialog()).findByRole('button', { name: /PAY-201 Grandchild task/ }));
-    await screen.findByRole('dialog', { name: /PAY-201 Grandchild task/ });
+    await screen.findByRole('dialog', { name: 'Grandchild task' });
     expect(back()).toHaveAccessibleName('Back to PAY-200');
 
     await userEvent.click(back() as HTMLElement);
-    await screen.findByRole('dialog', { name: /PAY-200 Child story/ });
+    await screen.findByRole('dialog', { name: 'Child story' });
     expect(back()).toHaveAccessibleName('Back to PAY-131');
     await userEvent.click(back() as HTMLElement);
-    await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    await screen.findByRole('dialog', { name: 'Refund partial captures' });
     expect(back()).toBeNull();
 
     // Down one, close, and open the card again: the walk is the reading's, so the reopened dialog has nowhere to go back to.
     await userEvent.click(await within(dialog()).findByRole('button', { name: /PAY-200 Child story/ }));
-    await screen.findByRole('dialog', { name: /PAY-200 Child story/ });
+    await screen.findByRole('dialog', { name: 'Child story' });
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await userEvent.click(card('Refund partial captures'));
-    await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    await screen.findByRole('dialog', { name: 'Refund partial captures' });
     expect(back()).toBeNull();
   });
 
@@ -1825,11 +1832,11 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await renderRun();
     const chip = runMore('Refund partial captures');
     await userEvent.click(chip);
-    expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Refund partial captures' })).not.toBeInTheDocument();
     await userEvent.click(chip);
     chip.focus();
     await userEvent.keyboard('{Enter}');
-    expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Refund partial captures' })).not.toBeInTheDocument();
   });
 });
 

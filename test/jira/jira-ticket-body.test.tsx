@@ -30,10 +30,12 @@ import type {
 import { daysAgoStamp } from '../helpers/dates';
 
 /*
-  Jira › Detail's body (Jira detail tabs spec §1, §9 cases 8–11 and 27; DESIGN.md §8.9.2): the heading, the summary strip, the tab row and the Ticket pane,
+  Jira › Detail's body (Jira detail tabs spec §1, §9 case 27; DESIGN.md §8.9.2): the heading, the summary strip, the tab row and the Ticket pane,
   drawn by both frames. It is mounted here bare — no `Modal`, no page — with the frame's read handed in as `detail`, so what is asserted is the body's alone:
   which tabs draw and which is selected (the remembered `jira-detail-tab` store, never written by a fallback), the strip's cells on every tab, the write
   controls that moved into it, and the Details facts that did not. Fixture stamps are relative to the clock the assertion runs under (`test/helpers/dates.ts`).
+  §9 cases 8–16 are not here: they are the shared table (`test/helpers/ticket-body-cases.ts`), run through each frame that draws this body, so the modal
+  and the page are held to one set of cases on one set of fixtures (Task 7).
 */
 
 const minutesAgo = (m: number): string => daysAgoStamp(m / 1440);
@@ -293,74 +295,10 @@ const stored = (): unknown => {
 };
 const strip = (): HTMLElement => screen.getByRole('group', { name: 'Summary' });
 
-describe('JiraTicketBody — tabs (T8–T10)', () => {
-  it('T8: Ticket, Delivery 2 targets, Agent 2 live, Children & comments with the direct-children count', () => {
-    const child = { ...ISSUE, key: 'PAY-15', id: '10015', summary: 'Partial refunds API', parent: { key: 'PAY-12', summary: '', type: null, status: null } };
-    mount({ detail: detail({ children: [child, { ...child, key: 'PAY-16', id: '10016' }, { ...child, key: 'PAY-17', id: '10017' }] }) });
-    expect(screen.getByRole('tablist')).toBeInTheDocument();
-    expect(tabNames()).toEqual(['Ticket', 'Delivery 2 targets', 'Agent 2 live', 'Children & comments 3']);
-    expect(screen.getByRole('tab', { name: 'Agent 2 live' })).toBeInTheDocument();
-  });
-
-  it('T8: one target reads `1 target`; a ticket with nothing to count draws no count', () => {
-    mount({ gitlab: gitlab([mr({ iid: 51, targetBranch: 'develop' })]), sessions: { links: [], reachable: true, rowsAt: new Date().toISOString() } });
-    expect(tabNames()).toEqual(['Ticket', 'Delivery 1 target', 'Agent', 'Children & comments']);
-  });
-
-  it('T8: the Agent count is the ended count when nothing is live', () => {
-    const only = sessions();
-    mount({ sessions: { ...only, links: only.links.filter((l) => l.endedAt !== null) } });
-    expect(screen.getByRole('tab', { name: 'Agent 5' })).toBeInTheDocument();
-  });
-
-  it('T8: a `hidden` delivery draws three tabs and no Delivery cell', () => {
-    mount({ gitlab: gitlab([], null) });
-    expect(tabNames()).toEqual(['Ticket', 'Agent 2 live', 'Children & comments']);
-    expect(within(strip()).queryByText('Delivery')).toBeNull();
-  });
-
-  it('T9: a selection is remembered across tickets; a tab this ticket does not draw falls back to Ticket without writing the store', () => {
-    const { rerender } = mount();
-    expect(selected()).toBe('Ticket');
-    fireEvent.click(screen.getByRole('tab', { name: 'Agent 2 live' }));
-    expect(stored()).toBe('agent');
-    expect(selected()).toBe('Agent 2 live');
-
-    const pay13 = { ...ISSUE, key: 'PAY-13', id: '10013', url: 'https://acme.atlassian.net/browse/PAY-13' };
-    rerender(tree({ issue: pay13 }));
-    expect(selected()).toMatch(/^Agent/);
-
-    fireEvent.click(screen.getByRole('tab', { name: /^Delivery/ }));
-    expect(stored()).toBe('delivery');
-    const pay14 = { ...ISSUE, key: 'PAY-14', id: '10014', url: 'https://acme.atlassian.net/browse/PAY-14' };
-    rerender(tree({ issue: pay14, gitlab: gitlab([], null) }));
-    expect(selected()).toBe('Ticket');
-    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', screen.getByRole('tab', { name: 'Ticket' }).id);
-    expect(stored()).toBe('delivery');
-  });
-
-  it('T10: ArrowRight from Ticket selects Delivery and moves focus; ArrowLeft from Ticket wraps to the last tab', () => {
-    mount();
-    const ticket = screen.getByRole('tab', { name: 'Ticket' });
-    expect(ticket).toHaveAttribute('tabindex', '0');
-    expect(screen.getByRole('tab', { name: /^Delivery/ })).toHaveAttribute('tabindex', '-1');
-    ticket.focus();
-    fireEvent.keyDown(ticket, { key: 'ArrowRight' });
-    const delivery = screen.getByRole('tab', { name: /^Delivery/ });
-    expect(delivery).toHaveAttribute('aria-selected', 'true');
-    expect(delivery).toHaveFocus();
-    expect(delivery).toHaveAttribute('aria-controls', screen.getByRole('tabpanel').id);
-
-    fireEvent.keyDown(delivery, { key: 'ArrowLeft' });
-    const back = screen.getByRole('tab', { name: 'Ticket' });
-    fireEvent.keyDown(back, { key: 'ArrowLeft' });
-    expect(screen.getByRole('tab', { name: /^Children & comments/ })).toHaveAttribute('aria-selected', 'true');
-    expect(stored()).toBe('children');
-  });
-});
-
-describe('JiraTicketBody — the strip (T11, T27)', () => {
-  it('T11: the Status chip opens `Move to` with the transitions; a pick posts the transition', async () => {
+describe('JiraTicketBody — the strip (T27)', () => {
+  // The transition itself, and the strip's other T11 cases, are the shared table's (`test/helpers/ticket-body-cases.ts`), run through each frame; what only
+  // the bare body can show is the argument it hands its frame on a landed write: `true`, "re-read me".
+  it('a landed transition hands the frame `onWrote(true)`', async () => {
     mount();
     fireEvent.click(within(strip()).getByRole('button', { name: 'Move to' }));
     const panel = screen.getByRole('dialog', { name: 'Move to' });
@@ -368,39 +306,6 @@ describe('JiraTicketBody — the strip (T11, T27)', () => {
     fireEvent.click(within(panel).getByText('Done'));
     await waitFor(() => expect(posts).toEqual(['/api/jira/issue/transition']));
     await waitFor(() => expect(onWrote).toHaveBeenCalledWith(true));
-  });
-
-  it('T11: `Assign to me` keeps today’s disabled titles', () => {
-    const { rerender } = mount({ status: { me: null } });
-    expect(within(strip()).getByRole('button', { name: 'Assign to me' })).toBeDisabled();
-    expect(within(strip()).getByRole('button', { name: 'Assign to me' })).toHaveAttribute('title', 'no identity');
-    rerender(tree({ status: { me: DANA } }));
-    expect(within(strip()).getByRole('button', { name: 'Assign to me' })).toHaveAttribute('title', 'already assigned to you');
-    expect(within(strip()).getByText('Dana Novak')).toBeInTheDocument();
-  });
-
-  it('T11: an unassigned ticket reads `unassigned`; sprint and parent are cells, absent when the ticket has none', () => {
-    const bare = { ...ISSUE, assignee: null, sprint: null, parent: null };
-    mount({ issue: bare, detail: detail({ ...bare }) });
-    expect(within(strip()).getByText('unassigned')).toBeInTheDocument();
-    expect(within(strip()).queryByText('Sprint')).toBeNull();
-    expect(within(strip()).queryByText('Parent')).toBeNull();
-  });
-
-  it('T11: the `develop` pill is red on the Ticket tab, worst first; a pill click selects Delivery; the Agent pill selects Agent', () => {
-    mount();
-    expect(selected()).toBe('Ticket');
-    const pills = within(strip()).getAllByRole('button', { name: /pipeline/ });
-    expect(pills.map((p) => [p.textContent, p.getAttribute('data-tone')])).toEqual([
-      ['develop · pipeline failed', 'red'],
-      ['demo · pipeline passed', 'green']
-    ]);
-    expect(within(strip()).getByText('Sprint 40')).toBeInTheDocument();
-    expect(within(strip()).getByRole('button', { name: 'PAY-3 Refund flows' })).toBeInTheDocument();
-    fireEvent.click(pills[1]);
-    expect(selected()).toBe('Delivery 2 targets');
-    fireEvent.click(within(strip()).getByRole('button', { name: new RegExp(STATE_LABEL.answer) }));
-    expect(selected()).toBe('Agent 2 live');
   });
 
   it('T27: the Agent pill leads with the session waiting on an answer, not the newer working one, then `+1`', () => {
@@ -573,50 +478,7 @@ const CHILD_A: JiraIssue = {
 const CHILD_B: JiraIssue = { ...CHILD_A, key: 'PAY-22', id: '10022', summary: 'Refund webhook retries', status: { name: 'Done', category: 'done' } };
 const NO_SESSIONS: JiraSessionsPayload = { links: [], reachable: true, rowsAt: new Date().toISOString() };
 
-describe('JiraTicketBody — Agent tab (T15)', () => {
-  it('T15: History is a closed fold reading `5 ended · last <date, time>`; opened, five rows each with `Reopen`', () => {
-    const payload = sessions();
-    const newest = payload.links.find((l) => l.sessionId === 's-ended-1')?.endedAt as string;
-    mount({ sessions: payload });
-    openTab(/^Agent/);
-    // Built from the parts, not from `formatCreated`, so the case pins the shape the client's dates share: lowercase month, day, then the zone's clock.
-    const zone = browserTimeZone();
-    const at = Date.parse(newest);
-    const p = zonedParts(at, zone);
-    const year = p.year === zonedParts(Date.now(), zone).year ? '' : ` '${String(p.year).slice(-2)}`;
-    expect(summaryOf('History')).toHaveTextContent(`History5 ended · last ${MONTH[p.month - 1]} ${p.day}${year}, ${formatZonedClock(at, zone)}`);
-    expect(foldOf('History')).not.toHaveAttribute('open');
-    expect(within(panel()).queryByText('Reopen')).toBeNull();
-
-    fireEvent.click(summaryOf('History'));
-    expect(foldOf('History')).toHaveAttribute('open');
-    const rows = within(foldOf('History')).getAllByRole('listitem');
-    expect(rows).toHaveLength(5);
-    for (const row of rows) expect(within(row).getByText('Reopen')).toBeInTheDocument();
-  });
-
-  it('T15: a live `review` card with a `stopState` offers no `Stop session`; an `execute` card with one still does', async () => {
-    agentsStatus = AGENTS_ON;
-    const stoppable = (id: string): DashboardRow => ({ id, status: 'busy', surface: 'dashboard', stopState: 'ready' });
-    mount({
-      sessions: {
-        links: [
-          link({ sessionId: 's-review', action: 'review', state: 'working', row: stoppable('s-review'), startedAt: minutesAgo(4) }),
-          link({ sessionId: 's-exec', action: 'execute', state: 'working', row: stoppable('s-exec'), startedAt: minutesAgo(8) })
-        ],
-        reachable: true,
-        rowsAt: new Date().toISOString()
-      }
-    });
-    openTab(/^Agent/);
-    const review = within(panel()).getByRole('article', { name: 'Session s-review' });
-    const exec = within(panel()).getByRole('article', { name: 'Session s-exec' });
-    // The execute card's Stop appears once the agents status lands; only then is the review card's absence a finding rather than a race.
-    await waitFor(() => expect(within(exec).getByRole('button', { name: 'More for PAY-12' })).toBeInTheDocument());
-    await waitFor(async () => expect(await cardMenuHas(exec, 'Stop session')).toBe(true));
-    expect(await cardMenuHas(review, 'Stop session')).toBe(false);
-  });
-
+describe('JiraTicketBody — Agent tab', () => {
   it('with no live session: `No session on this ticket`, the `default: … · last run <age>` line, and no `Run ▾` in the pane', () => {
     const payload = sessions();
     const endedOnly: JiraSessionsPayload = { ...payload, links: payload.links.filter((l) => l.endedAt !== null) };
@@ -654,32 +516,7 @@ describe('JiraTicketBody — Agent tab (T15)', () => {
   });
 });
 
-describe('JiraTicketBody — Children & comments tab (T16)', () => {
-  it('T16: a Children row click opens the child and the tab stays; `← PAY-12` is the frame’s Back', () => {
-    const { rerender } = mount({ detail: detail({ children: [CHILD_A, CHILD_B] }), sessions: NO_SESSIONS });
-    openTab(/^Children & comments/);
-    expect(summaryOf('Children')).toHaveTextContent('Children2');
-    expect(foldOf('Children')).toHaveAttribute('open');
-    fireEvent.click(within(panel()).getByRole('button', { name: /^PAY-21 Ledger rounding fix/ }));
-    expect(onOpenIssue).toHaveBeenCalledWith(CHILD_A, null);
-
-    rerender(tree({ issue: CHILD_A, detail: detail({ ...CHILD_A }), sessions: NO_SESSIONS, back: ISSUE }));
-    expect(selected()).toBe('Children & comments');
-    fireEvent.click(screen.getByRole('button', { name: 'Back to PAY-12' }));
-    expect(onBack).toHaveBeenCalledTimes(1);
-  });
-
-  it('T16: the Agent tab’s child-live line opens the child and the Agent tab stays selected', () => {
-    const childLive: JiraSessionsPayload = { ...NO_SESSIONS, links: [link({ key: 'PAY-21', sessionId: 's-child', state: 'working' })] };
-    const { rerender } = mount({ detail: detail({ children: [CHILD_A, CHILD_B] }), sessions: childLive });
-    openTab(/^Agent/);
-    fireEvent.click(within(panel()).getByRole('button', { name: `${STATE_LABEL.working} on PAY-21 →` }));
-    expect(onOpenIssue).toHaveBeenCalledWith(CHILD_A, null);
-
-    rerender(tree({ issue: CHILD_A, detail: detail({ ...CHILD_A }), sessions: childLive, back: ISSUE }));
-    expect(selected()).toMatch(/^Agent/);
-  });
-
+describe('JiraTicketBody — Children & comments tab', () => {
   it('while the detail read is out the Children fold reads `loading…`', () => {
     mount({ detail: null });
     openTab(/^Children & comments/);

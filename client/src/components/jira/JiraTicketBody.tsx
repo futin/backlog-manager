@@ -87,7 +87,8 @@ export function JiraTicketBody({
   onOpenIssue,
   onWrote,
   onReview,
-  onRun
+  onRun,
+  titleId
 }: {
   /** The issue the frame opened on — the card's copy in the modal. Everything the card carries draws from it until `detail` lands. */
   issue: JiraIssue;
@@ -108,6 +109,8 @@ export function JiraTicketBody({
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
   /** A Delivery next row's `Run ▾` (a failed pipeline): the frame's own `onRun`, the one its head's `Run ▾` calls. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
+  /** The heading's `id`, for a frame that names itself by it — the modal's `aria-labelledby`, so the dialog has one name and it is this title. */
+  titleId?: string;
 }) {
   const { data, reload } = useJiraContext();
   const { data: sessions, reload: reloadSessions } = useJiraSessionsContext();
@@ -340,7 +343,9 @@ export function JiraTicketBody({
             </span>
           ))}
         </div>
-        <h2 className="jira-detail-title">{src.summary}</h2>
+        <h2 id={titleId} className="jira-detail-title">
+          {src.summary}
+        </h2>
       </div>
       <JiraTicketStrip
         src={src}

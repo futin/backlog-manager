@@ -45,6 +45,36 @@ describe('Modal', () => {
     expect(dialog.querySelector('.ui-modal-body')).toContainElement(screen.getByText('the ticket'));
   });
 
+  it('takes the single shape when a composer passes `head` and no `facts`: a head band and a body, no facts slot and no split', () => {
+    render(
+      <Modal label="PAY-131" head={<span>the head</span>} onClose={() => {}}>
+        <span>the ticket</span>
+      </Modal>
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'PAY-131' });
+    expect(dialog).toHaveClass('ui-modal', 'ui-modal-single');
+    // Not the split: its two-column grid would leave the one column a half-width ghost beside an empty slot.
+    expect(dialog).not.toHaveClass('ui-modal-split');
+    expect(dialog.querySelector('.ui-modal-facts')).toBeNull();
+    expect(dialog.querySelector('.ui-modal-head')).toContainElement(screen.getByText('the head'));
+    expect(dialog.querySelector('.ui-modal-body')).toContainElement(screen.getByText('the ticket'));
+    // The shell's exit is the same in every shape.
+    expect(screen.getByRole('button', { name: 'close' })).toBeInTheDocument();
+  });
+
+  it('names the dialog by one element of its own with `labelledBy`, and carries no aria-label then', () => {
+    render(
+      <Modal labelledBy="the-title" head={<span>the head</span>} onClose={() => {}}>
+        <h2 id="the-title">Refund webhook retries twice</h2>
+      </Modal>
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Refund webhook retries twice' });
+    expect(dialog).toHaveAttribute('aria-labelledby', 'the-title');
+    expect(dialog).not.toHaveAttribute('aria-label');
+  });
+
   it('draws a `foot` as a full-width band after the body, and no band without one', () => {
     const { unmount } = render(
       <Modal label="reply editor" head={<span>head</span>} facts={<span>write</span>} foot={<button type="button">Post reply</button>} onClose={() => {}}>

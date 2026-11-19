@@ -34,7 +34,8 @@ import { daysAgoStamp } from '../helpers/dates';
   next step ringed on its track with its row under it, `Ignore` and its store, the older-MRs fold and the Worktrees fold. Mounted through the shared body
   (`JiraTicketBody`), because which rows are open is the body's state and a strip pill opens one — the fold, the pill and the row are one behaviour. The
   fixture is §9 case 3's shape on PAY-12: `develop` has one open MR and two merged, `demo` one open, three merged and one closed — eight MRs in two targets.
-  Every stamp is relative to the clock the assertion runs under (`test/helpers/dates.ts`).
+  Every stamp is relative to the clock the assertion runs under (`test/helpers/dates.ts`). §9 cases 12–14 are the shared table's
+  (`test/helpers/ticket-body-cases.ts`), run through each frame that draws the body; the cases left here are the tab's own.
 */
 
 // The review split asks the dashboard whether agents are on (`useAgents`); the hook fetches, so it is replaced by a status this suite sets per case.
@@ -301,55 +302,7 @@ const ignoredStore = (): unknown => {
 };
 const IGNORED_TITLE = 'ignored in this browser — click to stop ignoring';
 
-describe('JiraDeliveryTab — rows (T12, T13)', () => {
-  it('T12: one row per target; the first is open with its full track and next row, the other folded with `+4 earlier`', () => {
-    mount();
-    expect(rows()).toHaveLength(2);
-    expect(rows().map((r) => r.querySelector('.jira-dlv-into')?.textContent)).toEqual(['into develop', 'into demo']);
-    expect(row('develop').open).toBe(true);
-    expect(row('demo').open).toBe(false);
-    expect(row('develop').querySelector('ol.jira-dlv-track')).not.toBeNull();
-    expect(nextRow('develop')).not.toBeNull();
-    expect(summary('demo').textContent).toContain('+4 earlier');
-    expect(summary('develop').textContent).toContain('+2 earlier');
-    // The compact line: `!iid` links out, the title, the five-dot track.
-    expect(within(summary('demo')).getByRole('link', { name: '!50' })).toHaveAttribute('target', '_blank');
-    expect(summary('demo').textContent).toContain('PAY-12 | demo cut of refunds');
-    expect(summary('demo').querySelectorAll('.jira-dlv-track.compact .jira-dlv-dot')).toHaveLength(5);
-  });
-
-  it('T12: opening `demo` keeps `develop` open; its older fold lists the four, newest first, `from` only on the one from another branch', () => {
-    mount();
-    fireEvent.click(summary('demo'));
-    expect(row('demo').open).toBe(true);
-    expect(row('develop').open).toBe(true);
-    const older = row('demo').querySelector('details.jira-dlv-older') as HTMLDetailsElement;
-    expect(older).not.toBeNull();
-    expect(older.open).toBe(false);
-    const olderSummary = older.querySelector('summary') as HTMLElement;
-    expect(olderSummary.textContent).toBe('4 earlier MRs into demo · 3 merged, 1 closed');
-    fireEvent.click(olderSummary);
-    expect(older.open).toBe(true);
-    const orows = [...older.querySelectorAll('.jira-dlv-orow')];
-    expect(orows.map((r) => within(r as HTMLElement).getByRole('link').textContent)).toEqual(['!30 ↗', '!31 ↗', '!32 ↗', '!33 ↗']);
-    expect(orows.map((r) => r.querySelector('.jira-dlv-word')?.textContent)).toEqual(['merged', 'closed', 'merged', 'merged']);
-    expect(orows.map((r) => r.querySelector('.jira-dlv-from')?.textContent ?? null)).toEqual([null, null, 'from pay-12-hotfix', null]);
-    // Folding the row again closes it alone.
-    fireEvent.click(summary('develop'));
-    expect(row('develop').open).toBe(false);
-    expect(row('demo').open).toBe(true);
-  });
-
-  it('T13: a strip `demo` pill click selects Delivery and opens the `demo` row, leaving `develop` open', () => {
-    setJiraDetailTab('ticket');
-    mount();
-    expect(selected()).toBe('Ticket');
-    fireEvent.click(within(strip()).getByRole('button', { name: 'demo · pipeline passed' }));
-    expect(selected()).toBe('Delivery 2 targets');
-    expect(row('demo').open).toBe(true);
-    expect(row('develop').open).toBe(true);
-  });
-
+describe('JiraDeliveryTab — rows', () => {
   it('Review Focus 1: a poll that replaces `demo`’s lead keeps the row open on the new lead; a poll without `demo` draws one row', () => {
     const view = mount();
     fireEvent.click(summary('demo'));
@@ -396,29 +349,7 @@ describe('JiraDeliveryTab — the head line', () => {
   });
 });
 
-describe('JiraDeliveryTab — the next step (T14, T24, rows 8, 9, 12)', () => {
-  it('T14: `demo`’s next row requests a review of `demo`’s MR; its Review dot is ringed and reads `next · review`', () => {
-    mount();
-    fireEvent.click(summary('demo'));
-    const review = step('demo', 'Review');
-    expect(review).toHaveAttribute('data-next');
-    expect(review.querySelector('.jira-dlv-dot')).toHaveAttribute('data-next');
-    expect(stepWord('demo', 'Review')).toBe('next · review');
-    expect(pill('demo')).toBe('next: review');
-    expect(summary('demo').querySelector('.jira-dlv-word')).toHaveAttribute('data-tone', 'next');
-    expect(summary('demo').querySelector('.jira-dlv-track.compact .jira-dlv-dot[data-next]')).not.toBeNull();
-    fireEvent.click(within(nextRow('demo') as HTMLElement).getByRole('button', { name: 'Request review' }));
-    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-12' }), 'request', expect.objectContaining({ iid: 50 }), REPOS);
-  });
-
-  it('T14: a target whose lead is merged draws no next row and rings nothing', () => {
-    mount({ gitlab: gitlab([DEVELOP_LEAD(), merged(60, 'demo', 90)]) });
-    fireEvent.click(summary('demo'));
-    expect(nextRow('demo')).toBeNull();
-    expect(row('demo').querySelector('[data-next]')).toBeNull();
-    expect(pill('demo')).toBe('merged');
-  });
-
+describe('JiraDeliveryTab — the next step (T24, rows 8, 9, 12)', () => {
   it('row 8: a failed pipeline under a clean review draws its sentence and a second `Run ▾`', () => {
     mount();
     const next = nextRow('develop') as HTMLElement;
@@ -494,11 +425,13 @@ describe('JiraDeliveryTab — the next step (T14, T24, rows 8, 9, 12)', () => {
 
 describe('JiraDeliveryTab — Ignore (T25, T29)', () => {
   it('T25: ignoring `develop`’s failed pipeline stores it, draws `ignored`, moves the pill to merge — and the strip stays red', () => {
-    mount();
+    // Built ONCE: `DEVELOP_LEAD`'s stamp is minute-relative to the clock, so a second build could land a second later than the one drawn.
+    const mrs = eight();
+    mount({ gitlab: gitlab(mrs) });
     const red = () => within(strip()).getByRole('button', { name: 'develop · pipeline failed' });
     expect(red()).toHaveAttribute('data-tone', 'red');
     fireEvent.click(within(nextRow('develop') as HTMLElement).getByRole('button', { name: 'Ignore' }));
-    expect(ignoredStore()).toEqual({ 'acme/pay-api!41': { pipeline: { status: 'failed', updatedAt: DEVELOP_LEAD().updatedAt } } });
+    expect(ignoredStore()).toEqual({ 'acme/pay-api!41': { pipeline: { status: 'failed', updatedAt: mrs[0].updatedAt } } });
     const word = within(step('develop', 'Pipeline')).getByRole('button', { name: 'ignored' });
     expect(word).toHaveAttribute('title', IGNORED_TITLE);
     expect(step('develop', 'Pipeline').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'grey');
