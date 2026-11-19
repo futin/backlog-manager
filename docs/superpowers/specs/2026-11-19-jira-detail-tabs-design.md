@@ -100,7 +100,7 @@ The user's, from the canvas threads and the questions after them:
 1. Layout B, in both the modal and the page.
 2. The second tab is named **Delivery** (the mock said Development).
 3. A target row is compact by default and expands into today's Delivery pane; older MRs of a target are folded under it.
-4. The Review step of a draft that CodeRabbit has not reviewed is **grey with `skipped` under it** (§4.5).
+4. The Review step of an open MR that CodeRabbit has not reviewed, once Pipeline is reached, is **grey with `skipped` under it** (§4.5).
 5. The live session card in Detail offers **Open only** — no Stop (§5.1). (Thread: "We can't stop code rabbit review, so let's remove stop, leave only Open".)
 6. Each History row has a **`Reopen`** button, as today.
 7. The `Review live` pill in the strip is centred in its cell (a mock fix; recorded so the builder checks it).
@@ -109,7 +109,7 @@ The user's, from the canvas threads and the questions after them:
 10. Review skills get a **separate spec, right after** this one; picking one will open the launch sheet like Run (recorded for that spec).
 
 Calls this spec makes, marked so the user can check them while reading: §1.3 (first-ever tab), §2.2 (rail row), §2.3 (back target), §3 (which facts sit
-in the strip vs the Ticket tab), §4.1 (group key), §4.2 (which row opens), §4.5 (`skipped` scope), §5.1 (Stop stays on the deck), §6 (children on the page).
+in the strip vs the Ticket tab), §4.1 (group key), §4.2 (which row opens), §5.1 (Stop stays on the deck), §6 (children on the page).
 
 ## 1 The body: strip, tabs, panes
 
@@ -249,10 +249,10 @@ menu; this spec draws no menu and no skills.
 
 ### 4.5 The `skipped` Review step
 
-`deliveryLook` (shared by card, List and Detail): when the MR is an **open draft** and its review state is `none`, the Review step's mark is **grey** and
-its step word is **`skipped`** — CodeRabbit does not review a draft until asked, so for a draft "no review" is a skip, not a pending step. Every other case
-is today's (an open non-draft with `none` stays off; merged stays magenta; closed stays off). Scope is my call from the user's thread on the draft row;
-widening it to non-draft MRs is one line in the same function.
+`deliveryLook` (shared by card, List and Detail): when the MR is **open**, its review state is `none` (CodeRabbit has not reviewed it), and a **later step
+— Pipeline — is already reached**, the Review step's mark is **grey** and its step word is **`skipped`**: the work moved past review without one. Until a
+later step is reached the Review step stays today's hollow "not reached" ring with no word. Merged stays magenta, closed stays off. This is the rule the
+user was given in the canvas thread on the Review step.
 
 The mock also draws a draft's Pipeline step green (`draft · pipeline passed`). The code makes a draft's pipeline `off` on purpose (`deliveryLook`'s header:
 "a draft's red pipeline is work in progress, not a signal"). **This spec keeps the code**: a draft's Pipeline step stays off and its chip stays `draft`.
@@ -322,8 +322,8 @@ The plan specifies behaviour and exact cases, never literal code. jsdom suites u
 4. Same target in two projects → two groups.
 5. A target with only merged MRs → its representative is the newest merged.
 6. The first group's representative equals `leadMr(all).lead` for every fixture above.
-7. `deliveryLook`: open draft, review `none` → Review step grey, word `skipped`; open draft, review `open` → today's amber; open non-draft, `none` → off,
-   no word; merged → magenta, unchanged; draft pipeline stays `off`.
+7. `deliveryLook`: open non-draft, review `none`, pipeline `success` → Review step grey, word `skipped`; same with pipeline `null` → off, no word; review
+   `open` → today's amber; merged → magenta, unchanged; draft → per §4.5's draft paragraph.
 
 Detail body (jsdom, rendered in the modal and on the page with the same fixtures):
 
