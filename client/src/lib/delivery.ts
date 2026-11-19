@@ -1,5 +1,8 @@
 import { polledPhrase, repoBasename } from './jira';
 import type { StateTone } from './tones';
+import { ignoreHolds } from './ignored-steps';
+import type { IgnoreEntry } from './ignored-steps';
+import { reviewStepWord } from './review-copy';
 import { pollAge } from './tracker';
 import { reviewState } from '../../../shared/review';
 import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, JiraIssue } from '../../../shared/types';
@@ -297,6 +300,111 @@ function pipelineLook(pipeline: GitlabMr['pipeline']): { chip: string; word: str
     default:
       return { chip: 'open', word: 'open, no pipeline', tone: 'grey', mark: 'off', failed: false };
   }
+}
+
+/** Which button a Delivery row draws under its sentence; the caller maps it to a control (Jira detail tabs spec §4.5) and turns `fix` into `Open session` when a live review link is on the key. */
+export type NextButton = 'request' | 'fix' | 'run' | 'merge' | 'gitlab' | null;
+
+/**
+ * What is next for one MR (Jira detail tabs spec §4.5). `step` names the `TrackStep.step` the track rings (`null`: nothing is ringed — a waiting or a done row);
+ * `word` is that step's Next word and `pill` the compact row's state pill (`next: <word>` whenever `step` is set, otherwise the waiting or done word the table
+ * gives); `sentence` is the row's line, `null` on every Review row (the caller draws `reviewRowText` there); `ignore` is the step an `Ignore` click would store
+ * (`null`: no Ignore offered); `ignored` is which steps draw `ignored` now, from the entry that still holds.
+ */
+export interface DeliveryNext {
+  step: 'review' | 'pipeline' | 'merged' | null;
+  word: string | null;
+  pill: string;
+  sentence: string | null;
+  button: NextButton;
+  ignore: 'review' | 'pipeline' | null;
+  ignored: { review: boolean; pipeline: boolean };
+}
+
+const NEXT_SENTENCES = {
+  unread: 'The review has not been read yet.',
+  failed: 'The pipeline failed — fix it in a Run session.',
+  canceled: 'The pipeline was canceled — re-run it in GitLab.',
+  draft: 'Still a draft — mark it ready in GitLab.',
+  green: 'Reviewed and green — merge happens in GitLab.',
+  noPipeline: 'Reviewed, no pipeline — merge happens in GitLab.'
+} as const;
+
+/** The states `Ignore` is offered for (§4.5.1); an entry stored for any other state — only a hand-edited one can be — never draws `ignored`. */
+const IGNORABLE_REVIEW: ReadonlySet<string> = new Set(['unread', 'none', 'open', 'stale', 'unknown']);
+
+/**
+ * The §4.5 table as one precedence, because the table alone does not fix it: Review before Pipeline before Merge, and the first unfinished one wins, so a
+ * failed pipeline under open findings is the review's row (the fix half fixes both). A step counts as finished when it is clean — or ignored, by an entry that
+ * still holds (`ignoreHolds`: the state and its stamp are as they were) — and the marker moves on to the next. The review's state comes from `reviewState`, never
+ * re-derived here; `reviewing` and `unknown` WAIT instead of ringing a step (nothing the reader can do), and `running` waits the same way; `unknown` still offers
+ * `Ignore`, since rule 0 of `reviewState` never clears it on its own and such an MR could otherwise never reach `merge`. A draft's pipeline is `off` in
+ * `deliveryLook`, so it never blocks, rings or draws `ignored`: a clean draft is next to be marked ready. A `null` or `'none'` pipeline does not block either
+ * (spec decision 4: the worst case is Merge offered a poll early); an ignored failed or canceled one reads as finished, so the merge row is the green row's.
+ *
+ * Detail only: `deliveryLook` is untouched and keeps drawing the card, the List, the band, the filters and the strip's pill, so a failed pipeline stays red
+ * there however many times it was ignored here. The waiting and done rows' pill is `deliveryLook(mr).word`, never `.chip`, which repeats the `!<iid>` the row
+ * already prints.
+ */
+export function deliveryNext(mr: GitlabMr, now: number, ignored: IgnoreEntry | undefined): DeliveryNext {
+  const look = deliveryLook(mr, now);
+  const noneIgnored = { review: false, pipeline: false };
+  // Merged and closed: done (rows 13 and 14). Nothing is next, and an entry for a finished MR is stale by definition — the prune drops it on the next write.
+  if (mr.state !== 'opened') {
+    return { step: null, word: null, pill: look.word, sentence: null, button: null, ignore: null, ignored: noneIgnored };
+  }
+  const reviewKind = mr.review === null ? 'unread' : reviewState(mr.review, now);
+  const holds = ignoreHolds(ignored, mr, now);
+  const reviewIgnored = holds.review && IGNORABLE_REVIEW.has(reviewKind);
+  const pipelineIgnored = holds.pipeline && !mr.draft && (mr.pipeline === 'failed' || mr.pipeline === 'canceled');
+  const flags = { review: reviewIgnored, pipeline: pipelineIgnored };
+
+  /** A waiting row: nothing is ringed, the pill is the given word. */
+  const waiting = (pill: string, over: Partial<DeliveryNext> = {}): DeliveryNext => ({
+    step: null,
+    word: null,
+    pill,
+    sentence: null,
+    button: null,
+    ignore: null,
+    ignored: flags,
+    ...over
+  });
+  const ring = (step: 'review' | 'pipeline' | 'merged', word: string, button: NextButton, ignore: DeliveryNext['ignore'], sentence: string | null): DeliveryNext => ({
+    step,
+    word,
+    pill: `next: ${word}`,
+    sentence,
+    button,
+    ignore,
+    ignored: flags
+  });
+
+  if (!reviewIgnored) {
+    switch (reviewKind) {
+      case 'unread':
+        return waiting(look.word, { sentence: NEXT_SENTENCES.unread, ignore: 'review' });
+      case 'none':
+        return ring('review', 'review', 'request', 'review', null);
+      case 'stale':
+        return ring('review', 're-review', 'request', 'review', null);
+      case 'open':
+        // `reviewKind` is `open` only for a read review; `capped` means the count is a floor, so `<n>+`.
+        return ring('review', `fix ${mr.review?.open ?? 0}${mr.review?.capped ? '+' : ''}`, 'fix', 'review', null);
+      case 'reviewing':
+        return waiting(reviewStepWord(mr.review, now) ?? look.word);
+      case 'unknown':
+        return waiting(reviewStepWord(mr.review, now) ?? look.word, { ignore: 'review' });
+    }
+  }
+  if (mr.draft) return ring('merged', 'mark ready', 'gitlab', null, NEXT_SENTENCES.draft);
+  if (!pipelineIgnored) {
+    if (mr.pipeline === 'failed') return ring('pipeline', 'fix pipeline', 'run', 'pipeline', NEXT_SENTENCES.failed);
+    if (mr.pipeline === 'canceled') return ring('pipeline', 're-run', 'gitlab', 'pipeline', NEXT_SENTENCES.canceled);
+    if (mr.pipeline === 'running') return waiting(look.word);
+  }
+  const noPipeline = mr.pipeline === null || mr.pipeline === 'none';
+  return ring('merged', 'merge', 'merge', null, noPipeline ? NEXT_SENTENCES.noPipeline : NEXT_SENTENCES.green);
 }
 
 /** The one definition of "failing" the band and the `Pipeline failing` filter share: opened, not a draft, head pipeline failed. */
