@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useAction } from '../../hooks/useAction';
+import { useDeliveryIndex } from '../../hooks/useDeliveryIndex';
 import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
 import { useParentRead } from '../../hooks/useParentRead';
@@ -26,6 +27,7 @@ import {
   unlinkJira,
   type JiraChildrenIndex
 } from '../../lib/jira';
+import { deliveryTargets, targetRowId, ticketDelivery } from '../../lib/delivery';
 import { childSessions } from '../../lib/jira-deck';
 import { parentLiveLine } from '../../lib/jira-parent';
 import { ticketSessions } from '../../lib/jira-sessions';
@@ -40,7 +42,7 @@ import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
 import { Chevron } from '../ui/Chevron';
 import { Popover } from '../ui/Popover';
-import { DeliveryPane } from './DeliveryPane';
+import { JiraDeliveryTab, useOpenRows } from './JiraDeliveryTab';
 import { JiraRunMenu } from './JiraRunMenu';
 import { JiraHistoryLine, JiraSessionCards, JiraStartingCard } from './JiraSessionCard';
 import { ChildrenTree } from './ChildrenTree';
@@ -62,7 +64,8 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * It passes `Modal` a `head`, which is the shell's split shape (`Detail.dc.html`): the head carries the type, key, parent and sprint as crumbs, the link out
  * and the title; the facts slot holds the AGENT — one `JiraSessionCard` per live session, newest first, then the history, then `Run ▾`; the body holds the
  * TICKET — a facts pane with the two writes beside the facts they change, then the description, children and worktrees panes and the comments note.
- * Between the sessions band and the history sits `DeliveryPane` (GitLab connection spec §7.1), which reads the shell's GitLab answer and draws itself or nothing.
+ * Between the sessions band and the history sits `JiraDeliveryTab` (GitLab connection spec §7.1; one row per target since Jira detail tabs §4), which
+ * reads the shell's GitLab answer and draws itself or nothing.
  *
  * **The left column is the sessions page's, not the status'.** The cards and the history read `useJiraSessionsContext()` (`GET /api/jira/sessions`, one poll
  * for the whole Jira section), narrowed to this key by `ticketSessions`. A `starting` Run is the one thing that payload never carries — a reservation has no
@@ -272,6 +275,12 @@ export function JiraDetail({
   // `useNow`, like the card strip's: every age on the cards, the session fact's elapsed reading and `created · updated` tick while the dialog sits open
   // between polls.
   const now = useNow(true);
+  // Delivery's open rows (Jira detail tabs Task 5, until Task 7 swaps this dialog's body for `JiraTicketBody`): the first target's row by default, reset on
+  // a key change — the same `useOpenRows` the body holds. This dialog has no strip, so no pill ever opens a row here.
+  const dlvIndex = useDeliveryIndex();
+  const dlv = dlvIndex === null ? null : ticketDelivery(src, dlvIndex);
+  const firstTarget = dlv !== null && dlv.kind === 'mrs' ? (deliveryTargets([dlv.lead, ...dlv.also])[0] ?? null) : null;
+  const { openRows, toggleRow, openRow } = useOpenRows(issue.key, firstTarget === null ? null : targetRowId(firstTarget));
   const boardNames = detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
   const paths = data?.repos[src.project.key] ?? [];
   // The parent link (see the header): one read shared with the Run menu, a push onto the walk when it lands for the key still shown.
@@ -408,8 +417,20 @@ export function JiraDetail({
           </>
         )}
       </div>
-      {/* Delivery (GitLab connection spec §7.1): what became of the work — under the sessions that did it, above their history. It draws itself or nothing. */}
-      <DeliveryPane issue={src} now={now} onReview={onReview === undefined ? undefined : (half, mr, repos) => onReview(src, half, mr, repos)} />
+      {/* Delivery (GitLab connection spec §7.1; per target since Jira detail tabs §4): what became of the work — under the sessions that did it, above their
+          history. It draws itself or nothing. Its Worktrees fold is not passed: this dialog still draws its own Worktrees list below, so it is never drawn
+          twice. */}
+      <JiraDeliveryTab
+        issue={src}
+        now={now}
+        onReview={onReview}
+        onRun={onRun}
+        openRows={openRows}
+        onToggleRow={toggleRow}
+        onOpenRow={openRow}
+        liveReviewLink={liveLinks.find((l) => l.action === 'review') ?? null}
+        worktrees={null}
+      />
       {ended.length > 0 && (
         <>
           <div className="jira-detail-lbl">History</div>

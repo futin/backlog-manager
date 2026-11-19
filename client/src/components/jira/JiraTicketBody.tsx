@@ -9,7 +9,7 @@ import { setJiraDetailTab, useJiraDetailTab, type DetailTab } from '../../hooks/
 import { useNow } from '../../hooks/useNow';
 import { useParentRead } from '../../hooks/useParentRead';
 import { useSettings } from '../../hooks/useSettings';
-import { deliveryTargets, ticketDelivery, UNKNOWN_LINE } from '../../lib/delivery';
+import { deliveryTargets, targetRowId, ticketDelivery, UNKNOWN_LINE } from '../../lib/delivery';
 import { elapsedSince } from '../../lib/item-age';
 import {
   failureOf,
@@ -30,18 +30,18 @@ import { ticketSessions } from '../../lib/jira-sessions';
 import { stripAgent, stripDelivery } from '../../lib/jira-strip';
 import { pollAge } from '../../lib/tracker';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
-import type { GitlabMr, JiraIssue, JiraIssueDetail, JiraWorktreesPayload, ReviewHalf } from '../../../../shared/types';
+import type { GitlabMr, JiraAction, JiraIssue, JiraIssueDetail, JiraWorktreesPayload, ReviewHalf } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { ChildrenTree } from './ChildrenTree';
 import { ChildSessionLine } from './ChildSessionLine';
-import { DeliveryPane } from './DeliveryPane';
+import { JiraDeliveryTab, useOpenRows } from './JiraDeliveryTab';
 import { JiraHistoryLine, JiraSessionCards, JiraStartingCard } from './JiraSessionCard';
 import { JiraTicketPane } from './JiraTicketPane';
 import { JiraTicketStrip, type StripDeliveryCell } from './JiraTicketStrip';
 import { ParentSessionLine } from './ParentSessionLine';
-import { WorktreesList } from './WorktreesList';
+import { WorktreesFold } from './WorktreesList';
 
 /**
  * JiraTicketBody — one Jira ticket's body: the heading, the summary strip, the tab row and the four panes (Jira detail tabs spec §1; DESIGN.md §8.9.2), drawn
@@ -68,9 +68,10 @@ import { WorktreesList } from './WorktreesList';
  * — Delivery on a project mapping no GitLab project — is shown as `ticket` for this render and NOT written, so the next mapped ticket opens on Delivery again.
  *
  * **The slots.** The Ticket pane is `JiraTicketPane`. The Delivery, Agent and Children panes are named render functions below (`deliverySlot`, `agentSlot`,
- * `childrenSlot`), drawing today's regions as they were — `DeliveryPane`, the agent band's content and history, the Children tree with the Worktrees list
- * and the comments note — until the tasks that redraw them fill those three functions. A Delivery pill's click records the target row to open (`openRow`)
- * and hands it to `deliverySlot`, which today's pane does not read yet.
+ * `childrenSlot`). Delivery is `JiraDeliveryTab` (spec §4): one fold row per target, and which rows are open is THIS body's state (`useOpenRows`, reset on
+ * a key change), because a strip pill opens its row from outside the tab — the pill's click adds the row and selects the tab. The Worktrees fold (spec
+ * §4.6) sits at the bottom of the Delivery tab, or of the Ticket tab when the ticket draws no Delivery tab, so it is drawn once either way. The Agent and
+ * Children panes draw today's regions — the agent band's content and history, the Children tree and the comments note — until the tasks that redraw them.
  */
 
 /**
@@ -93,7 +94,8 @@ export function JiraTicketBody({
   onBack,
   onOpenIssue,
   onWrote,
-  onReview
+  onReview,
+  onRun
 }: {
   /** The issue the frame opened on — the card's copy in the modal. Everything the card carries draws from it until `detail` lands. */
   issue: JiraIssue;
@@ -112,6 +114,8 @@ export function JiraTicketBody({
   onWrote: (reread: boolean) => void;
   /** The Delivery pane's review button — the frame opens the launch sheet pre-set to a review. Absent, no button draws. */
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  /** A Delivery next row's `Run ▾` (a failed pipeline): the frame's own `onRun`, the one its head's `Run ▾` calls. */
+  onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
   const { data, reload } = useJiraContext();
   const { data: sessions, reload: reloadSessions } = useJiraSessionsContext();
@@ -124,15 +128,13 @@ export function JiraTicketBody({
   keyRef.current = issue.key;
 
   // Per-ticket state, reset DURING render on a key change (React's "adjust state when a prop changes"), so the swapped-in ticket's first frame carries none
-  // of the last one's: its refusal, its parent-read failure, the Delivery row a pill asked to open.
+  // of the last one's: its refusal, its parent-read failure. The open Delivery rows reset the same way, inside `useOpenRows`.
   const [shownKey, setShownKey] = useState(issue.key);
   const [parentAskedFor, setParentAskedFor] = useState<string | null>(null);
-  const [openRow, setOpenRow] = useState<string | null>(null);
   if (shownKey !== issue.key) {
     setShownKey(issue.key);
     clearError();
     setParentAskedFor(null);
-    setOpenRow(null);
   }
 
   const src: JiraIssue = detail ?? issue;
@@ -161,6 +163,7 @@ export function JiraTicketBody({
   const index = useDeliveryIndex();
   const dlv = index === null ? null : ticketDelivery(src, index);
   const targets = dlv !== null && dlv.kind === 'mrs' ? deliveryTargets([dlv.lead, ...dlv.also]) : [];
+  const { openRows, toggleRow, openRow } = useOpenRows(issue.key, targets.length === 0 ? null : targetRowId(targets[0]));
   const deliveryCell: StripDeliveryCell =
     dlv === null || dlv.kind === 'hidden'
       ? null
@@ -258,11 +261,28 @@ export function JiraTicketBody({
           ? [reserved.name, repoBasename(reserved.repo), elapsedSince(reserved.startedAt, now)].filter((p) => p !== null).join(' · ')
           : '—';
 
-  /** The Delivery slot: today's `DeliveryPane`, as it is. `row` is the target a strip pill asked to open, for the per-target rows that replace it. */
-  const deliverySlot = (row: string | null): ReactNode => {
-    void row;
-    return <DeliveryPane issue={src} now={now} onReview={onReview === undefined ? undefined : (half, mr, repos) => onReview(src, half, mr, repos)} />;
-  };
+  // The Worktrees fold (spec §4.6), drawn by whichever tab is its home for this ticket; keyed by the key so its open state resets with the ticket.
+  const worktreesFold =
+    ticketTrees.length === 0 ? null : (
+      <div className="jira-detail-pane">
+        <WorktreesFold key={issue.key} trees={ticketTrees} issueKey={issue.key} live={sessionLive} home={data?.home ?? null} />
+      </div>
+    );
+
+  /** The Delivery slot: the per-target rows, the open set this body holds, the newest live `review` link for a `fix` row's `Open session`. */
+  const deliverySlot = (): ReactNode => (
+    <JiraDeliveryTab
+      issue={src}
+      now={now}
+      onReview={onReview}
+      onRun={onRun}
+      openRows={openRows}
+      onToggleRow={toggleRow}
+      onOpenRow={openRow}
+      liveReviewLink={liveLinks.find((l) => l.action === 'review') ?? null}
+      worktrees={worktreesFold}
+    />
+  );
 
   /** The Agent slot: today's agent band content and history, less `Run ▾` and the band's label (the frame's head and the tab's count carry those now). */
   const agentSlot = (): ReactNode => {
@@ -328,17 +348,12 @@ export function JiraTicketBody({
     );
   };
 
-  /** The Children slot: today's Children tree, Worktrees list and comments note, as they were. */
+  /** The Children slot: today's Children tree and comments note, as they were; the Worktrees moved to a fold (`worktreesFold`). */
   const childrenSlot = (): ReactNode => (
     <div className="jira-detail-ticket">
       {detail !== null && tree !== null && (
         <div className="jira-detail-pane">
           <ChildrenTree direct={detail.children.length} tree={tree} underway={underway} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />
-        </div>
-      )}
-      {ticketTrees.length > 0 && (
-        <div className="jira-detail-pane">
-          <WorktreesList trees={ticketTrees} issueKey={issue.key} live={sessionLive} home={data?.home ?? null} />
         </div>
       )}
       <p className="jira-modal-comments">
@@ -351,8 +366,13 @@ export function JiraTicketBody({
   );
 
   const pane: Record<DetailTab, () => ReactNode> = {
-    ticket: () => <JiraTicketPane src={src} detail={detail} failure={failure} sessionLine={sessionLine} now={now} />,
-    delivery: () => deliverySlot(openRow),
+    ticket: () => (
+      <>
+        <JiraTicketPane src={src} detail={detail} failure={failure} sessionLine={sessionLine} now={now} />
+        {deliveryCell === null && worktreesFold}
+      </>
+    ),
+    delivery: deliverySlot,
     agent: agentSlot,
     children: childrenSlot
   };
@@ -392,7 +412,7 @@ export function JiraTicketBody({
         delivery={deliveryCell}
         agent={stripAgent({ links: liveLinks, starting }, ended.length, now)}
         onDelivery={(row) => {
-          setOpenRow(row);
+          if (row !== null) openRow(row);
           select('delivery');
         }}
         onAgent={() => select('agent')}

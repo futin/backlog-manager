@@ -142,6 +142,12 @@ export function deliveryTargets(mrs: readonly GitlabMr[]): DeliveryTarget[] {
 }
 
 /**
+ * A target's row id in the Delivery tab: `<project>\u0000<target>`. The strip's pill carries the same id (`stripDelivery`), so a pill click names the row it
+ * opens, and the body's open-row set keys on it — the target, not the lead MR, because a poll that merges a lead and opens a new one is the same row.
+ */
+export const targetRowId = (t: Pick<DeliveryTarget, 'project' | 'target'>): string => `${t.project}\u0000${t.target}`;
+
+/**
  * The summary on the older-MRs fold (spec §4.3): `4 earlier MRs into demo · 3 merged, 1 closed`, `<z open>` last when an older MR is still open, a zero part
  * dropped with its comma, `1 earlier MR` singular. `null` when the target has no older MR, so the caller draws no fold at all.
  */

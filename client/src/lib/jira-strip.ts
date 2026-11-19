@@ -1,4 +1,4 @@
-import { deliveryLook, type DeliveryTarget, type DeliveryTone } from './delivery';
+import { deliveryLook, targetRowId, type DeliveryTarget, type DeliveryTone } from './delivery';
 import { repoBasename } from './jira';
 import type { SessionLink } from './jira-sessions';
 import { pollAge } from './tracker';
@@ -46,7 +46,7 @@ export function stripDelivery(
     .map((t): StripPill => {
       const where = multiProject ? `${repoBasename(t.project)} → ${t.target}` : t.target;
       const look = deliveryLook(t.lead, now);
-      return { key: `${t.project}\u0000${t.target}`, label: `${where} · ${look.word}`, tone: look.tone };
+      return { key: targetRowId(t), label: `${where} · ${look.word}`, tone: look.tone };
     })
     .sort((a, b) => toneRank(a.tone) - toneRank(b.tone));
   const folded = all.slice(MAX_PILLS);

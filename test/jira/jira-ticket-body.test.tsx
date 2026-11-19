@@ -268,6 +268,7 @@ function tree(opts: Opts = {}) {
               onBack={onBack}
               onOpenIssue={onOpenIssue}
               onWrote={onWrote}
+              onRun={jest.fn()}
             />
           </JiraSessionsContext.Provider>
         </JiraContext.Provider>
