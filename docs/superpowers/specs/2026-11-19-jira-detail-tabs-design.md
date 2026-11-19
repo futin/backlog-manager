@@ -2,13 +2,14 @@
 
 Status: written, awaiting approval. Date: 2026-11-19. Branch `jira-detail-tabs`. Amends DESIGN.md §8.9.2 (Detail dialog) and §8.9.6 (Delivery, the Detail
 half only), and the board.md rule "The Jira section's four pages". Mocks: the Design-canvas artifact "Jira Detail" (<https://claude.ai/artifact/DPpfcBD3A4RDu1dq83fcjt>,
-private, Version 6, nine comment threads all resolved), copied into [2026-11-19-jira-detail-tabs-mockups/](2026-11-19-jira-detail-tabs-mockups/) and read
+private, Version 8, nine comment threads all resolved), copied into [2026-11-19-jira-detail-tabs-mockups/](2026-11-19-jira-detail-tabs-mockups/) and read
 against the code in [00-mock-audit.md](2026-11-19-jira-detail-tabs-mockups/00-mock-audit.md).
 
 | Mock | What it fixes |
 | ---- | ------------- |
 | [Main.dc.html](2026-11-19-jira-detail-tabs-mockups/Main.dc.html) | The ticket PAGE on the Delivery tab: top bar, heading, summary strip, tab row, two target rows (the first open, the second with its older MRs folded), Worktrees fold |
 | [B-Modal.dc.html](2026-11-19-jira-detail-tabs-mockups/B-Modal.dc.html) | The MODAL on the Agent tab: the same strip and tabs inside the dialog, a live session card with `Open`, History folded open with `Reopen` per row |
+| [States.dc.html](2026-11-19-jira-detail-tabs-mockups/States.dc.html) | §4.5's fourteen MR states as compact target rows, each with its track, next-step ring, `next:` pill and row button |
 | [Review-Skills.dc.html](2026-11-19-jira-detail-tabs-mockups/Review-Skills.dc.html) | NOT this spec — the follow-up review-skills spec's Settings page, kept beside the others because the `Review ▾` menu in `Main.dc.html` belongs to it |
 
 The mocks carry real-looking sample data from one ticket; the layout, controls, copy and states are what they fix. Where a mock and this spec differ, this
@@ -100,8 +101,11 @@ The user's, from the canvas threads and the questions after them:
 1. Layout B, in both the modal and the page.
 2. The second tab is named **Delivery** (the mock said Development).
 3. A target row is compact by default and expands into today's Delivery pane; older MRs of a target are folded under it.
-4. The Review step of an open MR that CodeRabbit has not reviewed, once Pipeline is reached, is **grey with `skipped` under it** (§4.5).
-5. The live session card in Detail offers **Open only** — no Stop (§5.1). (Thread: "We can't stop code rabbit review, so let's remove stop, leave only Open".)
+4. **"skipped" is dropped for a "next step" marker** (§4.5): the first unfinished step of an open MR's track gets an accent ring and a `next` word, the
+   compact row reads `next: <step>`, and the row's one button does that step — Detail only, the card and List unchanged. A `null` pipeline does not block
+   (Review clean + no pipeline → next is Merge). The states are drawn in `States.dc.html`.
+5. **Stop is hidden on a review session only** (§5.1) — a session whose link's `action` is `'review'`. Every other live session keeps Stop in its menu,
+   as today.
 6. Each History row has a **`Reopen`** button, as today.
 7. The `Review live` pill in the strip is centred in its cell (a mock fix; recorded so the builder checks it).
 8. The tab is **remembered**: the last tab used opens the next ticket, in the modal and the page.
@@ -110,7 +114,7 @@ The user's, from the canvas threads and the questions after them:
 11. A plain click opens the modal; **Cmd/Ctrl-click or middle-click opens the full page** directly. No setting (§2.3).
 
 Calls this spec makes, marked so the user can check them while reading: §1.3 (first-ever tab), §2.2 (rail row), §2.3 (back target), §3 (which facts sit
-in the strip vs the Ticket tab), §4.1 (group key), §4.2 (which row opens), §5.1 (Stop stays on the deck), §6 (children on the page).
+in the strip vs the Ticket tab), §4.1 (group key), §4.2 (which row opens), §1.2 (repo in a Delivery pill), §5.2 (History rows), §6 (children on the page).
 
 ## 1 The body: strip, tabs, panes
 
@@ -132,7 +136,7 @@ One `--strip` band under the heading, a row of label-over-value cells (`Main.dc.
 | Assignee | initials disc + name, or `Unassigned` | `Assign to me`, today's rules and titles |
 | Sprint | sprint name | — (absent → cell not drawn) |
 | Parent | the parent link (pushes the walk, today's behaviour) | — (absent → not drawn) |
-| Delivery | one pill per target, `<target> · <word>` in `deliveryLook`'s tone (§4.3), at most three then `+N` | a pill click selects the Delivery tab and opens that target's row |
+| Delivery | one pill per target, `<target> · <word>` in `deliveryLook`'s tone (§4.3), led by the repo basename when the groups span more than one project (my call), at most three then `+N` | a pill click selects the Delivery tab and opens that target's row |
 | Agent | live: a pill `<state label> · <age>` led by the state's dot, centred in the cell; otherwise `idle · N ended` or `no sessions` | a live pill click selects the Agent tab |
 
 The strip is the anti-goal's answer: a failed pipeline (red pill), findings to fix (amber), a session waiting on an answer (its state word) are all
@@ -167,7 +171,8 @@ carries it today, and this spec adds no Jira request.
 (`backlog-manager.jira-ticket-key`, a string or `null`), so a reload on the page reopens the same ticket. `ticket` with no key is not a page: the
 hold-and-fall resolves it to `board` (the same shape as an unknown stored page today).
 
-The page is a component under `JiraView` (so the launch sheet, `nudge` and the walk slot are the ones the board uses) that reads the detail by key
+The page is a component under `JiraView` (so the launch sheet and `nudge` are the ones the board uses; the walk is the page's own, §2.3, and no modal opens
+on the `ticket` page) that reads the detail by key
 (`fetchJiraDetail`) and builds the `JiraIssue` half from it — `JiraIssueDetail extends JiraIssue`, so no new type. Until the read lands: `loading…`; a
 failed read: `could not read <KEY> — <the server's sentence>` with a `Retry`. A 404 (no such ticket, or not visible) says so and offers `← Board`.
 
@@ -194,7 +199,8 @@ replaced by the next ticket opened on the page; it is never cleared by leaving (
 - **Back.** `← <origin>` returns to the page that opened the ticket page (`Board`, `Sessions`, `Mentions`), held in memory, not persisted; after a reload or
   a rail-row entry it is `← Board` (my call).
 - **Walk on the page.** A Children row or the parent link swaps the page's ticket (sets the key) and pushes onto an in-page walk, so the heading shows the
-  same `← <key>` Back chip as the modal. The walk is the page's own state, emptied when the page is left.
+  same `← <key>` Back chip as the modal. The walk is the page's own state — not `JiraView`'s `OpenSlot`, which draws the modal — emptied when the page is
+  left; every step and every Back writes the key store, so a reload lands on the ticket on screen.
 
 ## 3 What sits where
 
@@ -253,15 +259,36 @@ sourceBranch}, repos } })` with that row's MR. `reviewGate` and the 409 paths ar
 **Reserved slot.** The button is today's CodeRabbit play-button split, in the place `Main.dc.html` draws `Review ▾`. The review-skills spec turns it into a
 menu; this spec draws no menu and no skills.
 
-### 4.5 The `skipped` Review step
+### 4.5 The next step
 
-`deliveryLook` (shared by card, List and Detail): when the MR is **open**, its review state is `none` (CodeRabbit has not reviewed it), and a **later step
-— Pipeline — is already reached**, the Review step's mark is **grey** and its step word is **`skipped`**: the work moved past review without one. Until a
-later step is reached the Review step stays today's hollow "not reached" ring with no word. Merged stays magenta, closed stays off. This is the rule the
-user was given in the canvas thread on the Review step.
+A pure `deliveryNext(mr, now)` in `lib/delivery.ts` answers, for one MR, which track step is next and what the row's one button does. Detail only: the card,
+the List, the band and the filters keep `deliveryLook` as it is, and `deliveryLook` itself does not change. The track draws the next step's dot with an
+dashed accent ring (`--cyan`, the board's action colour — dashed so it never reads as a reached green step) and the word `next` under the step label, replacing the step's own word where it had one; the compact row's
+state pill reads `next: <step word>` in the same accent, and its five-dot track rings the same dot. When nothing is next (waiting, done, closed) the pill is
+today's `deliveryLook` chip word and no dot is ringed. The table is the user's, row for row (`States.dc.html` draws each):
 
-The mock also draws a draft's Pipeline step green (`draft · pipeline passed`). The code makes a draft's pipeline `off` on purpose (`deliveryLook`'s header:
-"a draft's red pipeline is work in progress, not a signal"). **This spec keeps the code**: a draft's Pipeline step stays off and its chip stays `draft`.
+| # | MR | Next | Row button |
+| - | -- | ---- | ---------- |
+| 1 | open draft, review `none` | Review | `▶ Request review` (CodeRabbit request half) |
+| 2 | open, review `null` (not read yet) | — (waiting) | none |
+| 3 | open, review `none` | Review | `▶ Request review` |
+| 4 | open, review `reviewing` | — (waiting) | none |
+| 5 | open, review `open` (findings) | Review — word `fix <n>` | `▶ Fix findings` (fix half) |
+| 6 | open, review `stale` | Review — word `re-review` | `▶ Request review` |
+| 7 | review `clean`, pipeline `running` | — (waiting) | none |
+| 8 | review `clean`, pipeline `failed` | Pipeline — word `fix pipeline` | `Run ▾` (the frame's, scrolled to; no new action) |
+| 9 | review `clean`, pipeline `success` | Merged — word `merge` | `Merge in GitLab ↗` (the MR's URL; the board never merges GitLab) |
+| 10 | review `clean`, pipeline `null` | Merged — word `merge`; Pipeline step reads `none` and is not ringed | `Merge in GitLab ↗` |
+| 11 | review `none`, pipeline `success` | Review (the old "skipped" case: review is simply next) | `▶ Request review` |
+| 12 | review `clean`, pipeline `canceled` | Pipeline — word `re-run` | `GitLab ↗` |
+| 13 | merged | — (done) | none |
+| 14 | closed | — (it is an older MR) | none |
+
+Precedence: Review before Pipeline before Merge — the first unfinished one wins, so a failed pipeline under open findings is row 5, not 8 (the fix half
+fixes both). A draft follows the same rows; its Pipeline step stays `off` (`deliveryLook`'s draft rule) and so never blocks or rings — a clean draft's
+next is `Merged` with the word `mark ready`, button `GitLab ↗`. `null` pipeline does not block (decision 4): worst case, Merge is offered a poll early. The
+review buttons are today's ReviewRow split and launch (§4.4); the server's 409s cover the race where the state moved on. `unknown` review (too long to read)
+is treated as `reviewing`: waiting, no button.
 
 ### 4.6 Worktrees
 
@@ -278,22 +305,20 @@ reservation's card, `No live session on this ticket.` with `Run ▾`'s twin hidd
 linked-how tag and short id, and `SessionOpen`'s split — primary `Open`, and the `Session actions` menu with the secondary Open and `Unlink` (on a `branch`
 link only).
 
-**Stop is not drawn in Detail** (decision 5). `JiraSessionCard` gains a prop that suppresses Stop; Detail passes it. **The agent deck on the Board page
-keeps Stop** (my call — the user's thread was about Detail's card, and the deck is where a runaway session is caught at a glance). If the user meant every
-surface, removing it from the deck is the same prop.
+**Stop is hidden on a review session** (decision 5): `JiraSessionCard` drops Stop from its menu when the link's `action` is `'review'`, on every surface
+that draws the card. Every other session keeps Stop exactly as today (only while agents are on and the row carries a `stopState`).
 
 ### 5.2 History
 
 A fold, **closed by default**: summary `History`, right-aligned `<N> ended · last <date, time>`. Open, one row per ended session (today's timeline data):
-start date-time, the action, the surface/how, the duration, and a `Reopen` button at the row's end — today's `Reopen`, same behaviour. The fold's open state
-is per-render (my call).
+today's `JiraHistoryLine`, unchanged — `<how> · ended <age> ago`, the surface, the duration and the name, with `Reopen` where the row has a session id (my
+call: the user asked for the button "like we have now"; the mock's absolute start time and action label are not drawn). The fold's open state is per-render.
 
 ## 6 Children & comments tab
 
 Two folds: `Children <count>` **open by default** holding today's Children section (head pill, `SpreadBar`, tree, row click swaps the ticket — in the page,
 §2.3), and `Comments` closed, holding today's `Comments stay in Jira — v1 neither reads nor writes them.` with the issue's link. On the page, the tree's
-descendants come from the picked board's lane walk when the ticket is on the picked board (as the modal's `modalTree` does), else direct children only (my
-call — no extra read).
+tree is the detail read's direct children only (my call — the page mounts no board poll, so it has no lane walk; the modal keeps its deeper tree).
 
 ## 7 The modal
 
@@ -328,8 +353,8 @@ The plan specifies behaviour and exact cases, never literal code. jsdom suites u
 4. Same target in two projects → two groups.
 5. A target with only merged MRs → its representative is the newest merged.
 6. The first group's representative equals `leadMr(all).lead` for every fixture above.
-7. `deliveryLook`: open non-draft, review `none`, pipeline `success` → Review step grey, word `skipped`; same with pipeline `null` → off, no word; review
-   `open` → today's amber; merged → magenta, unchanged; draft → per §4.5's draft paragraph.
+7. `deliveryNext` returns, for each of §4.5's fourteen rows, exactly that row's next step, word and button; plus: findings open + pipeline failed → row
+   5; clean draft → `mark ready`; `unknown` review → waiting. `deliveryLook` output is byte-identical to today's for every fixture (no shared change).
 
 Detail body (jsdom, rendered in the modal and on the page with the same fixtures):
 
@@ -342,9 +367,10 @@ Detail body (jsdom, rendered in the modal and on the page with the same fixtures
 12. Delivery tab with the fixture of case 3: two rows; the first is open and shows the full track and the CodeRabbit row; the second's summary shows
     `+4 earlier`; opening it shows the nested fold reading `4 earlier MRs into demo · 3 merged, 1 closed`.
 13. A strip Delivery pill click selects the tab and opens that row.
-14. Review button on the `demo` row (open representative) calls the launch with `demo`'s iid; a merged representative draws no Review button.
-15. Agent tab: History fold closed by default with `5 ended`; opened, five rows each with `Reopen`; the live card has `Open` and no `Stop session` even when
-    the row carries `stopState`. The Board deck's card with `stopState` still draws Stop.
+14. The `demo` row's next-step button (open representative, review `none`) calls the review launch with `demo`'s iid; a merged representative draws no
+    button; the next dot carries the ring and the word `next`.
+15. Agent tab: History fold closed by default with `5 ended`; opened, five rows each with `Reopen`; a live card whose link `action` is `'review'` has no
+    `Stop session` even with a `stopState`; an `execute` card with a `stopState` still draws it.
 16. Walk: Children row click swaps the ticket and keeps the selected tab; `← <key>` returns.
 
 Page (jsdom):
@@ -367,7 +393,7 @@ and a ticket with two targets — with live data where it exists and a fixture w
 ## 10 Docs that move with the code
 
 - `.claude/DESIGN.md` §8.9.2 rewritten for the strip / tabs / panes and the page; §8.9.6's Detail paragraph for per-target rows, older MRs, Review per
-  target and `skipped`; §8.0's rail tree for the conditional `<KEY>` row.
+  target and the next-step marker; §8.0's rail tree for the conditional `<KEY>` row.
 - `.claude/rules/board.md`: "The Jira section's four pages" → five, `ticket` and its key store named, `Open full page ↗` listed among the threaded links.
 - `docs/subsystems/board.md` where it lists the Jira pages.
 - `lib/jira-page.ts` and `hooks/useJiraPage.ts` header comments (the latter already says "board, sessions or setup" — stale before this change).
