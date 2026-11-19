@@ -107,6 +107,7 @@ The user's, from the canvas threads and the questions after them:
 8. The tab is **remembered**: the last tab used opens the next ticket, in the modal and the page.
 9. The page is a **fifth Jira page, `ticket`**.
 10. Review skills get a **separate spec, right after** this one; picking one will open the launch sheet like Run (recorded for that spec).
+11. A plain click opens the modal; **Cmd/Ctrl-click or middle-click opens the full page** directly. No setting (§2.3).
 
 Calls this spec makes, marked so the user can check them while reading: §1.3 (first-ever tab), §2.2 (rail row), §2.3 (back target), §3 (which facts sit
 in the strip vs the Ticket tab), §4.1 (group key), §4.2 (which row opens), §5.1 (Stop stays on the deck), §6 (children on the page).
@@ -182,6 +183,11 @@ replaced by the next ticket opened on the page; it is never cleared by leaving (
 
 ### 2.3 Entering and leaving
 
+- **Which frame a click opens** (decision 11). On every surface that opens Detail today — Board card, List row, agent-deck card, Sessions row, a Children
+  row inside the modal — a plain click opens the **modal**, as today. **Cmd-click (macOS) / Ctrl-click (elsewhere) or a middle-click opens the page
+  directly** on that ticket (key store set, `onOpenJiraPage('ticket')`, origin = the surface's page), with no modal in between. These surfaces are buttons,
+  not links, so the modifier is read off the click event (`metaKey || ctrlKey`, `button === 1` via `onAuxClick`); a new browser tab is NOT opened — there is
+  no URL to open it at. Each surface's `title` gains `⌘-click: full page`. No setting.
 - **Modal → page.** The modal's head gains `Open full page ↗` (an outlined 28 px link-weight chip beside `Open in Jira ↗`). It closes the modal, sets the
   key, and calls `onOpenJiraPage('ticket')`. `onOpenJiraPage`'s type stays `(p: JiraPage) => void`; the key is set through the store's setter first
   (`setJiraTicketKey(key)`), the same two-writer reason `useJiraPage` is a `persistedStore`.
@@ -349,6 +355,8 @@ Page (jsdom):
 20. `ticket` with no key resolves to `board`.
 21. Rail draws the `<KEY>` row only while a key is held; clicking it switches to the page.
 22. `← <origin>`: entered from Sessions → `← Sessions` returns to Sessions; after a rail-row entry → `← Board`.
+23. Cmd-click (and Ctrl-click, and middle-click) on a Board card, a List row, a deck card and a Sessions row → no modal, page = `ticket`, key set, origin
+    = that page; a plain click on each → the modal, page unchanged.
 
 Guards: grep `test/` for every hook and helper the diff adds a caller of (`useJiraPage`, `persistedStore`, `useOrchestratorRuns` if touched,
 `fetchJiraDetail`) and run each hit (CLAUDE.md's source-guard rule).
