@@ -93,6 +93,54 @@ export function leadMr(mrs: readonly GitlabMr[]): { lead: GitlabMr; also: Gitlab
 }
 
 /**
+ * One delivery target of a ticket: the MRs into one branch of one GitLab project (Jira detail tabs spec §4.1). `lead` is the target's representative —
+ * `leadMr` over the group, so an open MR beats a merged one and the newest wins — and `older` is every other MR into that target, newest `updatedAt` first
+ * (not `leadMr`'s state-ranked `also`: the older fold reads as a history, and a closed MR from yesterday sits above a merged one from last month).
+ */
+export interface DeliveryTarget {
+  project: string;
+  target: string;
+  lead: GitlabMr;
+  older: GitlabMr[];
+}
+
+/**
+ * A ticket's MRs grouped by `(project, targetBranch)` — the same branch name in two projects is two targets, because a merge into `develop` of `pay-api` says
+ * nothing about `pay-web`. Groups come out in `leadOrder` over their leads, so the first group's lead is `leadMr(mrs).lead` (the ticket's one lead, which the
+ * card and the List still draw) and the tab's rows read in the same order as the strip's pills. `[]` for no MRs: unlike `leadMr`, a caller that has not yet
+ * asked whether there are any gets an empty list, not a throw.
+ */
+export function deliveryTargets(mrs: readonly GitlabMr[]): DeliveryTarget[] {
+  const groups = new Map<string, GitlabMr[]>();
+  for (const mr of mrs) {
+    // A NUL cannot occur in a GitLab path or a branch name, so the key cannot collide across the two parts.
+    const key = `${mr.project}\0${mr.targetBranch}`;
+    const list = groups.get(key);
+    if (list) list.push(mr);
+    else groups.set(key, [mr]);
+  }
+  const targets = [...groups.values()].map((group): DeliveryTarget => {
+    const { lead, also } = leadMr(group);
+    const older = [...also].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.iid - a.iid);
+    return { project: lead.project, target: lead.targetBranch, lead, older };
+  });
+  return targets.sort((a, b) => leadOrder(a.lead, b.lead));
+}
+
+/**
+ * The summary on the older-MRs fold (spec §4.3): `4 earlier MRs into demo · 3 merged, 1 closed`, `<z open>` last when an older MR is still open, a zero part
+ * dropped with its comma, `1 earlier MR` singular. `null` when the target has no older MR, so the caller draws no fold at all.
+ */
+export function olderMrsLine(t: DeliveryTarget): string | null {
+  if (t.older.length === 0) return null;
+  const count = (state: GitlabMr['state']): number => t.older.filter((m) => m.state === state).length;
+  const parts = ([['merged', count('merged')], ['closed', count('closed')], ['open', count('opened')]] as const)
+    .filter(([, n]) => n > 0)
+    .map(([word, n]) => `${n} ${word}`);
+  return `${t.older.length} earlier ${t.older.length === 1 ? 'MR' : 'MRs'} into ${t.target} · ${parts.join(', ')}`;
+}
+
+/**
  * Resolve one ticket (spec §6.2, §7). A ticket's own MRs win; a SUB-TASK (`type.subtask` with `parent` set — a story under an epic has a parent too and
  * inherits nothing) with none of its own shows its parent's, one level only, never the grandparent's. With no MR at all, the ticket is `unknown` while any
  * project its Jira project maps has never been read or is capped — "no MR found" in a list that may be incomplete is not "no MR" — and `none` otherwise. A

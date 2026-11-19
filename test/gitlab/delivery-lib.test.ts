@@ -5,10 +5,12 @@ import {
   deliveryIndex,
   deliveryLook,
   deliveryShown,
+  deliveryTargets,
   effectiveDeliveryFilter,
   leadMr,
   matchesDelivery,
   mrRepo,
+  olderMrsLine,
   ticketDelivery
 } from '../../client/src/lib/delivery';
 import type { DeliveryFilter, TicketDelivery, TrackStep } from '../../client/src/lib/delivery';
@@ -233,6 +235,113 @@ describe('leadMr', () => {
     const older = mr({ iid: 10, updatedAt: '2026-11-11T08:00:00Z' });
     const newer = mr({ iid: 11, updatedAt: '2026-11-11T09:00:00Z' });
     expect(leadMr([older, newer]).lead).toBe(newer);
+  });
+});
+
+describe('deliveryTargets', () => {
+  const DAY = 24 * 60;
+  const merged = (iid: number, target: string, days: number): GitlabMr =>
+    mr({ iid, state: 'merged', pipeline: null, targetBranch: target, updatedAt: minutesAgo(days * DAY) });
+  const closed = (iid: number, target: string, days: number): GitlabMr =>
+    mr({ iid, state: 'closed', pipeline: null, targetBranch: target, updatedAt: minutesAgo(days * DAY) });
+  const open = (iid: number, target: string, days: number, over: Partial<GitlabMr> = {}): GitlabMr =>
+    mr({ iid, targetBranch: target, updatedAt: minutesAgo(days * DAY), ...over });
+  const targetsOf = (mrs: GitlabMr[]): string[] => deliveryTargets(mrs).map((t) => t.target);
+
+  it('T1: one MR is one group with no older MRs and no line', () => {
+    const only = mr({ iid: 1 });
+    const groups = deliveryTargets([only]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toEqual({ project: only.project, target: 'develop', lead: only, older: [] });
+    expect(olderMrsLine(groups[0])).toBeNull();
+  });
+
+  it('no MRs is no groups, and does not throw', () => {
+    expect(deliveryTargets([])).toEqual([]);
+  });
+
+  it('T2: two open MRs into develop and demo are ordered by their leads, newest update first', () => {
+    expect(targetsOf([open(1, 'develop', 1), open(2, 'demo', 2)])).toEqual(['develop', 'demo']);
+    expect(targetsOf([open(1, 'develop', 2), open(2, 'demo', 1)])).toEqual(['demo', 'develop']);
+    expect(targetsOf([open(2, 'demo', 1), open(1, 'develop', 2)])).toEqual(['demo', 'develop']);
+  });
+
+  it('T2b: an open lead outranks a merged one whatever the stamps', () => {
+    expect(targetsOf([merged(1, 'develop', 1), open(2, 'demo', 5)])).toEqual(['demo', 'develop']);
+  });
+
+  it('T3: older MRs are counted and summarised per target', () => {
+    const mrs = [
+      open(1, 'develop', 1),
+      merged(2, 'develop', 3),
+      merged(3, 'develop', 4),
+      open(4, 'demo', 2),
+      merged(5, 'demo', 5),
+      merged(6, 'demo', 6),
+      merged(7, 'demo', 7),
+      closed(8, 'demo', 8)
+    ];
+    const groups = deliveryTargets(mrs);
+    const develop = groups.find((t) => t.target === 'develop')!;
+    const demo = groups.find((t) => t.target === 'demo')!;
+    expect(demo.older).toHaveLength(4);
+    expect(olderMrsLine(demo)).toBe('4 earlier MRs into demo · 3 merged, 1 closed');
+    expect(develop.older).toHaveLength(2);
+    expect(olderMrsLine(develop)).toBe('2 earlier MRs into develop · 2 merged');
+  });
+
+  it('an older open MR: the newer open one leads and the open part goes last in the line', () => {
+    const newer = open(1, 'demo', 1);
+    const older = open(2, 'demo', 3);
+    const gone = merged(3, 'demo', 2);
+    const [t] = deliveryTargets([older, gone, newer]);
+    expect(t.lead).toBe(newer);
+    expect(t.older).toEqual([gone, older]);
+    expect(olderMrsLine(t)).toBe('2 earlier MRs into demo · 1 merged, 1 open');
+  });
+
+  it('the older parts: a zero part drops with its comma, and a single older MR is singular', () => {
+    const [a] = deliveryTargets([open(1, 'demo', 1), closed(2, 'demo', 2), open(3, 'demo', 3)]);
+    expect(olderMrsLine(a)).toBe('2 earlier MRs into demo · 1 closed, 1 open');
+    const [b] = deliveryTargets([open(1, 'demo', 1), merged(2, 'demo', 2)]);
+    expect(olderMrsLine(b)).toBe('1 earlier MR into demo · 1 merged');
+  });
+
+  it('T4: the same target branch in two projects is two groups', () => {
+    const api = open(1, 'develop', 1, { project: 'acme/pay-api' });
+    const web = open(2, 'develop', 2, { project: 'acme/pay-web' });
+    const groups = deliveryTargets([web, api]);
+    expect(groups.map((g) => [g.project, g.target, g.lead.iid])).toEqual([
+      ['acme/pay-api', 'develop', 1],
+      ['acme/pay-web', 'develop', 2]
+    ]);
+    expect(groups.every((g) => g.older.length === 0)).toBe(true);
+  });
+
+  it('T5: a target with only merged MRs leads with the newest', () => {
+    const [t] = deliveryTargets([merged(1, 'demo', 3), merged(2, 'demo', 1), merged(3, 'demo', 2)]);
+    expect(t.lead.iid).toBe(2);
+    expect(t.older.map((m) => m.iid)).toEqual([3, 1]);
+  });
+
+  it('older is newest updatedAt first, not leadMr state order', () => {
+    const mrs = [open(10, 'demo', 0.5), merged(13, 'demo', 3), closed(12, 'demo', 2), merged(11, 'demo', 1)];
+    const [t] = deliveryTargets(mrs);
+    expect(t.older.map((m) => m.iid)).toEqual([11, 12, 13]);
+    // The contrast: leadMr's own `also` ranks merged before closed, which is the order the older fold must NOT take.
+    expect(leadMr(mrs).also.map((m) => m.iid)).toEqual([11, 13, 12]);
+  });
+
+  it('T6: the first group leads with leadMr over the whole list', () => {
+    const fixtures: GitlabMr[][] = [
+      [mr({ iid: 1 })],
+      [open(1, 'develop', 1), open(2, 'demo', 2)],
+      [open(1, 'develop', 2), open(2, 'demo', 1)],
+      [merged(1, 'develop', 1), merged(2, 'develop', 2), closed(3, 'demo', 1)],
+      [merged(1, 'demo', 3), merged(2, 'demo', 1), merged(3, 'demo', 2)],
+      [open(1, 'develop', 1, { project: 'acme/pay-api' }), open(2, 'develop', 1, { project: 'acme/pay-web' })]
+    ];
+    for (const mrs of fixtures) expect(deliveryTargets(mrs)[0].lead).toBe(leadMr(mrs).lead);
   });
 });
 
