@@ -82,10 +82,11 @@ Input classes the spec implies and no spec test names. Each has its test in the 
    (the link opens its tab, `Run ▾` opens its popover) and the ticket page does NOT open. → Task 8.
 3. **A walk on the page followed by a reload** — two Children steps in, then remount: the page opens on the ticket last on screen (the key store was
    written per step) with an empty walk and `← Board`. → Task 8.
-4. **More than three Delivery targets in the strip** — five groups with tones red, amber, amber, grey, green: three pills drawn (red, amber, amber) then
-   `+2` in grey's tone (the worst of the folded two, by the strip's red > amber > `leadOrder` rule). → Task 4.
-5. **Storage that throws** (private mode, quota) on an ignore or tab write — the click still takes effect for this session (the module store's in-memory
-   value and listeners update; `persistedStore`'s existing `try`/`catch` shape), nothing throws to React. → Task 3.
+4. **More than three Delivery targets in the strip** — five open leads, updated 1 h (green), 2 h (grey), 3 h (amber), 4 h (amber), 5 h (red) ago, so
+   `leadOrder` is green, grey, amber, amber, red: three pills drawn (red, amber 3 h, amber 4 h), then `+2` in green's tone — the first folded pill in the
+   strip's own order (red, amber, then the rest in `leadOrder`). → Task 4.
+5. **Storage that throws** (private mode, quota) on an ignore or tab write — the click still takes effect on screen (mounted readers update through the
+   store's listeners; `persistedStore`'s existing `try`/`catch` shape), nothing throws to React. → Task 3.
 
 ## File map
 
@@ -93,9 +94,8 @@ Input classes the spec implies and no spec test names. Each has its test in the 
 | ---- | ------ | ---- |
 | `client/src/lib/delivery.ts` | Modify | `deliveryTargets`, `deliveryNext`, `olderMrsLine`, exported types; `deliveryLook` untouched |
 | `client/src/lib/ignored-steps.ts` *(name)* | Create | ignore entry types, `isIgnoredSteps` guard, `ignoreHolds`, `pruneIgnored` — pure |
-| `client/src/hooks/jsonStore.ts` *(name)* | Create | module store over a JSON value, the `persistedStore` shape (or generalise `persistedStore`; builder's call) |
 | `client/src/hooks/useIgnoredSteps.ts` *(name)* | Create | the `backlog-manager.jira-ignored-steps` store: read, `ignore`, `unignore` |
-| `client/src/hooks/persistedStore.ts` | Modify | header's user list only (and the generalisation, if chosen) |
+| `client/src/hooks/persistedStore.ts` | Modify | generalised to a JSON value (`persistedJsonStore`); header's user list |
 | `client/src/lib/jira-page.ts`, `client/src/hooks/useJiraPage.ts` | Modify | `ticket` page; header comments |
 | `client/src/hooks/useJiraTicketKey.ts` *(name)* | Create | `backlog-manager.jira-ticket-key` store, `useJiraTicketKey`, `setJiraTicketKey` |
 | `client/src/hooks/useJiraDetailTab.ts` *(name)* | Create | `backlog-manager.jira-detail-tab` store |
@@ -149,6 +149,8 @@ Input classes the spec implies and no spec test names. Each has its test in the 
     1 open` (the open part goes last — §4.3 names it as an addition). One older merged only → `1 earlier MR into demo · 1 merged`.
   - T4: `develop` in `acme/pay-api` and in `acme/pay-web` → two groups.
   - T5: a target with only merged MRs (3, distinct `updatedAt`) → `lead` is the newest.
+  - `older` order: a target with an open lead, then merged `!11` (1 day ago), closed `!12` (2 days ago), merged `!13` (3 days ago) → `older` iids
+    `[11, 12, 13]` (newest first, NOT `leadMr`'s state-ranked `also`, which would give `[11, 13, 12]`).
   - T6: for every fixture above, `deliveryTargets(mrs)[0].lead === leadMr(mrs).lead`.
 - [ ] **Step 2: Run, expect FAIL** — `pnpm exec jest test/gitlab/delivery-lib.test.ts` → `deliveryTargets is not a function`.
 - [ ] **Step 3: Implement** the three exports. `leadOrder` stays private; reuse it, do not copy it.
@@ -199,7 +201,9 @@ success                  → step 'merged', 'merge', sentence row 9, button 'mer
 null | 'none'            → step 'merged', 'merge', sentence row 10, button 'merge'
 ```
 
-`pill` is `next: <word>` whenever `step` is set; `sentence` is `null` on Review rows (the caller draws `reviewRowText`).
+`pill` is `next: <word>` whenever `step` is set; `sentence` is `null` on Review rows (the caller draws `reviewRowText`). The next row draws when it has
+a sentence, a button OR `ignore !== null`; for `unknown` that is `Ignore` alone, with no sentence (the spec gives none and `reviewRowText` has none for
+`unknown`; invent no copy).
 
 - [ ] **Step 1: Write the failing tests** (T7, T29's pure half, T30's pure half). Fixture MR: `acme/pay-api!41`, open, not draft, `updatedAt` 2 h ago;
   vary `review` (via `test/helpers/gitlab.ts`'s builders if present, else local ones) and `pipeline`. Assert `step`, `word`, `pill`, `sentence`,
@@ -212,6 +216,8 @@ null | 'none'            → step 'merged', 'merge', sentence row 10, button 'me
   - entry for `failed`, pipeline now `running` → row 7, `ignored.pipeline` false.
   - entry for `failed` with an older `updatedAt` → row 8.
   - entry `{ review: { state: 'unread', landedAt: null } }` with `review: null` → falls through to the pipeline rows.
+  - entry `{ review: { state: 'open', landedAt: T1 } }` with the review now `open` but `landedAt` T2 → row 5, `ignored.review` false; entry
+    `{ review: { state: 'none', landedAt: null } }` with the review now `open` → row 5, `ignored.review` false.
   - pipeline `'none'` and `null` → row 10.
   - `deliveryLook(mr, now)` deep-equals a snapshot taken from today's code for every fixture (write the expected objects literally from the current
     output before Step 3, so a change to `deliveryLook` fails).
@@ -228,18 +234,21 @@ null | 'none'            → step 'merged', 'merge', sentence row 10, button 'me
 ### Task 3: Stores — ignore, detail tab, ticket key, `ticket` page
 
 **Files:**
-- Create: `client/src/hooks/jsonStore.ts`, `client/src/hooks/useIgnoredSteps.ts`, `client/src/hooks/useJiraDetailTab.ts`,
+- Create: `client/src/hooks/useIgnoredSteps.ts`, `client/src/hooks/useJiraDetailTab.ts`,
   `client/src/hooks/useJiraTicketKey.ts`
 - Modify: `client/src/lib/jira-page.ts:15` (`JIRA_PAGES`), `client/src/hooks/useJiraPage.ts`, `client/src/hooks/persistedStore.ts` (header list)
 - Modify: `client/src/components/SideRail.tsx:309` — filter `ticket` out of the tree's `items` for now (Task 8 draws it), so the rail never draws an
   empty `ticket` row in between.
-- Test: `test/ui/persisted-store.test.tsx`, `test/jira/jira-view-store.test.tsx`, `test/jira/ignored-steps-store.test.tsx` (new)
+- Test: `test/jira/jira-lib.test.ts` (782 pins the four-page `JIRA_PAGES` — T17 lives there), `test/ui/persisted-store.test.tsx`,
+  `test/jira/jira-view-store.test.tsx`, `test/jira/ignored-steps-store.test.tsx` (new)
 
 **Interfaces:**
 - Consumes: `persistedStore`, `readIgnoredSteps`, `pruneIgnored`, `ignoreKey` (Task 2), `isJiraKey` (`shared/types.ts:1393`).
 - Produces:
-  - `jsonStore<T>(key: string, read: (v: unknown) => T, fallback: T): { useValue(): T; set(next: T): void }` — same listener-set shape as
-    `persistedStore`; a write updates memory and listeners even when `localStorage` throws.
+  - `persistedJsonStore<T>(key: string, read: (v: unknown) => T): { useValue(): T; set(next: T): void }` in `hooks/persistedStore.ts` — the same
+    module listener set and the same "mounted readers, no cached value" rule (`persistedStore.ts:14-17`); `persistedStore` becomes a thin wrapper over it
+    (guard + fallback as `read`). One file still holds `new Set<Listener>`, so `test/ui/persisted-store.test.tsx:130-136`'s source guard stays green
+    unchanged — do not add a second holder. A write whose `setItem` throws still reaches every mounted reader through the listeners.
   - `useIgnoredSteps(): { entries: IgnoredSteps; ignore(mr: GitlabMr, step: 'review' | 'pipeline', ticketMrs: readonly GitlabMr[] | null): void;
     unignore(mr: GitlabMr, step: 'review' | 'pipeline', ticketMrs: readonly GitlabMr[] | null): void }` — each write records the current state and
     stamp (`'unread'` and `null` for a `null` review), drops the other half only if it is the one named, removes an emptied entry, and runs
@@ -251,18 +260,19 @@ null | 'none'            → step 'merged', 'merge', sentence row 10, button 'me
   - `JIRA_PAGES` = `['board', 'sessions', 'mentions', 'setup', 'ticket']`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - T17: `JIRA_PAGES` includes `ticket`; `isJiraPage('ticket')` true.
+  - T17 (`test/jira/jira-lib.test.ts:782`): `JIRA_PAGES` equals `['board', 'sessions', 'mentions', 'setup', 'ticket']`; `isJiraPage('ticket')` true.
   - T28 (guard half): stored `"foo"` under the key store reads `''`; stored `"PAY-12"` reads `PAY-12`.
   - Tab store: stored `"delivery"` reads `delivery`; `"bogus"` reads `ticket`; two mounted readers both re-render on one `setJiraDetailTab('agent')`.
   - T29 (store half): `{ review: { state: 'none', landedAt: null } }` and `{ review: { state: 'unread', landedAt: null } }` survive a write, an unmount
     and a remount (re-read from `localStorage`); a stored non-JSON string reads `{}`.
   - T30 (store half): through `ignore()` — A's `!41` ignored; a write for ticket B whose `ticketMrs` hold a merged `!7` leaves `!41`; A's write with
     `!41` merged drops it; a write with `ticketMrs` `null` drops nothing.
-  - Review Focus 5: `localStorage.setItem` mocked to throw → `ignore()` and `setJiraDetailTab()` still change what the hook returns; no error thrown.
+  - Review Focus 5: `localStorage.setItem` mocked to throw → after `ignore()` and `setJiraDetailTab()` the mounted readers show the new value; no error
+    thrown.
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement.** Update the header comments: `persistedStore.ts`'s list of its users, `useJiraPage.ts`'s stale "board, sessions or setup"
   (now five pages), `jira-page.ts`'s list.
-- [ ] **Step 4: Run, expect PASS** — the new suite, `test/ui/persisted-store.test.tsx`, `test/jira/jira-view-store.test.tsx`, `test/ui/rail.test.tsx`
+- [ ] **Step 4: Run, expect PASS** — the new suite, `test/jira/jira-lib.test.ts`, `test/ui/persisted-store.test.tsx`, `test/jira/jira-view-store.test.tsx`, `test/ui/rail.test.tsx`
   (the filtered tree), `test/jira/jira-sections.test.tsx`; typecheck. `JiraView` with `ticket` stored and no page component yet: Task 8 owns it; until
   then the `default` branch of `JiraView`'s page switch must draw the Board — check it does, and if not, make `ticket` draw the Board here.
 - [ ] **Step 5: Commit** — `feat(jira): stores for the detail tab, the ticket key and ignored steps`.
@@ -273,6 +283,9 @@ Mocks: `html/Main.html` (`.strip`, the tab row, the Ticket pane), `html/B-Modal.
 
 **Files:**
 - Create: `client/src/lib/jira-strip.ts`, `client/src/components/jira/JiraTicketBody.tsx`, `JiraTicketStrip.tsx`, `JiraTicketPane.tsx`
+- Modify: `client/src/components/jira/JiraDetail.tsx` — its module-private helpers the body needs (`WorktreesList` 592, the function at 615,
+  `ChildrenTree` 656, `ChildSessionLine` 721, `ParentSessionLine` 735, `JiraMoveRows` 752) each move to their own file under `components/jira/`,
+  exported, unchanged; `JiraDetail` imports them back. Tasks 5 and 6 consume them from those files.
 - Modify: `client/src/styles.css` (or the sheet the Jira components use)
 - Test: `test/jira/jira-strip-lib.test.ts` (new), `test/jira/jira-ticket-body.test.tsx` (new)
 
@@ -287,7 +300,9 @@ Mocks: `html/Main.html` (`.strip`, the tab row, the Ticket pane), `html/B-Modal.
     `question` → `working` → `starting` → other, newest first within a state; `idle · N ended` or `no sessions`.
   - `JiraTicketBody` props: `{ issue: JiraIssue; detail: JiraIssueDetail | null; failure: string | null; back: … | null; onBack; onOpenIssue;
     onWrote; onRun; onReview?; tree: <children source>; worktrees: … }` — the builder settles the exact list from what `JiraDetail` passes its regions
-    today. It draws no crumbs, no frame head and no `Run ▾`. It renders the Agent, Delivery and Children panes as named slots that Tasks 5–6 fill; until
+    today. It draws no crumbs, no frame head and no `Run ▾`. **Ownership:** each frame owns the detail read and re-read (`JiraDetail.tsx:243-249` today;
+    the page reads by key) and passes `detail` / `failure` / `onWrote` (re-read) down; the body owns the one `useAction` write guard
+    (`JiraDetail.tsx:217`) and draws the write-error line (`role="alert"`, under the strip; today 311–339) because its strip holds the write controls. It renders the Agent, Delivery and Children panes as named slots that Tasks 5–6 fill; until
     then those tabs draw today's regions moved as they are (the agent band content, `DeliveryPane`, Children + Worktrees).
 
 - [ ] **Step 1: Write the failing tests.** Fixtures: `PAY-12` Story, assignee `Dana Novak`, sprint `Sprint 40`, parent `PAY-3`, two targets
@@ -300,8 +315,9 @@ Mocks: `html/Main.html` (`.strip`, the tab row, the Ticket pane), `html/B-Modal.
     has the red tone on the Ticket tab; clicking the Agent pill selects `Agent`.
   - T27: the Agent pill reads `<STATE_LABEL.question> · 10m` (whatever `pollAge` prints) and `+1`, not the working one.
   - `stripAgent` with a `starting` reservation alone → age from `startedAt`.
-  - Review Focus 4: five targets (red, amber, amber, grey, green) → three pills then `+2` in grey's tone.
+  - Review Focus 4: the five-target fixture above → pills red, amber, amber in that order, then `+2` in green's tone.
   - `kind: 'none'` → one pill `no MR`; `kind: 'unknown'` → `unknown` with today's unknown title; `hidden` → no Delivery cell.
+  - A failing `Assign to me` write draws its error in the `role="alert"` line under the strip, on every tab.
   - Ticket pane: `Resolved <date>` drawn when `resolved` is set, absent when `null`; a ticket with no labels draws no `Labels` fact; Details pane holds
     Reporter, Priority, Created · updated, On boards, Repository, Session and none of Status / Assignee / Sprint / Parent.
 - [ ] **Step 2: Run, expect FAIL.**
@@ -325,12 +341,15 @@ Mocks: `html/Main.html` (`details.tgt`, the next row, the older fold, the Worktr
 - Consumes: Tasks 1–3 (`deliveryTargets`, `olderMrsLine`, `deliveryNext`, `useIgnoredSteps`), `reviewRowText`, `reviewGate` (`ReviewRow.tsx:45`), `reviewHalf`,
   `JiraRunMenu`, `SessionOpen`, `WorktreesList` (`JiraDetail.tsx:592`, drawing `WorktreeRow` from `./JiraWorktreeRow`); the strip's
   row id from Task 4.
-- Produces: `JiraDeliveryTab` props `{ issue; now; onReview?; onRun; openRow: string | null; onOpenRow(id: string | null); liveReviewLink: <the
-  newest live link with action 'review', or null>; worktrees }`. The body holds `openRow` (default: the first group's id; reset on ticket swap) so a
-  strip pill click can set it.
+- Produces: `DeliveryPane` props become `{ issue: JiraIssue; mr: GitlabMr; now: number; next: DeliveryNext; via: string | null; onUnignore(step:
+  'review' | 'pipeline'): void; children: ReactNode }` — `mr` is one target's lead, `children` is the next row; it no longer resolves the ticket's
+  delivery itself (`kind` handling moves to `JiraDeliveryTab`).
+- Produces: `JiraDeliveryTab` props `{ issue; now; onReview?; onRun; openRows: ReadonlySet<string>; onToggleRow(id: string): void; onOpenRow(id: string): void; liveReviewLink: <the
+  newest live link with action 'review', or null>; worktrees }`. The body holds `openRows` — independent folds, not an accordion (default: the first group's
+  id alone; reset on ticket swap); a strip pill click adds its row and leaves the others as they are.
 
 - [ ] **Step 1: Write the failing tests** (fixture of T3 on `PAY-12`, project `acme/pay-api`):
-  - T12: two rows; `develop` open with the full track and a next row; `demo`'s summary shows `+4 earlier`; open it → nested fold reads
+  - T12: two rows; `develop` open with the full track and a next row; `demo`'s summary shows `+4 earlier`; open it → `develop` stays open, and nested fold reads
     `4 earlier MRs into demo · 3 merged, 1 closed`; open that → four rows newest first, `from <branch>` only on the one whose source differs.
   - T13: strip `demo` pill click → Delivery selected and the `demo` row open.
   - T14: `demo` (open, review `none`) next-row button calls `onReview` with `demo`'s iid and `half: 'request'`; a target whose lead is merged draws no
@@ -340,18 +359,23 @@ Mocks: `html/Main.html` (`details.tgt`, the next row, the older fold, the Worktr
   - T25: `develop` (clean review, pipeline failed): `Ignore` → `localStorage` `backlog-manager.jira-ignored-steps` holds `{ "acme/pay-api!<iid>": {
     pipeline: { status: 'failed', updatedAt: <the MR's updatedAt> } } }`; the Pipeline step reads `ignored` with the exact title; the compact pill reads
     `next: merge`; clicking `ignored` removes the entry; the strip's `develop` pill stays red throughout.
+  - `unknown` review on the open row: the next row draws `Ignore` alone, no sentence, no button; clicking it stores `{ review: { state: 'unknown',
+    landedAt: <the review's landedAt> } }` and the pill moves on to the pipeline rows.
+  - T29 render half: `Ignore` on a `none` review (row 3) → the Review step reads `ignored`; unmount and remount the tab → still `ignored`.
   - Row 8: the next row draws a `JiraRunMenu` (find it by its accessible name, as `test/jira/jira-run-menu.test.tsx` does); row 9: `Merge in GitLab ↗`
     with the MR's `webUrl`, `target="_blank"`; row 12: `GitLab ↗`.
-  - Head line: `Branch <source>` when both groups share it, absent otherwise; `2 targets · 7 MRs`; a sub-task inheriting → `via PAY-3`.
+  - `kind: 'none'` and `kind: 'unknown'`: `JiraDeliveryTab` draws today's two sentences (`DeliveryPane.tsx:90-100`, copied unchanged) in place of rows,
+    and the Delivery tab draws no count.
+  - Head line: `Branch <source>` when both groups share it, absent otherwise; `2 targets · 8 MRs`; a sub-task inheriting → `via PAY-3`.
   - The repo basename shows in compact rows only when groups span two projects.
   - Worktrees fold: closed, `Worktrees 2`; an unmapped ticket (no Delivery tab) draws it at the bottom of Ticket.
   - Review Focus 1: rerender with `demo`'s open MR merged and a new open one on `demo` → the `demo` row is still open, shows the new lead, and its fold
     reads `5 earlier MRs into demo · 4 merged, 1 closed`; rerender with `demo` gone → one row, no error.
-  - No rendered text in the tab contains `CodeRabbit` (T26's render half — after Task 9 it is the copy that guarantees it; assert here once).
 - [ ] **Step 2: Run, expect FAIL.**
-- [ ] **Step 3: Implement.** Each row is a `<details>` (or a button + region with `aria-expanded`); fold state lives in the body, keyed by row id.
+- [ ] **Step 3: Implement.** Until Task 7, the old modal's delivery region (`JiraDetail.tsx:414`) renders `JiraDeliveryTab` in place of `DeliveryPane`,
+  so the modal stays green between Tasks 5 and 7. Each row is a `<details>` (or a button + region with `aria-expanded`); fold state lives in the body, keyed by row id.
   `Ignore` writes pass the ticket's delivery MRs (or `null` when the payload is `null` or the delivery is not `mrs`) as `ticketMrs`.
-- [ ] **Step 4: Run, expect PASS**, plus `test/jira/jira-delivery-pane.test.tsx` and `test/jira/jira-delivery-surfaces.test.tsx` (update the `Also:`
+- [ ] **Step 4: Run, expect PASS**, plus `test/jira/jira-detail.test.tsx`, `test/jira/jira-delivery-pane.test.tsx` and `test/jira/jira-delivery-surfaces.test.tsx` (update the `Also:`
   and lead-only ReviewRow cases to the new placement — those cases are the old behaviour, so changing them is the task, not a regression) and typecheck.
 - [ ] **Step 5: Commit** — `feat(jira): one delivery row per target with the next step`.
 
@@ -402,6 +426,9 @@ Mock: `html/B-Modal.html`.
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement.** Keep the one `useAction` guard, the `shownKey` reset, `useParentRead`. If `Modal` gains a shape, its header comment says
   which composers use it; the `Mentions` modal's `lead` shape is untouched.
+- [ ] **Shared cases:** move T8, T9, T11, T15 and T16 from `test/jira/jira-ticket-body.test.tsx` into a case table in `test/helpers/ticket-body-cases.ts`
+  (`(mount: (fixture) => void) => void`, registering the `it`s), run here through the modal; Task 8 runs the same table through the page (spec §9, "in
+  the modal and on the page with the same fixtures").
 - [ ] **Step 4: Run, expect PASS** — the four suites above, `test/jira/jira-mention-modal.test.tsx`, `test/ui/ui-modal-scroll-style.test.ts`,
   `test/guards/design-guards.test.ts`, typecheck.
 - [ ] **Step 5: Commit** — `feat(jira): detail modal draws the tabbed ticket body`.
@@ -412,6 +439,7 @@ Mock: `html/Main.html` (`.topbar`, the page body).
 
 **Files:**
 - Create: `client/src/components/jira/JiraTicketPage.tsx`, `client/src/lib/open-intent.ts`
+- Modify: `JiraDetail.tsx` / the moved `ChildrenTree` (the Children row button, `JiraDetail.tsx:686` today) — a modifier-click surface too.
 - Modify: `JiraView.tsx` (page switch at 103–113; the walk and launch reset on page change), `SideRail.tsx` (220 tree map, 309 `RailTree`), `JiraCard.tsx`,
   `JiraIssueList.tsx` (row 346), `JiraAgentDeck.tsx` (91), `JiraSessionList.tsx` (318), `JiraBoardView.tsx` (`openWithTree`), `JiraDetail.tsx` (wire
   `onOpenPage`)
@@ -433,14 +461,18 @@ Mock: `html/Main.html` (`.topbar`, the page body).
   - T20: page `ticket`, key `''` → the Board draws and the page store reads `board` after the effect.
   - T21: rail draws the `PAY-12` row only while the key is held; clicking it sets page `ticket`.
   - T22: entered from Sessions → `← Sessions` returns to Sessions; entered by the rail row, or after a remount → `← Board`.
-  - T23: Cmd-click, Ctrl-click and middle-click (`auxclick`, `button: 1`) on a Board card, a List row, a deck card and a Sessions row → no dialog, page
+  - T23: Cmd-click, Ctrl-click and middle-click (`auxclick`, `button: 1`) on a Board card, a List row, a deck card, a Sessions row and a Children row
+    in the modal → no dialog, page
     `ticket`, key set, origin that page; a plain click on each → the dialog, page unchanged. Each surface's `title` contains the platform's text.
   - T28: failing read → `Retry` calls `fetchJiraDetail` again; `Forget PAY-12` → key `''`, back on the origin, rail row gone.
+  - The shared case table from Task 7 (`test/helpers/ticket-body-cases.ts`), mounted through the page.
   - Pre-issue frame: before the read lands the top bar shows `Jira / PAY-12` and `← Board`, and no `Open in Jira ↗` or `Run ▾`; after it lands,
     `Jira / <board> / PAY-3 <summary> / PAY-12` (board crumb only when the ticket is on the picked board), `Open in Jira ↗` and `Run ▾`.
+  - Page write: `Assign to me` on the page posts, then the page re-reads `fetchJiraDetail` (called twice) and draws the new assignee.
   - Page walk: a Children row click sets the key to the child and shows `← PAY-12`; Back sets it back. A later failed re-read keeps the drawn issue
     and shows the failure line under the strip.
-  - Review Focus 2: Cmd-click on the card's `!iid` link and on its `Run ▾` → page unchanged, no dialog.
+  - Review Focus 2: Cmd-click AND middle-click on the card's `!iid` link and its `Run ▾`, and middle-click on a link or button inside a List row and a
+    Sessions row → page unchanged, no dialog. Inner controls that stop `click` today (`JiraCard.tsx:139,158`) also stop `auxclick`.
   - Review Focus 3: two walk steps, unmount, remount → the page shows the last child, no `←` walk chip, `← Board`.
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement.** The rail filter from Task 3 becomes "draw `ticket` only while a key is held, labelled with the key, with the ticket
@@ -455,17 +487,22 @@ Mock: `html/Main.html` (`.topbar`, the page body).
 **Files:**
 - Modify: `client/src/lib/review-copy.ts` (`reviewRowText`, line 72), `server/src/jira/prompt.util.ts` (`reviewText`, line 162; the strings at 158 and
   169)
-- Test: `test/gitlab/review-copy.test.ts`, `test/jira/jira-prompt.test.ts`
+- Test: `test/gitlab/review-copy.test.ts`, `test/jira/jira-prompt.test.ts`, `test/jira/agents-dispatch-jira.test.ts` (pins `` `@coderabbitai review` `` at
+  963), `test/jira/jira-delivery-pane.test.tsx` (pins `CodeRabbit · …` at 344/347), `test/jira/jira-delivery-tab.test.tsx`
 
 **Interfaces:** none new; `reviewText`'s signature and its callers are unchanged.
 
 - [ ] **Step 1: Write the failing tests** (T26): `reviewRowText` for an `open` review starts `Review · `; the `request` prompt contains no
   `@coderabbitai`, still names the mr-review-loop skill and its trigger step, and says to mention the repository's review bot account with `review` when
-  the skill names no trigger; the `fix` prompt is unchanged apart from any bot name.
+  the skill names no trigger; the `fix` prompt is unchanged apart from any bot name. T26's render half, in `test/jira/jira-delivery-tab.test.tsx`: with
+  an `open` review on the expanded row, no rendered text in the Delivery tab contains `CodeRabbit`.
 - [ ] **Step 2: Run, expect FAIL.**
-- [ ] **Step 3: Implement.** Grep the client for any other drawn `CodeRabbit` string (`grep -rn "CodeRabbit" client/src --include='*.tsx' --include='*.ts'`)
+- [ ] **Step 3: Implement.** First `grep -rln "coderabbitai\|CodeRabbit ·" test/` and update every pinned string it finds (today also
+  `test/gitlab/gitlab-review-fold.test.ts`, `test/gitlab/gitlab-poller.test.ts`, `test/gitlab/gitlab-env.test.ts` — check each hit is a drawn string or
+  a prompt, not a server-side identifier, before changing it). Then grep the client for any other drawn `CodeRabbit` string (`grep -rn "CodeRabbit" client/src --include='*.tsx' --include='*.ts'`)
   and change only drawn strings; identifiers, file names and comments keep their names (§4.7).
-- [ ] **Step 4: Run, expect PASS**, plus `test/jira/jira-launch.test.tsx` (the preview text), typecheck.
+- [ ] **Step 4: Run, expect PASS** — every suite in **Files** and every grep hit from Step 3, plus `test/jira/jira-launch.test.tsx` (the preview text),
+  typecheck.
 - [ ] **Step 5: Commit** — `fix(jira): never name the review bot in copy or prompt`.
 
 ### Task 10: Docs
