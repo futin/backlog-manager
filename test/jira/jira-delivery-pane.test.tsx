@@ -310,10 +310,10 @@ describe('the next row on a Review step (was the CodeRabbit row)', () => {
     const onReview = jest.fn();
     const lead = mr({ review: review() });
     drawNext([lead], { onReview });
-    expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
+    expect(rowEl()?.textContent).toContain('Review · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
     expect(rowEl()?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'amber');
     // The sentence ellipsises before the button gives way (a failed read's suffix overflowed 505 > 495 at 1440 in /ui-verify), so it is its own title.
-    expect(rowEl()?.querySelector('.jira-dlv-next-text')).toHaveAttribute('title', 'CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
+    expect(rowEl()?.querySelector('.jira-dlv-next-text')).toHaveAttribute('title', 'Review · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
     const btn = screen.getByRole('button', { name: 'Fix review' });
     expect(btn).toBeEnabled();
     expect(btn.closest('.ui-split')).toHaveClass('ui-split-28');
@@ -324,7 +324,7 @@ describe('the next row on a Review step (was the CodeRabbit row)', () => {
   it('none: `not reviewed yet` and `Request review`, launching the request half', () => {
     const onReview = jest.fn();
     drawNext([mr({ review: NONE })], { onReview });
-    expect(rowEl()?.textContent).toContain('CodeRabbit · not reviewed yet');
+    expect(rowEl()?.textContent).toContain('Review · not reviewed yet');
     fireEvent.click(screen.getByRole('button', { name: 'Request review' }));
     expect(onReview).toHaveBeenCalledWith('request', expect.objectContaining({ iid: 412 }), REPOS);
   });
@@ -351,7 +351,7 @@ describe('the next row on a Review step (was the CodeRabbit row)', () => {
 
   it('draws the row without a button when no repo is a candidate', () => {
     drawNext([mr({ review: review() })], { projects: [{ ...MICRO, repos: [] }] });
-    expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings');
+    expect(rowEl()?.textContent).toContain('Review · 2 open findings');
     expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
   });
 

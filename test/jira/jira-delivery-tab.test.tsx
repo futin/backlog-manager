@@ -376,6 +376,15 @@ describe('JiraDeliveryTab — the next step (T24, rows 8, 9, 12)', () => {
     expect(within(next).getByRole('link', { name: 'GitLab ↗' })).toHaveAttribute('href', 'https://gitlab.example.test/acme/pay-api/-/merge_requests/41');
   });
 
+  it('T26: an open review on the expanded row reads `Review ·`, and nothing drawn on the tab names the review bot', () => {
+    mount({ gitlab: gitlab([DEVELOP_LEAD({ review: review() })]) });
+    expect(nextRow('develop')?.textContent).toContain('Review · 2 open findings');
+    expect(document.body.textContent).not.toMatch(/CodeRabbit/i);
+    for (const el of document.querySelectorAll('[title], [aria-label]')) {
+      expect(`${el.getAttribute('title') ?? ''} ${el.getAttribute('aria-label') ?? ''}`).not.toMatch(/CodeRabbit/i);
+    }
+  });
+
   it('T24: open findings with a live review session draw `Open session`, which opens that session', () => {
     mount({
       gitlab: gitlab([DEVELOP_LEAD({ review: review() })]),

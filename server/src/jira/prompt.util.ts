@@ -155,8 +155,11 @@ function readTicket(key: string): string {
  * bot or a stranger wrote on the MR is ever in the prompt this server composes. The body opens with `readTicket` (after the workspace block, which every action
  * puts first), then names the MR as `!<iid>` in its project, which already exists for this branch. Both halves run the skill's discovery step (Step 1) for the
  * host, project and token only — the credentials live in the skill's tooling, not in this prompt — and neither pushes nor opens an MR (Steps 2-3 are skipped).
- * `request` starts at the trigger step: post `@coderabbitai review`, wait for the review, then triage, fix, verify, push, and reply and resolve as the skill
- * says. `fix` starts at the step that fetches the open findings and must not post a trigger — the review already landed — then carries on through fix, verify,
+ * `request` starts at the trigger step: post the trigger comment that step names, wait for the review, then triage, fix, verify, push, and reply and resolve
+ * as the skill says. The prompt names no review bot (Jira detail tabs spec §4.7): which bot reviews is the repository's, and the skill's trigger step is the
+ * one home of its trigger, so a skill version that changes it never leaves this server posting a stale one. A skill version that names no trigger falls back
+ * to mentioning the repository's own review bot account with `review`, which the session reads off the MR's earlier review threads — never an account this
+ * server passes in, since `jira/` reads nothing of `gitlab/` beyond `remote.util.ts`. `fix` starts at the step that fetches the open findings and must not post a trigger — the review already landed — then carries on through fix, verify,
  * push, and reply and resolve. A session without the skill stops and says so rather than improvising a GitLab call of its own.
  */
 function reviewText(key: string, half: ReviewHalf, mr: { project: string; iid: number }): string {
@@ -165,8 +168,10 @@ function reviewText(key: string, half: ReviewHalf, mr: { project: string; iid: n
   if (half === 'request') {
     return (
       `${readTicket(key)} Then use the mr-review-loop skill on ${where}, which already exists for this branch. Run its discovery step (Step 1) for the host, ` +
-      `project and token only, and skip pushing the branch and creating the merge request (Steps 2 and 3). Start at the trigger step: post a comment ` +
-      `\`@coderabbitai review\` on it, wait for the review, then triage the findings, fix them, verify, push, and reply and resolve as the skill says. ${missing}`
+      `project and token only, and skip pushing the branch and creating the merge request (Steps 2 and 3). Start at the trigger step: post the review trigger ` +
+      `comment that step names on it (if this version of the skill names no trigger, mention the repository's review bot account with \`review\`, as the ` +
+      `merge request's earlier review threads show it), wait for the review, then triage the findings, fix them, verify, push, and reply and resolve as the ` +
+      `skill says. ${missing}`
     );
   }
   return (

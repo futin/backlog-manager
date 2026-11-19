@@ -67,7 +67,8 @@ export function reviewStepTitleSuffix(review: GitlabReview | null, now: number):
 
 /**
  * The sentence in Detail's CodeRabbit row (spec §5.2), or `null` where the row is absent: `reviewing`, `clean`, `unknown`, and no review read. The caller
- * also hides it for a non-open lead MR, which only it knows.
+ * also hides it for a non-open lead MR, which only it knows. It opens `Review · `, never the bot's name (Jira detail tabs spec §4.7): which bot reviews is
+ * the repository's, so a drawn string names the step, not the product.
  */
 export function reviewRowText(review: GitlabReview | null, now: number): string | null {
   if (review === null) return null;
@@ -94,7 +95,7 @@ export function reviewRowText(review: GitlabReview | null, now: number): string 
     default:
       return null;
   }
-  return `CodeRabbit · ${body}${reviewStepTitleSuffix(review, now)}`;
+  return `Review · ${body}${reviewStepTitleSuffix(review, now)}`;
 }
 
 /**
