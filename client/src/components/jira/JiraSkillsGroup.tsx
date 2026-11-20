@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
@@ -111,7 +111,7 @@ const BUILT_INS: { id: 'execute' | 'context'; label: string; sub: string; glyph:
  * - **The add row**: a name field, a template textarea and `Add`, which stays disabled until both hold something after trim. The template is sent trimmed
  *   and otherwise as typed — placeholders are the SERVER's to expand, so this card holds no second parser to drift from it. It adds to the segment
  *   on screen (`group` in the body), and its placeholders are that group's example.
- * - **`Edit`** opens `SkillEditor` in the row's place — inline, not the mock's sheet: name, template, a `Group` toggle, `Save` / `Cancel`. Save is an
+ * - **`Edit`** opens `SkillEditor` in the row's place — inline, not the mock's sheet: a head naming the skill and `Esc cancels`, name (focused on open), template, a `Group` toggle, `Save` / `Cancel`. Save is an
  *   update (the id keeps the skill's place); a group change moves it to the other segment, which the card does not follow. A refusal shows in the alert row
  *   and the editor stays. One editor at a time, and Escape cancels it through `useDialogEscape` (see `SkillEditor`).
  * - **Run's hint** names the six placeholders and says what the list does NOT do: a skill has to exist in the repo or the Claude install, and this list only
@@ -477,10 +477,23 @@ function SkillEditor({
   const [prompt, setPrompt] = useState(skill.prompt);
   const [group, setGroup] = useState<JiraSkillGroup>(skill.group === 'review' ? 'review' : 'run');
   useDialogEscape(onCancel);
+  // Focus lands in the editor on open, so a keyboard user is already inside it (Escape works from the first keypress) and the page does not stay put on a
+  // button that no longer exists.
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
   const ready = name.trim() !== '' && prompt.trim() !== '';
   return (
     <div className="set-row set-row-stacked jira-skill-add jira-skill-edit">
+      {/* The row this editor replaced said which skill it was; without a head the editor read as an anonymous form that had pushed the list around, and
+          nothing said how to leave it (2026-11-20). `skill.name` is the STORED name, not the draft, so the head does not rewrite itself as one types. */}
+      <div className="jira-skill-edit-head">
+        <span className="jira-skill-edit-title">Editing {skill.name}</span>
+        <span className="set-hint">Esc cancels</span>
+      </div>
       <input
+        ref={nameRef}
         className="set-text jira-skill-add-name"
         type="text"
         aria-label="Edited skill name"
@@ -502,10 +515,10 @@ function SkillEditor({
         {group === 'review' && <span className="set-hint">Review: shows on an open MR, works on its source branch</span>}
       </div>
       <div className="jira-skill-edit-actions">
-        <Chip size={28} disabled={busy || !ready} onClick={() => onSave({ name, prompt, group })}>
+        <Chip variant="ink" size={28} disabled={busy || !ready} onClick={() => onSave({ name, prompt, group })}>
           Save
         </Chip>
-        <Chip variant="flat" size={28} disabled={busy} onClick={onCancel}>
+        <Chip size={28} disabled={busy} onClick={onCancel}>
           Cancel
         </Chip>
       </div>
