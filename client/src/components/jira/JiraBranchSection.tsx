@@ -32,6 +32,8 @@ export interface BranchState {
   refusal: { text: string; offerContinue: boolean } | null;
   /** A ready Continue on a branch without the issue's key (`continueOffTicket`): accepted, but its tree is listed only under the repository in Setup. */
   offTicket: boolean;
+  /** The branch is the MR's, not the person's (a review, bot or skill): the section draws `Continue` and the branch as static values. */
+  locked: boolean;
 }
 
 /**
@@ -91,7 +93,8 @@ export function useBranchState(
     setDraft,
     choice,
     refusal: ready ? draftRefusal(effective, action, key, known) : null,
-    offTicket: ready && continueOffTicket(choice, key)
+    offTicket: ready && continueOffTicket(choice, key),
+    locked: locked !== null
   };
 }
 
@@ -135,7 +138,8 @@ export function JiraBranchSection({
   const { refs, known, ready, draft, setDraft, refusal, offTicket } = branch;
   const set = (patch: Partial<BranchDraft>): void => setDraft((d) => ({ ...d, ...patch }));
 
-  if (action === 'review') {
+  // The lock is the hook's `locked`, not the action's name: a review SKILL's action is `{ skill }` and its branch is the MR's all the same.
+  if (branch.locked || action === 'review') {
     return (
       <div className="sheet-field">
         <span className="set-name">Branch</span>
