@@ -235,6 +235,8 @@ taken.
   - `fix` row: bot row `Review bot — fix findings` / `Fixes the open findings on !42`.
   - zero review skills: split exactly as today, no chevron, no ghost on any kind.
   - `fix` with a live bot review link: `Open session`, then ghost `Review ▾` (aria-label `Review with a skill`) whose menu has no bot row.
+  - `fix` with a live review-SKILL link (not the bot's) on that branch: still the split + chevron, never `Open session` (a skill session is not
+    `liveReviewLink`).
   - `run` row: Run ▾ then ghost; `merge` and `gitlab`: chip then ghost; no next kind (row `null` today): the row draws with the ghost alone.
   - gate held (live run link on KEY): chevron, ghost and skill rows disabled with the gate sentence as title; ghost reason line ends ` — Review waits until it
     ends or you stop it.`; split reason line unchanged.
