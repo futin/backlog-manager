@@ -90,8 +90,9 @@ taken.
   - `resolveJiraActionOrThrow({ skill: rev.id }, skills, null)` → 400 `<rev name> is a review skill and needs an MR`; `({ skill: run.id }, skills, mr)` →
     400 `<run name> is a run skill and takes no MR`; unknown id still `unknown skill <id>`.
   - compose, review skill `"/code-review high {mr.url} {mr.iid} {mr.source}->{mr.target} {mr.project} {branch} {base}|"` with mr
-    `{ project: 'grp/app', iid: 42, url: 'https://gl/grp/app/-/merge_requests/42', source: 'timify-1-x', target: 'develop' }` and a `continue` workspace on
-    `timify-1-x` → body `/code-review high https://gl/grp/app/-/merge_requests/42 42 timify-1-x->develop grp/app timify-1-x |` then `\n\nJira ticket: <KEY>`
+    `{ project: 'grp/app', iid: 42, url: 'https://gl/grp/app/-/merge_requests/42', source: 'timify-1-x', target: 'develop' }` and a workspace on
+    `timify-1-y` (deliberately not the MR's source, in this pure-compose case) → body
+    `/code-review high https://gl/grp/app/-/merge_requests/42 42 timify-1-x->develop grp/app timify-1-y |` then `\n\nJira ticket: <KEY>`
     (no `{key}` in template).
   - compose, run skill with `{mr.url}` in its template and `mr: null` → `{mr.url}` stays literal.
   - `{key}` named → no key line appended (both groups).
@@ -125,19 +126,22 @@ taken.
 
 **Interfaces:** Consumes Tasks 2–3. Produces nothing new for the client beyond the widened request type.
 
-- [ ] **Step 1: Failing tests** (fixture: a cached open MR `!42`, keys `[KEY]`, `webUrl` W, source S, target T; a review skill R; a run skill U)
+- [ ] **Step 1: Failing tests** (fixture: a cached open MR `!42`, keys `[KEY, KEY2]`, `webUrl` W, source S, target T, plus a second cached open MR `!43` on another branch so
+  the lookup is scoped; a review skill R; a run skill U)
   - body `{ action: { skill: R }, mr: { project, iid: 42, url: W, source: S, target: T }, choice continue S }` → spawns; prompt contains W; the link stores
     branch S; works with `mr.review === null` and with a `clean` review state.
-  - each of `url`, `source`, `target` differing from the cache → 409 `!42 changed since the sheet opened — reopen the sheet` (three cases), nothing spawned.
+  - each of `url`, `source`, `target` differing from the cache → 409 `!42 changed since the sheet opened — reopen the sheet` (three cases), nothing spawned;
+    the `source` case sends `mr.source` and `choice.branch` both on the OLD name (what a stale sheet sends), and still gets the 409, not `a review continues`.
   - MR not cached / `merged` / keys without KEY or parent → 400 `!42 is not an open merge request of KEY`.
   - repo not a candidate → 400 `<repo> is not a review candidate for !42`; choice `new` or branch ≠ S or `openMr` → 400 `a review continues S`.
   - malformed five-field body (iid as string; url missing) → 400 `mr must be { project, iid, url, source, target }`; `half` with a skill → 400
     `half is the review bot's only`; R without `mr` → 400 needs-an-MR; U with `mr` → 400 takes-no-MR.
-  - strict gate: a quiet live `run` link on KEY blocks R (409, today's sentence) though it would yield to a Run; a second R dispatch racing on S loses on the
-    branch hold.
+  - strict gate: a quiet live `run` link on KEY blocks R (409, today's sentence) though it would yield to a Run; R on KEY and R on KEY2, both on S, raced → one spawns, the
+    other 409 `a session is live on S` (different keys, so only the branch hold can refuse).
 - [ ] **Step 2:** fail. **Step 3:** implement — controller parses `mr` with `iidFrom: 'body'` when the action is a skill and `body.mr` is present; service
-  runs a `reviewSkillOrThrow` sharing `reviewOrThrow`'s candidate / `continue` / `notOpen` checks (extract the shared part; no state or half checks), then
-  the three-field comparison, then composes from the cache values; `strict` true for `review` and for a review skill; the branch hold applies to both.
+  runs a `reviewSkillOrThrow` sharing `reviewOrThrow`'s candidate / `continue` / `notOpen` checks (extract the shared part; no state or half checks), with the
+  three-field comparison placed right after the cache / `opened` / keys check and BEFORE the candidate and `continue` checks, then composes from the cache
+  values; `strict` true for `review` and for a review skill; the branch hold applies to both.
 - [ ] **Step 4:** pass + the whole suite (bot cases unchanged). **Step 5:** commit `feat(jira): dispatch a review skill on an MR's branch`.
 
 ### Task 5: Client libraries — run-only resolution, labels, wire, reason tail
@@ -146,7 +150,7 @@ taken.
 - Modify: `client/src/lib/jira.ts` (`resolveJiraAction` ~1116, `fetchJiraPrompt` ~1283, `dispatchJira` ~1664), `client/src/lib/jira-sessions.ts`
   (`runLabel` ~251), `client/src/lib/jira-list.ts` (`runOptionLabel` ~228), `client/src/lib/review-copy.ts` (`reviewBlockedTail` ~113),
   `client/src/components/settings/SettingsView.tsx` (Jira default action select)
-- Test: `test/jira/jira-lib.test.ts`, `test/jira/jira-sessions-lib.test.ts`, `test/jira/jira-list.test.tsx`, `test/settings/settings.test.ts`
+- Test: `test/jira/jira-lib.test.ts`, `test/jira/jira-sessions-lib.test.ts`, `test/jira/jira-list.test.tsx`, `test/settings/settings-view.test.tsx` (its `the Jira default action row` block)
 
 **Interfaces:**
 - Produces: `fetchJiraPrompt(key, action, repo, branch, review?: { half; mr: { project; iid } } | { skillMr: ReviewSkillMr })` (query names `mrProject`,
@@ -156,10 +160,11 @@ taken.
 - [ ] **Step 1: Failing tests**
   - `resolveJiraAction(R.id, skills)` with R a review skill → `'execute'`; a run skill id → `{ skill }` as today.
   - `runLabel` for a link with R's action → `Review the MR · <R name>`; run skill → bare name; deleted id → bare id (no prefix).
-  - `runOptionLabel('skill:R')` → `Review the MR · <R name>`.
+  - `applyListFilters(...).runs` over a link whose action is `{ skill: R }` → the option labelled `Review the MR · <R name>` (`runOptionLabel` is
+    module-private; the `skills` parameters of `applyListFilters`, `runOptionLabel` and `runLabel` widen to `{ id; name; group }`).
   - `reviewBlockedTail('Review')` → ` — Review waits until it ends or you stop it.`
   - `fetchJiraPrompt` with `{ skillMr }` → query has the five names, no `half`.
-  - Settings › Local default select lists run skills only.
+  - Settings › `Jira default action` select (in `settings-view.test.tsx`) lists run skills only.
 - [ ] **Step 2–4:** fail, implement, pass. **Step 5:** commit `feat(jira): client libraries know review skills`.
 
 ### Task 6: Setup › Skills — switch, groups, inline editor
@@ -173,13 +178,13 @@ taken.
 
 **Interfaces:** Consumes Task 1 (`group`), Task 5 (`reviewBlockedTail` not needed here). Posts `POST /api/jira/skills` `{ id?, name, prompt, group }`.
 
-- [ ] **Step 1: Failing tests** (fixture: run A, review R1, run B, review R2 — interleaved on purpose)
-  - scope line is the spec's; switch shows `Run 2` / `Review 2`, Run pressed; explainer per segment exact.
-  - Run segment: heads `Built in` (two built-in rows), `Your run skills · 2`, hint `↑↓ to reorder · order = menu order`; rows A, B in that order; A's ↑ and
-    B's ↓ disabled.
+- [ ] **Step 1: Failing tests** (fixture: run A, review R1, run B, review R2, run C — interleaved on purpose, groups unequal)
+  - scope line is the spec's; switch shows `Run 3` / `Review 2`, Run pressed; explainer per segment exact.
+  - Run segment: heads `Built in` (two built-in rows), `Your run skills · 3`, hint `↑↓ to reorder · order = menu order`; rows A, B, C in that order; A's ↑ and
+    C's ↓ disabled.
   - Review segment: built-in row `Review bot` / `request a review, or fix what it found` with no `Make default`; `Your review skills · 2`; rows R1, R2; Review
     hint `Fills in: …` exact; no `Make default` on R1/R2.
-  - ↓ on R1 posts `/skills/order` with `[A, R2, B, R1]` (whole list, only the review slice moved).
+  - ↓ on R1 posts `/skills/order` with `[A, R2, B, R1, C]` (whole list, only the review slice moved).
   - empty Review group → `No review skills yet.`, no `Your review skills` head, no order hint; a group with one skill draws no order hint.
   - add row on Review segment with placeholders `Claude code review` / `/code-review high {mr.url}` posts `group: 'review'`.
   - `Edit` on R1: row becomes name+prompt pre-filled, Group with `Review` pressed and its sub-line, `Save` / `Cancel`; switching Group to Run hides the
@@ -187,7 +192,8 @@ taken.
     R1's editor; pressing `×` on a row closes an open editor.
   - remove confirm text per group (spec Copy).
   - Escape with the editor open closes the editor only (in `dialog-escape.test.tsx`, beside the `ui/Confirm` case).
-- [ ] **Step 2–4:** fail, implement (segment state local, not persisted; editor calls `useDialogEscape` while open), pass.
+- [ ] **Step 2–4:** fail, implement (segment state local, not persisted; editor calls `useDialogEscape` while open), pass; also run
+  `test/guards/dialog-count-docs.test.ts` and the `claude-rules` guard (the step 5 doc edits).
 - [ ] **Step 5:** update the `useDialogEscape.ts` header and `board.md`'s Escape bullet to name the skill editor as a non-dialog entry; commit
   `feat(jira): Setup › Skills shows Run and Review skills apart`.
 
@@ -222,6 +228,7 @@ taken.
 - Modify: `client/src/components/jira/ReviewRow.tsx` (`ReviewSplit` chevron, header comment), `client/src/components/jira/NextRow.tsx` (control table, header
   comment), `client/src/components/jira/JiraDeliveryTab.tsx` (the one renderer of `NextRow`: thread `onReviewSkill(skillId, mr, repos)` beside
   `onReview`, and on up to wherever `onReview` opens the launch sheet — follow `onReview`'s callers)
+- Modify (composer count): `.claude/rules/board.md` ~25, `client/src/hooks/useDialogEscape.ts` ~52, `test/guards/dialog-count-docs.test.ts:114`
 - Create: `client/src/components/jira/ReviewMenu.tsx` (the `ui/Popover` menu, `label="Review menu"`)
 - Test: `test/jira/jira-delivery-tab.test.tsx` (and `jira-delivery-pane.test.tsx` where it already covers the split)
 
@@ -237,12 +244,15 @@ taken.
   - `fix` with a live bot review link: `Open session`, then ghost `Review ▾` (aria-label `Review with a skill`) whose menu has no bot row.
   - `fix` with a live review-SKILL link (not the bot's) on that branch: still the split + chevron, never `Open session` (a skill session is not
     `liveReviewLink`).
-  - `run` row: Run ▾ then ghost; `merge` and `gitlab`: chip then ghost; no next kind (row `null` today): the row draws with the ghost alone.
+  - `run` row: Run ▾ then ghost; `merge` and `gitlab`: chip then ghost; no next kind on an OPEN MR (row `null` today): the row draws with the ghost alone;
+    a merged lead and a closed lead (also `button: null`, `client/src/lib/delivery.ts:370`) draw no ghost — the ghost requires `mr.state === 'opened'`.
   - gate held (live run link on KEY): chevron, ghost and skill rows disabled with the gate sentence as title; ghost reason line ends ` — Review waits until it
     ends or you stop it.`; split reason line unchanged.
   - hidden when agents off / no candidate repo / no `onReview` (each).
-  - Escape closes the menu only (it is a `ui/Popover`; add it to `board.md`'s Popover composer list, ~line 25, "ten composers" → eleven).
-- [ ] **Step 2–4:** fail, implement, pass; run source guards for `reviewGate`, `ReviewSplit`, `skillCommand`, `JiraRunMenu` (`grep -l` in `test/`).
+  - Escape closes the menu only (it is a `ui/Popover`; add it to the composer lists in `board.md` ~line 25 and `client/src/hooks/useDialogEscape.ts` ~52, "ten composers" →
+    eleven, and update `test/guards/dialog-count-docs.test.ts:114`'s `/ten composers/` to match).
+- [ ] **Step 2–4:** fail, implement, pass; run source guards for `reviewGate`, `ReviewSplit`, `skillCommand`, `JiraRunMenu` (`grep -l` in `test/`), plus
+  `test/guards/dialog-count-docs.test.ts` and the `claude-rules` guard.
 - [ ] **Step 5:** commit `feat(jira): Review ▾ offers review skills on each open MR`.
 
 ### Task 9: Rules and docs
