@@ -902,7 +902,8 @@ fix-or-leave). It opens the Run launch sheet in review mode (§8.9.5) with that 
 
 **`Review ▾`** (`ReviewMenu`, `.jira-review`; Jira review skills spec §4; mock `Main.dc.html`'s target row). With at least one review skill the split gains a
 chevron half — always the `Chevron` mark (`components/ui/Chevron.tsx`), never a text `▾`, which the chevrons guard bans — named `More reviewers`; the left half
-stays the bot's preset action. It opens a 300 px `Popover`, `Review menu`, in `JiraRunMenu`'s row language (`.jira-run-*`: head, 40 px row, 28 px `sparkle`
+stays the bot's preset action. It opens a 340 px `Popover` (Run ▾'s 300 ellipsised the bot row before its iid), `Review menu`,
+in `JiraRunMenu`'s row language (`.jira-run-*`: head, 40 px row, 28 px `sparkle`
 tile, label over a quiet sub-line): head `Built in`, the bot row — `Review bot — request review` over `Posts the review request on !<iid>`, or on the fix half
 `Review bot — fix findings` over `Fixes the open findings on !<iid>` — marked `default`, then head `Your review skills` and one row per review skill, its
 sub-line the leading slash command (`skillCommand`) and its whole template the title. Where the bot split is not drawn — the row's control is `Open session`,

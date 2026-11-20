@@ -32,7 +32,10 @@ import { ReviewSplit } from './ReviewRow';
  * modal stays), and focus returns to the trigger — and binds no key of its own. The wrapper (`.jira-review`) is the popover's positioning parent, as
  * `.jira-run` is `Run ▾`'s. A pick closes the menu first and then calls through; what opens is the launch sheet, held by `JiraView` above the modal.
  */
-const MENU_WIDTH = 300;
+// 340, not `Run ▾`'s 300: the bot row carries the `default` mark beside the longest fixed label any reviewer menu has (`Review bot — request review` over
+// `Posts the review request on !<5-digit iid>`), and at 300 both lines ellipsised before the iid — the one fact that says which MR the bot will touch
+// (2026-11-20 ui-verify). The mock's panel is ~330 px; the phone shape ignores the width.
+const MENU_WIDTH = 340;
 
 interface MenuRow {
   id: string;
