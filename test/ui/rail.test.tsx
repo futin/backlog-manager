@@ -15,7 +15,7 @@ import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext, JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext';
 import { resetJiraListFilters, useJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
 import { useJiraPage } from '../../client/src/hooks/useJiraPage';
-import { setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { syncJiraTicket } from '../../client/src/hooks/useJiraTicketKey';
 import { setJiraView, useJiraView } from '../../client/src/hooks/useJiraView';
 import type { JiraStatusPayload, JiraSessionsPayload, PullRequestsPayload } from '../../shared/types';
 import { repo, row } from '../helpers/pr-fixtures';
@@ -709,25 +709,24 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(onChange).toHaveBeenLastCalledWith('jira');
   });
 
-  // T21 (Jira detail tabs spec §2.2): the tree's fifth row is the ticket page's, drawn only while the key store holds a key, named by that key and led by
-  // the ticket glyph; clicking it opens the page like any other row. Emptying the key takes the row away.
-  it('draws the ticket row only while a key is held, labelled with the key, and clicking it sets page `ticket`', async () => {
-    const onChange = jest.fn();
+  // The ticket page's key lives in the address bar now (jira-ticket-url spec), so the tree never draws a row for it: a held key and the stored page `ticket` still
+  // leave exactly the four fixed rows, with no glyph span and nothing marked current.
+  it('draws no ticket row while a key is held and the page is `ticket` — four rows, no key button, no glyph, none current', () => {
     const page = renderHook(() => useJiraPage());
-    act(() => page.result.current[1]('board'));
-    act(() => setJiraTicketKey(''));
-    render(tree(payload([]), onChange, 'jira'));
-    const labels = (): string[] => Array.from(screen.getByRole('group', { name: 'Jira pages' }).querySelectorAll('.rail-sublink')).map((b) => b.textContent ?? '');
-    expect(labels()).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
-    act(() => setJiraTicketKey('PAY-12'));
-    expect(labels()).toEqual(['Board', 'Sessions', 'Mentions', 'Setup', 'PAY-12']);
-    const row = within(screen.getByRole('group', { name: 'Jira pages' })).getByRole('button', { name: 'PAY-12' });
-    expect(row.querySelector('.rail-sub-glyph svg')).not.toBeNull();
-    await userEvent.click(row);
-    expect(page.result.current[0]).toBe('ticket');
-    expect(onChange).toHaveBeenLastCalledWith('jira');
-    act(() => setJiraTicketKey(''));
-    expect(labels()).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
+    act(() => page.result.current[1]('ticket'));
+    act(() => syncJiraTicket('PAY-12', 'board'));
+    try {
+      render(tree(payload([]), jest.fn(), 'jira'));
+      const group = screen.getByRole('group', { name: 'Jira pages' });
+      const rows = Array.from(group.querySelectorAll('.rail-sublink'));
+      expect(rows.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
+      expect(within(group).queryByRole('button', { name: 'PAY-12' })).toBeNull();
+      expect(document.querySelector('.rail-sub-glyph')).toBeNull();
+      expect(rows.some((b) => b.hasAttribute('aria-current'))).toBe(false);
+    } finally {
+      act(() => syncJiraTicket('', 'board'));
+      act(() => page.result.current[1]('board'));
+    }
   });
 
   it('keeps the Sessions pill’s last count while the dashboard is unreachable, with the Jira tree open', () => {

@@ -230,7 +230,6 @@ button.rail-count { cursor: pointer }
 .rail-sublink:hover { color: var(--ink) }
 .rail-sublink.on { color: var(--ink); font-weight: 600; background: var(--strip) }
 /* A glyph led into a tree row's label — the Jira ticket page's row, `<KEY>` with the ticket glyph (Jira detail tabs spec §2.2). */
-.rail-sub-glyph { display: inline-flex; flex: none; margin-right: 6px; color: var(--ink3) }
 
 /* Settings sits under a 1 px rule with 24 px of air either side: it is about
    the board, the rows above it are about the work (§8.0). Inset 4 px at each
