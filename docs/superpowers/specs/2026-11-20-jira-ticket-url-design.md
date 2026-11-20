@@ -44,7 +44,8 @@ mode (`contentWidth: 'full'`) the summary strip's cells bunch at the left edge w
   `noTicket` path. The orphaned `backlog-manager.jira-ticket-key` entry is removed once on load, so no dead key lingers in localStorage.
 - **History: one rule on the key's transitions.** No key → key is `pushState` of `?section=jira&ticket=<KEY>` (modal `Open full page ↗`, a Cmd/Ctrl/middle
   click). Key → another key is `replaceState` (a Children row, the parent link, the Back chip: the in-page chip walks, browser Back leaves). Key → none is
-  `replaceState` to the address without `section`/`ticket`. The one setter (`setJiraTicketKey`) applies this rule, so its callers keep their shape.
+  `replaceState` to the address without `section`/`ticket`. The one setter (`setJiraTicketKey`) applies this rule; the walk's and Forget's calls keep their
+  shape, and the setter takes the origin as a second argument for the push, so `JiraView`'s `openPage` computes the origin before calling it.
 - **The address follows the screen, by one derived rule.** Whenever (section, Jira page) is not (`jira`, `ticket`) with a key held, the address carries no
   `section`/`ticket`; one effect in `App` enforces it, so every leave — the rail's tree and count pills, the strip chips, `← <origin>`, `Forget <KEY>`, the
   Jira fall, the source settle, `JiraView`'s `noTicket` write-back — drops them without each route knowing. A click on the rail's top-row `Jira` while on the
@@ -58,7 +59,9 @@ mode (`contentWidth: 'full'`) the summary strip's cells bunch at the left edge w
   is the builder's call. Accepted: after an in-app leave the pushed entry reads `/`, so one browser Back press may change nothing visible.
 - **Deep link on load.** `ticket` joins `PARAMS` in `lib/deep-link.ts`, and the key is defined there as one pair: `section=jira` AND a key-shaped `ticket`
   (`isJiraKey`). A valid pair writes the page store in `App`'s `link` initializer — `setJiraPage('ticket')` and the key, beside `setRunsMode`, before the lazy
-  `JiraView` mounts — so a pasted link opens the ticket even with `board` stored, and the mount effect keeps `section=jira&ticket=` in the address. An
+  `JiraView` mounts — so a pasted link opens the ticket even with `board` stored, and the mount effect keeps `section=jira&ticket=` in the address. The
+  origin is seeded from the entry's `history.state` when it carries one (a reload keeps it, so Sessions → ticket → reload → Back still ends on Sessions),
+  else `board` (a pasted link or a new tab). An
   ignored `ticket=` (no `section=jira`, or not key-shaped) is stripped on mount even when no valid `section` is present, so the address never names a
   ticket that is not on screen; every other deep link is stripped as today. While `GET /api/jira` is unanswered the pair is held (`JiraView` draws its
   `loading…`); on `configured: false` the Jira fall moves the section and the derived rule above strips it.
@@ -67,9 +70,10 @@ mode (`contentWidth: 'full'`) the summary strip's cells bunch at the left edge w
   `.rail-sub-glyph`, whose only caller was the row, go with it.
 - **Spread strip.** Each `.jira-strip-cell` grows (`flex: 1 1 auto`): the band's spare width on a row is shared equally among that row's cells, so the gap
   after every cell widens by the same amount, and each cell's label and value stay left-aligned inside it. Six cells on one 1900 px row: six columns, the
-  same extra space after each. Two cells (a ticket with no Delivery or Agent cell): two halves, the second starting mid-band. A wrapped row fills its own
+  same extra space after each. Three cells, the fewest the strip draws (Status, Assignee and Agent are unconditional; Sprint, Parent, Delivery are not):
+  each cell is its content width plus a third of the spare, so the cells start further apart but not at exact thirds. A wrapped row fills its own
   width the same way, so no row is pushed to the far edges. It applies wherever the strip draws (the page and the modal), not keyed on `data-width`. No
-  `container-type`: the strip holds the Move-to `Popover` and `Run ▾`, whose phone-shape panels are `position: fixed`, and a container would become their
+  `container-type`: the strip holds the Move-to `Popover` and its frame holds `Run ▾`, whose phone-shape panels are `position: fixed`, and a container would become their
   containing block (the hazard `styles.css` documents beside `.jira-list-frame`). No inline `style=` (CSP).
 
 ## Left to the builder
