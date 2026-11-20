@@ -566,7 +566,9 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     const floor = '.jira-issues-lane .jira-issues-summary .jira-issues-title, .jira-issues-lane .jira-issues-summary .jira-issues-label';
     expect(body(floor)).toMatch(/flex:\s*1 1 0;\s*min-width:\s*min\(/);
     expect(body('.jira-issues-summary .jira-lane-tag')).toMatch(/min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
-    expect(styles).toMatch(/td\.jira-issues-key\[data-depth='3'\] \{\s*padding-right: 4px\s*\}/);
-    expect(styles).toMatch(/thead th:nth-child\(2\) \{ width: 122px \}/);
+    // D5 retired 2026-11-20: the indent moved from the Key cell to Summary, so every key starts at one edge and Key is a plain 110 px column again.
+    expect(styles).not.toMatch(/td\.jira-issues-key\[data-depth/);
+    expect(styles).toMatch(/td\.jira-issues-summary\[data-depth='1'\] \{ padding-left: 42px \}/);
+    expect(styles).toMatch(/thead th:nth-child\(3\) \{ width: 110px \}/);
   });
 });

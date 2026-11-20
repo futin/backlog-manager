@@ -2250,7 +2250,7 @@ describe('the issue List', () => {
   /** `r`'s cell under the column named `name`, found by the head's own index so a cell is never read from the wrong column. */
   const cellOf = (r: HTMLTableRowElement, name: string): HTMLTableCellElement => r.cells[headers().indexOf(name)];
   const sessionCell = (key: string): string => row(key).querySelector('.jira-issues-session')?.textContent ?? '';
-  const depthOf = (r: HTMLTableRowElement): string | null => r.querySelector('td.jira-issues-key')?.getAttribute('data-depth') ?? null;
+  const depthOf = (r: HTMLTableRowElement): string | null => r.querySelector('td.jira-issues-summary')?.getAttribute('data-depth') ?? null;
 
   it('draws the lanes in order: a header row, its cards in sortForBoard order across statuses, then its nested lane', async () => {
     await renderList(NESTING);
@@ -2271,7 +2271,7 @@ describe('the issue List', () => {
 
   it('draws today’s columns, Sprint and Assignee (disc and name) included', async () => {
     await renderList();
-    expect(headers()).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']);
+    expect(headers()).toEqual(['Type', 'Status', 'Key', 'Summary', 'Updated', 'Session', 'Assignee', 'Sprint', 'Priority', 'Run']);
     const r = row('PAY-43');
     expect(within(cellOf(r, 'Assignee')).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(cellOf(r, 'Assignee').querySelector('.jira-card-av')).toHaveTextContent('AL');
@@ -2390,8 +2390,10 @@ describe('the issue List', () => {
     expect(document.querySelectorAll('.jira-issues-under')).toHaveLength(4);
   });
 
-  it('indents in the Key cell: a nested header at depth 1, its cards at 2, and a depth-5 lane’s rows at LANE_INDENT_CAP', async () => {
+  it('indents in the Summary cell: a nested header at depth 1, its cards at 2, and a depth-5 lane’s rows at LANE_INDENT_CAP', async () => {
     await renderList();
+    // The Key cell never indents, so a parent's key and its children's keys start at one edge.
+    expect(document.querySelectorAll('td.jira-issues-key[data-depth]')).toHaveLength(0);
     expect(depthOf(row('PAY-40'))).toBe('0');
     expect(depthOf(row('PAY-44'))).toBe('1');
     expect(depthOf(row('PAY-41'))).toBe('1');
@@ -2646,7 +2648,7 @@ describe('the Delivery quick filter', () => {
   const seg = (): HTMLElement => screen.getByRole('group', { name: 'Delivery' });
   /** The card rows' summaries — a lane's header row is the lane's heading, not one of the rows the filter is about. */
   const rowSummaries = (): string[] =>
-    Array.from(document.querySelectorAll('.jira-issues-table tbody tr.jira-issues-row:not(.jira-issues-lane)')).map((r) => r.querySelector('td:nth-child(3)')?.textContent ?? '');
+    Array.from(document.querySelectorAll('.jira-issues-table tbody tr.jira-issues-row:not(.jira-issues-lane)')).map((r) => r.querySelector('td.jira-issues-summary')?.textContent ?? '');
 
   it('picks Pipeline failing in the panel: only the failing top stays, and the List control shows the same value', async () => {
     mount(payload(), 'list');
