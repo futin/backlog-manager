@@ -25,7 +25,9 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with ten composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`), the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraTicketStrip.tsx`, the Status chip in the ticket body's strip) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
-  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still ten dialogs counted.
+  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. The third is the Skills card's inline
+  editor (`SkillEditor`, `components/jira/JiraSkillsGroup.tsx`), joined only while a row is being edited, Escape cancelling the edit alone. Still ten dialogs
+  counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)

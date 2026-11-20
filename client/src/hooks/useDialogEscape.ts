@@ -57,6 +57,10 @@ import { useEffect, useRef } from 'react';
  * board's Filters are `FilterBar`'s own panel, already counted. Its click-outside is its own `pointerdown` listener — this module owns the key, not the
  * pointer.
  *
+ * The third non-dialog entry is the Skills card's inline editor (`SkillEditor` in `components/jira/JiraSkillsGroup.tsx`, 2026-11-20 review-skills spec §2):
+ * drawn in place of the skill row it edits, mounted only while open, one call to this hook, and Escape cancels the edit and nothing under it — the same
+ * shape as `Confirm`, and like it not one of the ten.
+ *
  * They stay `window` listeners rather than becoming element handlers because
  * none of these overlays traps focus (each one's own comment says so): Escape
  * has to work wherever focus happens to sit, including on the card button that
