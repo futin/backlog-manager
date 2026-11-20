@@ -74,7 +74,9 @@ that MR's source branch, and Start runs it. Setup › Skills shows Run and Revie
 - `JiraSkill` in `shared/types.ts`: `{ id, name, prompt, group: 'run' | 'review' }`.
 - `readSkill` (`server/src/jira/config.util.ts`): `group` absent → `'run'` (every existing file keeps working, no migration, nothing rewritten on read);
   `'run'` or `'review'` → itself; anything else → the entry is dropped with a warning, like any malformed skill.
-- `parseSkillWrite`: `group` required? **No — absent means `run`**, so an older client's save still works; present and not one of the two is the 400
+- `parseSkillWrite`: `group` is optional. A **create** without it stores `group: 'run'` (written explicitly); an **update** without it keeps the stored group
+  (`writeSkill`'s `{ ...stored, ...skill }` merge, `config.util.ts:632`, must not overwrite it with a default), so an older client's save neither fails nor
+  moves a review skill; present and not one of the two is the 400
   `group must be run or review`. An update may change the group; the skill keeps its id and its position in the list.
 - `writeSkillOrder` and `POST /skills/order`: **unchanged**. The list stays one list; a group's order is the relative order of its members in it. The card
   moves a skill inside its group's slice and posts the whole list (the route still demands exactly the file's id set).
@@ -100,8 +102,9 @@ Per `Review-Skills.dc.html`:
 - **Edit (new, inline — not a sheet):** `Edit` swaps that row, in place, for the add row's two fields pre-filled, a two-segment **Group** toggle `Run` |
   `Review` (sub-line `Review: shows on an open MR, works on its source branch` while Review is pressed), and chips `Save` / `Cancel`. Save posts
   `POST /api/jira/skills` with the id (an update: id and list position kept) and closes the editor; a refusal shows in the card's existing alert row and the
-  editor stays open. One editor open at a time; opening another, or pressing `×` on a row, cancels the first. Escape cancels it (a plain `keydown` on the
-  editor, not a `ui/Popover`/`ui/Sheet`, so the Escape stack in `.claude/rules/board.md` is untouched). Saving a group change moves the skill to the other
+  editor stays open. One editor open at a time; opening another, or pressing `×` on a row, cancels the first. Escape cancels it through `useDialogEscape`,
+  called while the editor is open, exactly as `ui/Confirm` does — Escape has one owner (`.claude/rules/board.md`, bug-23), so the editor binds no listener
+  of its own. It joins the hook's non-dialog entries (`board.md` list and `useDialogEscape.ts` header) and gets a `test/board/dialog-escape.test.tsx` case. Saving a group change moves the skill to the other
   segment; the shown segment does not follow. Changing a skill that is the stored `jiraDefaultAction` to Review is allowed; the default then resolves as
   unknown and falls back to `execute` (§5).
 - The placeholder hint rows become per group: Run's two rows as today; Review's one row `Fills in: {key}, {mr.url}, {mr.iid}, {mr.source}, {mr.target},
@@ -150,7 +153,9 @@ half, unchanged.
 
 ### 5. Run ▾ and the default action
 
-- `JiraRunMenu` and Sessions' run surfaces list `group === 'run'` skills only. Run ▾'s heads (`Built in`, `Skills on this machine · N`) are unchanged; N
+- Every surface that offers a skill to START from Run lists `group === 'run'` skills only: `JiraRunMenu` (card, modal, Delivery `run` kind) and the launch
+  sheet (below). Sessions' Run filter (`client/src/lib/jira-list.ts:218-264`) is not one: it builds its options from the links' actions, so a review-skill
+  link keeps its option, labelled per §7. Run ▾'s heads (`Built in`, `Skills on this machine · N`) are unchanged; N
   counts run skills.
 - The launch sheet's `A skill` tile, its skill select, its sub-line count (`<n> on this machine`) and its empty hint (`no skills on this machine`,
   `JiraLaunchSheet.tsx:322-345`) are built from run skills only on a non-review sheet, so a review skill is never pickable from Run.
@@ -225,7 +230,10 @@ half, unchanged.
   unchanged across mixed groups.
 - `prompt.util`: review skill fills all `{mr.*}` and `{branch}`; run skill leaves `{mr.url}` literal; key appended when unnamed in both.
 - Preview + dispatch routes: the two group/MR 400s, `half` with a skill 400, review skill on a closed or foreign MR refused with today's sentences, review skill
-  accepted on an MR with no review state and on a `clean` one, strict gate and branch hold apply, bot review path unchanged (existing tests stay green).
+  accepted on an MR with no review state and on a `clean` one, strict gate and branch hold apply, bot review path unchanged (existing tests stay green); the
+  400 `mr must be { project, iid, url, source, target }` for each missing or malformed field (url not http(s), url over 2 000, a branch `branchNameProblem`
+  refuses) on both routes; the 409 `!<iid> changed since the sheet opened — reopen the sheet`, one row each for a differing `url`, `source`, `target`.
+- `config.util` (add): create without `group` stores `run`; update without `group` keeps a stored `review`.
 - Client: Skills card switch counts and per-group ↑/↓ edges, the add row adds to the shown group, inline Edit (Group toggle, Save keeps id and position, a refusal keeps it open, one editor at a time,
   Escape cancels), per-group hints and remove confirms, the review tile hidden from a non-review launch sheet, `Make default` run-only; Run ▾
   hides review skills; `resolveJiraAction` falls back for a review id; `Review ▾` chevron present only with ≥1 review skill, gated with the split, ghost menu
