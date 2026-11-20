@@ -11,7 +11,7 @@ import { JiraContext, JiraProvider } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext, JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
-import { JIRA_TICKET_KEY_KEY, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { getJiraTicket, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
@@ -109,7 +109,7 @@ afterEach(() => {
   });
 });
 
-const storedKey = (): unknown => JSON.parse(localStorage.getItem(JIRA_TICKET_KEY_KEY) ?? 'null');
+const storedKey = (): unknown => getJiraTicket().key;
 const page = (): unknown => JSON.parse(localStorage.getItem(JIRA_PAGE_KEY) ?? 'null');
 const issueReads = (key: string): number => requested.filter((u) => u === `/api/jira/issue/${key}`).length;
 /** The top bar's crumbs, one per element, joined as they read: `Jira / <board> / <parent> / <KEY>`. */

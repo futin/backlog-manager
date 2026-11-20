@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
  * persistedStore / persistedJsonStore — the one home of the client's persisted module store: one value (a closed string for `persistedStore`, any JSON the reader accepts for `persistedJsonStore`), one `localStorage` key, every mounted reader subscribed.
  * `useFilesPage`, `useGithubPage`, `useJiraPage`, `useRunsMode` and `useJiraView` are all this, and each keeps only what is its own: the key, the guard, the
  * fallback and the reason it has more than one mounted reader. Four hand copies of this body were four things free to drift, and audits kept reporting them
- * (#425). `useJiraDetailTab`, `useJiraTicketKey` and `useIgnoredSteps` (Jira detail tabs spec §1.3, §2.1, §4.5.1) are the same body over `persistedJsonStore`
- * below: the two closed-string ones through the same guard-and-fallback, the ignore store through a repairing reader of an object.
+ * (#425). `useJiraDetailTab` and `useIgnoredSteps` (Jira detail tabs spec §1.3, §4.5.1) are the same body over `persistedJsonStore`
+ * below: the closed-string one through the same guard-and-fallback, the ignore store through a repairing reader of an object.
  *
  * **Why a module store and not `usePersistedState`.** That hook is a `useState` per caller over one key, so a write from one mounted component would reach
  * localStorage and never reach another already-mounted one: the rail's tree would persist a page the view beside it went on ignoring until a reload. Holding

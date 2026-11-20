@@ -11,7 +11,7 @@ import { JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext
 import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
-import { JIRA_TICKET_KEY_KEY, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { getJiraTicket, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
 import { browserPlatform, fullPageTitle } from '../../client/src/lib/open-intent';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
@@ -2738,7 +2738,7 @@ describe('the Delivery quick filter', () => {
 */
 describe('modifier clicks open the ticket page', () => {
   const MAPPED = { PAY: ['/Users/ada/pay'] };
-  const storedKey = (): unknown => JSON.parse(localStorage.getItem(JIRA_TICKET_KEY_KEY) ?? 'null');
+  const storedKey = (): unknown => getJiraTicket().key;
   const page = (): unknown => JSON.parse(localStorage.getItem(JIRA_PAGE_KEY) ?? 'null');
   const middle = (el: Element): void => {
     fireEvent(el, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));

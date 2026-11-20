@@ -6,7 +6,7 @@ import '@testing-library/jest-dom';
 
 import { setJiraView, useJiraView } from '../../client/src/hooks/useJiraView';
 import { DETAIL_TABS, JIRA_DETAIL_TAB_KEY, setJiraDetailTab, useJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
-import { JIRA_TICKET_KEY_KEY, setJiraTicketKey, useJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { JIRA_TICKET_KEY_KEY, setJiraTicketKey, syncJiraTicket, useJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
 import { JIRA_VIEWS, JIRA_VIEW_KEY, isJiraView } from '../../client/src/lib/jira-view';
 
 /*
@@ -135,31 +135,26 @@ describe('the stored detail tab', () => {
   });
 });
 
-describe('the stored ticket key', () => {
+describe('the ticket key is not stored', () => {
   beforeEach(() => {
     localStorage.clear();
-    act(() => setJiraTicketKey(''));
+    history.replaceState(null, '', '/');
+    act(() => syncJiraTicket('', 'board'));
   });
 
-  it('reads the empty string with nothing stored', () => {
-    localStorage.clear();
+  it('reads the empty string with nothing set', () => {
     render(<KeyReader id="a" />);
     expect(screen.getByTestId('a')).toHaveTextContent('[]');
   });
 
-  it('reads a stored key, and the empty string for a stored value that is not one (T28)', () => {
+  it('a stored legacy value is not read', () => {
     localStorage.setItem(JIRA_TICKET_KEY_KEY, '"PAY-12"');
     render(<KeyReader id="a" />);
-    expect(screen.getByTestId('a')).toHaveTextContent('[PAY-12]');
-    for (const [id, bad] of [['b', '"foo"'], ['c', '42'], ['d', '"PAY-12\\n"'], ['e', '{not json']] as const) {
-      localStorage.setItem(JIRA_TICKET_KEY_KEY, bad);
-      render(<KeyReader id={id} />);
-      expect(screen.getByTestId(id)).toHaveTextContent('[]');
-    }
+    expect(screen.getByTestId('a')).toHaveTextContent('[]');
   });
 
-  it('reaches every mounted reader on a write and on a clear, and survives a remount', () => {
-    const first = render(
+  it('reaches every mounted reader on a write and on a clear, and writes nothing to localStorage', () => {
+    render(
       <>
         <KeyReader id="a" />
         <KeyReader id="b" />
@@ -168,11 +163,9 @@ describe('the stored ticket key', () => {
     act(() => setJiraTicketKey('PAY-31'));
     expect(screen.getByTestId('a')).toHaveTextContent('[PAY-31]');
     expect(screen.getByTestId('b')).toHaveTextContent('[PAY-31]');
-    first.unmount();
-    expect(localStorage.getItem(JIRA_TICKET_KEY_KEY)).toBe('"PAY-31"');
-    render(<KeyReader id="a" />);
-    expect(screen.getByTestId('a')).toHaveTextContent('[PAY-31]');
+    expect(localStorage.getItem(JIRA_TICKET_KEY_KEY)).toBeNull();
     act(() => setJiraTicketKey(''));
     expect(screen.getByTestId('a')).toHaveTextContent('[]');
+    expect(localStorage.getItem(JIRA_TICKET_KEY_KEY)).toBeNull();
   });
 });
