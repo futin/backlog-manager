@@ -108,7 +108,8 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 - [ ] **Step 3: Implement** the store as a plain module store with `useSyncExternalStore` (not `persistedJsonStore`); rewrite the header comment (URL is
   the source of truth, why the origin rides in `history.state`). Update `jira-view-store.test.tsx` cases that asserted the key persisted: they now assert
   it is NOT written to localStorage; the "reads a stored key" case (~150-159) becomes "a stored legacy value is not read". In the same commit, every
-  `storedKey()` assertion in `test/jira/jira-ticket-page.test.tsx` (11 sites) and `test/jira/jira-board.test.tsx` (defined ~2741, asserted ~2778, 2818,
+  `storedKey()` assertion in `test/jira/jira-ticket-page.test.tsx` (helper at :112, ten assertions; drop its now-unused `JIRA_TICKET_KEY_KEY` import, as in
+  jira-board) and `test/jira/jira-board.test.tsx` (defined ~2741, asserted ~2778, 2818,
   2861, 2872 — the `.toBe('')` ones pin "a control's click does not open the page", keep them) becomes `getJiraTicket().key`, so no suite is left red.
 - [ ] **Step 4: Run, expect PASS**, plus `pnpm run test:jest -- test/jira/jira-ticket-page.test.tsx test/jira/jira-board.test.tsx` and typecheck.
 - [ ] **Step 5: Commit** `feat(jira): the ticket key store writes the address, not localStorage`.
@@ -121,7 +122,7 @@ from the deep link, enforces "address follows the screen" in one effect, and own
   origin first and calls `setJiraTicketKey(key, origin)`; header comment)
 - Modify: `client/src/components/jira/JiraTicketPage.tsx` (header comment ~31-38; walk/Forget calls unchanged in shape)
 - Test: `test/ui/deep-link-app.test.tsx` (extend), `test/jira/jira-ticket-page.test.tsx` (update T22 rail-row and remount cases, add history cases),
-  `test/jira/jira-board.test.tsx` (~2749-2777: stop asserting the persisted key)
+  `test/jira/jira-board.test.tsx` (no change here — Task 2 updated it; kept in the run as a regression check)
 
 **Interfaces:**
 - Consumes: Task 1 `readDeepLink(...).ticket`, `originFromState`, `withoutDeepLink`, `ticketAddress`; Task 2 `syncJiraTicket`, `setJiraTicketKey`,
@@ -148,9 +149,11 @@ from the deep link, enforces "address follows the screen" in one effect, and own
   - load `/?section=runs&runs=watchdog&ticket=PAY-12` → Runs › Watchdog, `location.search === ''` (Review Focus 5).
   - load `/?section=jira&ticket=PAY-12` with `GET /api/jira` → `configured: false` → section falls, `location.search === ''`.
   - localStorage `backlog-manager.jira-ticket-key` set before load → gone after mount.
-  - load `/?section=nope` → `location.search === '?section=nope'` (unread params stay, as today).
-  In `jira-ticket-page.test.tsx` — the first two cases may use `mountSection`; every later case needs `App`'s derived effect, popstate listener or rail,
-  so it mounts `<App />` with the Jira-configured fixture:
+  - load `/?section=nope` → `location.search === '?section=nope'` (unread params stay, as today — a regression pin, green before Step 3 too).
+  In `jira-ticket-page.test.tsx` — the first two cases may use `mountSection` (arm or clear the history spies after mounting: the helper's own
+  `setJiraTicketKey` now pushes); every later case needs `App`'s derived effect, popstate listener or rail, so it mounts `<App />` with the
+  Jira-configured fixture and is driven through events or the address, never bare store writes (a store write plus a `setState` outside a discrete event
+  can render in separate passes and let an effect see the key without the page):
   - from Sessions, Cmd-click a row → one `pushState`, search `?section=jira&ticket=<key>`, state `{ jiraTicketOrigin: 'sessions' }`.
   - a Children row then the Back chip → only `replaceState` calls, search follows the drawn key.
   - `← Sessions` → search `''`, Sessions page, key `''`.
