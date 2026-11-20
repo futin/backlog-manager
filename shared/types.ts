@@ -1715,8 +1715,12 @@ export interface JiraDispatchRequest {
   key: string;
   repo: string;
   action: JiraAction;
-  /** With `action: 'review'` only: the MR the button drew and the half the sheet previewed (spec 6). The server checks both against its own cache. */
-  mr?: { project: string; iid: number };
+  /**
+   * With `action: 'review'`: the MR the button drew and the half the sheet previewed (spec 6), `{ project, iid }`. With a review skill's `{ skill }`: the five
+   * values the sheet previewed (`ReviewSkillMr`), and no `half`. The server checks either against its own cache — a skill's `url`, `source` and `target` must
+   * still equal the cached MR's, or the sheet is stale.
+   */
+  mr?: { project: string; iid: number } | ReviewSkillMr;
   half?: ReviewHalf;
   assign: boolean;
   transitionId: string | null;

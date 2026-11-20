@@ -1,11 +1,11 @@
 import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
 import { isJiraKey, parseJiraAction } from '../../../shared/types';
-import type { JiraDispatchRequest, JiraDispatchResult } from '../../../shared/types';
+import type { JiraDispatchRequest, JiraDispatchResult, ReviewSkillMr } from '../../../shared/types';
 import { REPLY_SHAPE_ERROR, parseBranchChoice, replyChoiceIsNarrow } from '../jira/branch-choice.util';
 import { JIRA_TRANSITION_ID_MAX_CHARS } from '../jira/config.util';
 import { isSessionId, SESSION_ID_RE } from '../jira/session-id.util';
-import { JIRA_PROMPT_MAX, parseReviewHalf, parseReviewMr } from '../jira/prompt.util';
+import { JIRA_PROMPT_MAX, parseReviewHalf, parseReviewMr, parseReviewSkillMr } from '../jira/prompt.util';
 import { JiraDispatchService } from './jira-dispatch.service';
 import { SameOriginPostGuard } from './origin.guard';
 
@@ -61,7 +61,8 @@ export class JiraAgentsController {
     // A review names the MR its button was drawn for and the half its sheet previewed (spec §6); both are shape here and checked against the GitLab cache by
     // the service. `mr` before `half`, both before the branch choice: the brief's one order. The iid must arrive as a JSON number — `parseReviewMr` also takes
     // a digit string because `GET /api/jira/prompt` reads it from a query, but a body has no reason to quote it, so a quoted one is a malformed body. Any other
-    // action ignores both fields: they are never rebuilt into its request, so they cannot reach a composition that does not expect them.
+    // action but a skill ignores both fields: they are never rebuilt into its request, so they cannot reach a composition that does not expect them (a skill's
+    // own MR is read just below, in its own five-field shape).
     let review: { mr: { project: string; iid: number }; half: 'request' | 'fix' } | null = null;
     if (action === 'review') {
       const rawMr = body.mr;
@@ -71,6 +72,22 @@ export class JiraAgentsController {
       const half = parseReviewHalf(body.half);
       if (half === null) throw new HttpException({ error: 'half must be request or fix' }, 400);
       review = { mr, half };
+    }
+    // A skill may carry an MR (spec §6): a review skill must, a run skill must not — but that pairing needs the skill's group, so it is the service's, after
+    // `jira.json` is read. Here only the wire, in the preview's order: a `half` is the bot's alone and refused first, then a present `mr` must be all five
+    // values (`iid` a JSON number, as the bot's body has it). Absent is "no MR", which a review skill then answers with its needs-an-MR 400.
+    let skillMr: ReviewSkillMr | null = null;
+    if (typeof action === 'object') {
+      if (body.half !== undefined) throw new HttpException({ error: "half is the review bot's only" }, 400);
+      if (body.mr !== undefined) {
+        const rawMr = body.mr;
+        const mrBody = typeof rawMr === 'object' && rawMr !== null && !Array.isArray(rawMr) ? (rawMr as Record<string, unknown>) : null;
+        skillMr =
+          mrBody === null
+            ? null
+            : parseReviewSkillMr({ project: mrBody.project, iid: mrBody.iid, url: mrBody.url, source: mrBody.source, target: mrBody.target }, 'body');
+        if (skillMr === null) throw new HttpException({ error: 'mr must be { project, iid, url, source, target }' }, 400);
+      }
     }
     const repo = body.repo;
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
@@ -112,7 +129,8 @@ export class JiraAgentsController {
       remoteControl: body.remoteControl === true,
       ...(surface === undefined ? {} : { surface }),
       ...(typeof prompt === 'string' ? { prompt } : {}),
-      ...(review === null ? {} : review)
+      ...(review === null ? {} : review),
+      ...(skillMr === null ? {} : { mr: skillMr })
     });
   }
 
