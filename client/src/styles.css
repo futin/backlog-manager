@@ -229,7 +229,6 @@ button.rail-count { cursor: pointer }
 }
 .rail-sublink:hover { color: var(--ink) }
 .rail-sublink.on { color: var(--ink); font-weight: 600; background: var(--strip) }
-/* A glyph led into a tree row's label — the Jira ticket page's row, `<KEY>` with the ticket glyph (Jira detail tabs spec §2.2). */
 
 /* Settings sits under a 1 px rule with 24 px of air either side: it is about
    the board, the rows above it are about the work (§8.0). Inset 4 px at each
@@ -1684,7 +1683,12 @@ button.rail-count { cursor: pointer }
   display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 26px; margin: 0; padding: 12px 16px; border-radius: 12px; background: var(--strip);
   min-width: 0
 }
-.jira-strip-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+/* Each cell grows (`flex: 1 1 auto`), so a row's spare width is shared equally among that row's cells: the gap after every cell widens by the same amount
+   and a wide frame no longer leaves the strip's right half empty. Label and value stay left-aligned inside a cell (it is a column flex, not centred). A
+   wrapped row fills its own width the same way, and it applies wherever the strip draws — the page and the modal — not keyed on `data-width`. Deliberately
+   NO `container-type` here or on the frame: the strip holds the Move-to `Popover` and its frame holds `Run ▾`, whose phone-shape panels are
+   `position: fixed`, and a container would become their containing block (the hazard documented beside `.jira-list-frame`). */
+.jira-strip-cell { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0 }
 .jira-strip-cell > dt { font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--ink3) }
 .jira-strip-cell > dd {
   margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; min-height: 28px; font-size: 13px; color: var(--ink)
