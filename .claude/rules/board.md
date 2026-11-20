@@ -59,7 +59,8 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   first on Shared) — `.set-cols` survives only on GitHub › Settings and Jira › Setup. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
   live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
-- **The Jira section's five pages are switched by the rail's tree, a link threaded down from it, or the address's `ticket` pair, never by an in-page control; the section is drawn only when
+- **The Jira section's five pages are switched by the rail's tree, a link threaded down from it, or the address's `ticket` pair, never by an in-page control;
+  the section is drawn only when
   `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `github` and `runs` UNCONDITIONALLY — `resolveLegacySection`
   (`lib/source-page.ts`) runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips
   the row unless the shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on
@@ -71,12 +72,14 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — a `persistedStore` (`hooks/persistedStore.ts`, the one home of the client's persisted module
   store), because the rail's `RailTree` and the in-page links are two mounted writers. `ticket` is a page only
   while `hooks/useJiraTicketKey.ts` holds a key, and the key lives in the address, not in storage: `/?section=jira&ticket=<KEY>`, valid only as that pair with
-  `isJiraKey`, parsed once in `lib/deep-link.ts` (`lib/ticket-url.ts` builds the address and reads `history.state`'s `jiraTicketOrigin`). The rail draws NO row for it,
-  ever (`JIRA_TREE_PAGES`), and `JiraView` draws the Board for `ticket` with an empty key and writes `board` back. History: none → key `pushState` with the origin in
-  state, key → another key `replaceState`, key → none `replaceState` with `null` state; the store's setter applies it, `syncJiraTicket` (load and popstate) writes
-  none. One `App` effect drops the key whenever the screen is not (`jira`, `ticket`), which strips the address, so no leave route clears it; one `popstate` listener
-  restores key, page and origin. `forgetLegacyTicketKey` removes the key an older build persisted. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page, and the issue modal's `Open full page ↗` and a
-  Cmd-, Ctrl- or middle-click on a card, list row or Sessions title, which `JiraView`'s `openPage` turns into a key-store write (with the origin) and then
+  `isJiraKey`, parsed once in `lib/deep-link.ts` (`lib/ticket-url.ts` builds the address and reads `history.state`'s `jiraTicketOrigin`). The rail draws NO row
+  for it, ever (`JIRA_TREE_PAGES`), and `JiraView` draws the Board for `ticket` with an empty key and writes `board` back. History: none → key `pushState` with
+  the origin in state, key → another key `replaceState`, key → none `replaceState` with `null` state; the store's setter applies it, `syncJiraTicket` (load and
+  popstate) writes none. One `App` effect drops the key whenever the screen is not (`jira`, `ticket`), which strips the address, so no leave route clears it;
+  one `popstate` listener restores key, page and origin. `forgetLegacyTicketKey` removes the key an older build persisted. The Board and Sessions pages share
+  one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or
+  Sessions page, and the issue modal's `Open full page ↗` and a Cmd-, Ctrl- or middle-click on a card, list row or Sessions title, which `JiraView`'s `openPage`
+  turns into a key-store write (with the origin) and then
   `onOpenJiraPage('ticket')`) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while

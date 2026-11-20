@@ -3477,13 +3477,14 @@ page value lives in a module store (`hooks/useJiraPage.ts`, on `hooks/persistedS
 the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
 
 The ticket page (Jira detail tabs spec §2) adds links of the same kind and no switch: the issue modal's `Open full page ↗`, and a Cmd-, Ctrl- or middle-click
-on a card, a list row or a Sessions title. Each is `JiraView`'s `openPage`, which writes the ticket key store first (with the origin, the page it was clicked on) and then calls the same threaded
-`onOpenJiraPage('ticket')`, so a link to a ticket means what any other page link means. The rail has no ticket row, because the ticket is not a place a reader
-returns to by menu: it is a link. The key lives in the address (`/?section=jira&ticket=<KEY>`), so a reload, a paste and a new tab reopen it and the browser's Back
-leaves it; a `ticket` page with no key would be a page with nothing to read, so `JiraView` writes `board` back for a stored `ticket` with no key. The key is in its
-own store (`hooks/useJiraTicketKey.ts`) rather than in the page value because the page value moves on every click and is persisted, while the key is the address's
-mirror and persists nowhere — a second copy in `localStorage` could only disagree with the URL. The address follows the screen by one derived rule in `App` (no key
-unless the screen is the ticket page) rather than a clear on every route out, so no leave route has to know the address exists.
+on a card, a list row or a Sessions title. Each is `JiraView`'s `openPage`, which writes the ticket key store first (with the origin, the page it was clicked
+on) and then calls the same threaded `onOpenJiraPage('ticket')`, so a link to a ticket means what any other page link means. The rail has no ticket row, because
+the ticket is not a place a reader returns to by menu: it is a link. The key lives in the address (`/?section=jira&ticket=<KEY>`), so a reload, a paste and a
+new tab reopen it and the browser's Back leaves it; a `ticket` page with no key would be a page with nothing to read, so `JiraView` writes `board` back for a
+stored `ticket` with no key. The key is in its own store (`hooks/useJiraTicketKey.ts`) rather than in the page value because the page value moves on every click
+and is persisted, while the key is the address's mirror and persists nowhere — a second copy in `localStorage` could only disagree with the URL. The address
+follows the screen by one derived rule in `App` (no key unless the screen is the ticket page) rather than a clear on every route out, so no leave route has to
+know the address exists.
 
 The chip's popover was once a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
 even in the section. Spec §3 of the app restyle overrode that: the popover now carries `Sync now`, per-board sync icons and a `Jira setup ↗` link, and the link is

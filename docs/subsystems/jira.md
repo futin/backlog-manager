@@ -323,9 +323,10 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `lib/sources.ts`) — and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
   section) picks the page and holds the open issue. The five pages (`board | sessions | mentions | setup | ticket`), `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a `persistedStore`
   (`hooks/persistedStore.ts`), and switched by the rail's tree or by `onOpenJiraPage` — the tree's own pair, built in `App` and handed down — never by an
-  in-page control. `ticket` (Jira detail tabs spec §2) is one ticket read by key at the main area's width, the key held by `hooks/useJiraTicketKey.ts`, in the address
-  as `/?section=jira&ticket=<KEY>` (Jira ticket URL spec; nothing persisted, no rail row); it is a page only while a key is held, and the modal's `Open full page ↗`
-  or a Cmd-, Ctrl- or middle-click on a card, list row or Sessions title opens it, by `pushState` with the origin in `history.state`, so Back returns to it. The rule and its reasons are
+  in-page control. `ticket` (Jira detail tabs spec §2) is one ticket read by key at the main area's width, the key held by `hooks/useJiraTicketKey.ts`, in the
+  address as `/?section=jira&ticket=<KEY>` (Jira ticket URL spec; nothing persisted, no rail row); it is a page only while a key is held, and the modal's `Open
+  full page ↗` or a Cmd-, Ctrl- or middle-click on a card, list row or Sessions title opens it, by `pushState` with the origin in `history.state`, so the
+  browser's Back returns to the page it was opened from. The rule and its reasons are
   [invariants.md](invariants.md#the-jira-sections-five-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 - **The provider and the hooks.** `JiraProvider` (`hooks/JiraContext.tsx`) holds the shell's ONE `useJira`, beside `TrackersProvider`, so the rail, the chip,
   both pages and the Sources card's Jira row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus,
