@@ -22,7 +22,7 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 - One URL scheme: `?section=jira&ticket=<KEY>` on `/`. No hash, no path route, no server or Vite change.
 - A key is valid only as the pair `section=jira` AND `isJiraKey(ticket)` (`shared/types.ts`); defined once, in `lib/deep-link.ts`.
 - History rule: none → key `pushState` with state `{ jiraTicketOrigin: <origin> }`; key → other key `replaceState` (state kept); key → none `replaceState`
-  to the address without `section`/`ticket`.
+  with state `null` to the address without `section`/`ticket`.
 - `TicketOrigin` is `'board' | 'sessions' | 'mentions'`; absent or invalid in `history.state` reads `'board'`.
 - No `container-type` on the strip or its frame; no inline `style=` (CSP).
 - Comments explain why, at length, matching the repo's density; every component keeps its `.claude/DESIGN.md` header citation. Wrap new prose at 160.
@@ -34,7 +34,8 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 1. A pasted lowercase or malformed key (`?section=jira&ticket=pay-12`, `ticket=PAY-`) — must be stripped on load and open the app as a plain load would. → Task 3
 2. Open A, leave to Sessions, open B from Sessions, browser Back — must land on Sessions, not on A. → Task 3
 3. Walk two children deep, then browser Back — must leave the page to the origin, not step to the parent. → Task 3
-4. `Forget <KEY>` after a failed read — address bare, key empty, page = origin; a later Forward must not resurrect a half state (it reopens the ticket). → Task 3
+4. `Forget <KEY>` after a failed read — address bare, key empty, page = origin. Forget replaces the pushed entry with the bare address, so a later Back then
+   Forward lands on a bare entry: that popstate (no `ticket`, no key held) changes nothing — no half state, no ticket reopened. → Task 3
 5. Other deep links unchanged: `?section=runs&runs=watchdog`, `?section=settings&settings=shared` still applied and stripped. → Task 1, Task 3
 
 ---
@@ -47,7 +48,7 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 - Modify: `client/src/components/jira/JiraTicketPage.tsx:42` (import `TicketOrigin` from `lib/jira-page.ts` instead of declaring it; keep `ORIGIN_LABEL` there)
 - Modify: `client/src/components/jira/JiraView.tsx:19` (import path for the type)
 - Create: `client/src/lib/ticket-url.ts`
-- Test: `test/ui/deep-link.test.ts` (extend), Create `test/jira/ticket-url.test.ts`
+- Test: `test/ui/deep-link.test.ts` (extend; its `toEqual` objects at ~10-54 each gain `ticket: null`), Create `test/jira/ticket-url.test.ts`
 
 **Interfaces:**
 - Produces: `DeepLink.ticket: string | null`; `readDeepLink(search)` sets it only for the valid pair. `PARAMS` includes `'ticket'`, so `withoutDeepLink`
@@ -96,7 +97,8 @@ from the deep link, enforces "address follows the screen" in one effect, and own
   - `setJiraTicketKey('PAY-12', 'sessions')` from empty → one `pushState`, `location.search === '?section=jira&ticket=PAY-12'`,
     `history.state` deep-equals `{ jiraTicketOrigin: 'sessions' }`, `getJiraTicket()` is `{ key: 'PAY-12', origin: 'sessions' }`.
   - then `setJiraTicketKey('PAY-13')` → one `replaceState`, no new push, search `?section=jira&ticket=PAY-13`, state still `sessions`, origin `sessions`.
-  - then `setJiraTicketKey('')` → `replaceState`, `location.search === ''`, `getJiraTicket()` is `{ key: '', origin: 'board' }`.
+  - then `setJiraTicketKey('PAY-14', 'mentions')` → `replaceState`, origin stays `sessions` (key → key ignores the argument).
+  - then `setJiraTicketKey('')` → `replaceState`, `location.search === ''`, `history.state === null`, `getJiraTicket()` is `{ key: '', origin: 'board' }`.
   - `setJiraTicketKey('PAY-12')` twice → exactly one `pushState` and no `replaceState`.
   - `setJiraTicketKey('pay-12')` → no history call, key stays `''`.
   - `syncJiraTicket('PAY-9', 'mentions')` → no history call; a mounted `useJiraTicketKey()` reader rerenders to `PAY-9`, `useJiraTicketOrigin()` to `mentions`.
@@ -105,8 +107,10 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 - [ ] **Step 2: Run, expect FAIL.** `pnpm run test:jest -- test/jira/jira-ticket-store.test.tsx test/jira/jira-view-store.test.tsx`
 - [ ] **Step 3: Implement** the store as a plain module store with `useSyncExternalStore` (not `persistedJsonStore`); rewrite the header comment (URL is
   the source of truth, why the origin rides in `history.state`). Update `jira-view-store.test.tsx` cases that asserted the key persisted: they now assert
-  it is NOT written to localStorage.
-- [ ] **Step 4: Run, expect PASS**, plus typecheck.
+  it is NOT written to localStorage; the "reads a stored key" case (~150-159) becomes "a stored legacy value is not read". In the same commit, every
+  `storedKey()` assertion in `test/jira/jira-ticket-page.test.tsx` (11 sites) and `test/jira/jira-board.test.tsx` (defined ~2741, asserted ~2778, 2818,
+  2861, 2872 — the `.toBe('')` ones pin "a control's click does not open the page", keep them) becomes `getJiraTicket().key`, so no suite is left red.
+- [ ] **Step 4: Run, expect PASS**, plus `pnpm run test:jest -- test/jira/jira-ticket-page.test.tsx test/jira/jira-board.test.tsx` and typecheck.
 - [ ] **Step 5: Commit** `feat(jira): the ticket key store writes the address, not localStorage`.
 
 ### Task 3: App wiring — load, address follows the screen, popstate; JiraView/JiraTicketPage read the store
@@ -125,7 +129,10 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 - Behaviour:
   - `link` initializer: `forgetLegacyTicketKey()`; when `read.ticket !== null`: `syncJiraTicket(read.ticket, originFromState(history.state))` and
     `setJiraPage('ticket')`.
-  - Mount effect: runs when ANY of `PARAMS` is present (not only on a valid section). With a valid pair, the address becomes
+  - `useJiraPage()` (new in `App`) is called after the `link` initializer, so its first read sees the page the link wrote; read earlier, the derived
+    effect below would clear a deep-linked key on mount.
+  - Mount effect: runs when `link.section !== null` OR `new URLSearchParams(location.search).has('ticket')` — not on every `PARAMS` hit, so
+    `?section=nope` and a lone `?runs=` stay in the address as today. With a valid pair, the address becomes
     `ticketAddress(...)` of the stripped address and `history.state` is kept; otherwise `withoutDeepLink` as today. `writeSection` only on a valid section.
   - Derived effect on `[section, jiraPage, key]`: when `key !== ''` and not (`section === 'jira'` and `jiraPage === 'ticket'`) → `setJiraTicketKey('')`.
   - `popstate` (one listener, mount only): pair present → `syncJiraTicket(key, originFromState(event.state))` then `onOpenJiraPage('ticket')`; absent and
@@ -141,18 +148,22 @@ from the deep link, enforces "address follows the screen" in one effect, and own
   - load `/?section=runs&runs=watchdog&ticket=PAY-12` → Runs › Watchdog, `location.search === ''` (Review Focus 5).
   - load `/?section=jira&ticket=PAY-12` with `GET /api/jira` → `configured: false` → section falls, `location.search === ''`.
   - localStorage `backlog-manager.jira-ticket-key` set before load → gone after mount.
-  In `jira-ticket-page.test.tsx`:
+  - load `/?section=nope` → `location.search === '?section=nope'` (unread params stay, as today).
+  In `jira-ticket-page.test.tsx` — the first two cases may use `mountSection`; every later case needs `App`'s derived effect, popstate listener or rail,
+  so it mounts `<App />` with the Jira-configured fixture:
   - from Sessions, Cmd-click a row → one `pushState`, search `?section=jira&ticket=<key>`, state `{ jiraTicketOrigin: 'sessions' }`.
   - a Children row then the Back chip → only `replaceState` calls, search follows the drawn key.
   - `← Sessions` → search `''`, Sessions page, key `''`.
   - rail Board click while on the page → search `''`, key `''`.
   - top-row `Jira` click while on the page → page and search unchanged.
-  - `Forget PAY-12` → search `''`, page = origin (Review Focus 4).
+  - rail click on Runs while on the page → search `''`, key `''` (the section arm of the derived rule).
+  - open PAY-12 from Sessions, its read fails, `Forget PAY-12` → search `''`, Sessions page, key `''`; then popstate to `''` with state `null` → still
+    Sessions, key `''`, no ticket page (Review Focus 4).
   - dispatch `popstate` with search `''` while on the page opened from Sessions → Sessions page, key `''` (no Board flash: the page store never reads
-    `board` in between — assert via a store subscriber).
+    `board` in between — assert with a mounted `useJiraPage()` probe that records each rendered value).
   - dispatch `popstate` to `?section=jira&ticket=PAY-12` with state `{ jiraTicketOrigin: 'sessions' }` while on Board → ticket page, chip `← Sessions`.
   - open A from Board, `← Board`, open B from Sessions, popstate to `''` → Sessions (Review Focus 2).
-  - walk two children, popstate to `''` → origin page, not the parent (Review Focus 3).
+  - open from Sessions, walk two children, popstate to `''` → Sessions page, not the parent and not Board (Review Focus 3).
   - Replace T22 "entered by the rail's row" with "entered by a link with no state → `← Board`"; replace "after a remount, origin forgotten" with "after a
     remount with the key held, the origin is kept".
 - [ ] **Step 2: Run, expect FAIL.** `pnpm run test:jest -- test/ui/deep-link-app.test.tsx test/jira/jira-ticket-page.test.tsx test/jira/jira-board.test.tsx`
@@ -165,7 +176,7 @@ from the deep link, enforces "address follows the screen" in one effect, and own
 
 **Files:**
 - Modify: `client/src/components/SideRail.tsx:138-140` (drop `ticketKey`, `jiraTree` is `JIRA_TREE_PAGES`), `:315-316` (drop `labelFor` ticket branch and
-  `glyphFor`), `RailTree`'s `glyphFor` prop and glyph span (~397-443), comments at ~578-588; drop the `GlyphName` import if unused
+  `glyphFor`), `RailTree`'s `glyphFor` prop and glyph span (~397-443), comments at ~578-588; drop the `Glyph` component import (`:5`, its only use is the row's span); `GlyphName` stays (`RAIL_GLYPH`)
 - Modify: `client/src/styles.css:233` (delete `.rail-sub-glyph`)
 - Test: `test/ui/rail.test.tsx` (~713-729: the row case)
 
@@ -176,7 +187,7 @@ from the deep link, enforces "address follows the screen" in one effect, and own
   `aria-current`.
 - [ ] **Step 2: Run, expect FAIL.** `pnpm run test:jest -- test/ui/rail.test.tsx`
 - [ ] **Step 3: Implement** the removals.
-- [ ] **Step 4: Run, expect PASS**; `grep -rn "rail-sub-glyph\|glyphFor" client/src test` → no hits; typecheck.
+- [ ] **Step 4: Run, expect PASS**; `grep -rn "rail-sub-glyph\|glyphFor" client/src` → no hits; typecheck.
 - [ ] **Step 5: Commit** `feat(jira): drop the rail's ticket row`.
 
 ### Task 5: Spread strip
