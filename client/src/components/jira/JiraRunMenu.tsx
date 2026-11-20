@@ -59,9 +59,10 @@ import { SplitChip } from '../ui/SplitChip';
  * sub-task's default; the toggle exists only inside the menu. The segments are this file's own markup (`jira-run-target*`), not `ui/Segmented`, whose label
  * is one string and cannot draw a key over a sub-line.
  *
- * **In the modal the panel still hangs from the controls row**, now 300 px wide in every home: the stylesheet makes `.jira-modal-controls` the positioning
- * parent, the panel's right edge the row's. The row sits at the foot of a column that scrolls under 700 px, so the panel is scrolled into view
- * (`block: 'nearest'`, which moves the column only as far as it must) on open.
+ * **In the modal the panel hangs from the chip itself**, 300 px wide in every home: since Jira detail tabs the chip sits at the right end of the Detail
+ * frame's head (`.jira-detail-acts`), so `.jira-run` is the positioning parent there as on a card, the panel's right edge the chip's. The panel can still
+ * reach past the visible part of the dialog — the head is short and the body scrolls under it — so it is scrolled into view (`block: 'nearest'`, which
+ * moves a scroller only as far as it must) on open.
  */
 const MENU_WIDTH = 300;
 
@@ -129,6 +130,8 @@ export function JiraRunMenu({
       className={open ? 'jira-run jira-run-open' : 'jira-run'}
       data-state={state}
       onClick={(e) => e.stopPropagation()}
+      // A middle-click on the chip is nobody's, and must not reach the card's or row's own middle-click, which opens the ticket page (spec §2.3).
+      onAuxClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
       }}

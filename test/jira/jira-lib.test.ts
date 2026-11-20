@@ -778,8 +778,9 @@ describe('parseJiraBoardIssues', () => {
 });
 
 describe('jira page key', () => {
-  it('names the four pages and the stored key', () => {
-    expect(JIRA_PAGES).toEqual(['board', 'sessions', 'mentions', 'setup']);
+  it('names the five pages and the stored key', () => {
+    expect(JIRA_PAGES).toEqual(['board', 'sessions', 'mentions', 'setup', 'ticket']);
+    expect(isJiraPage('ticket')).toBe(true);
     expect(isJiraPage('mentions')).toBe(true);
     expect(isJiraPage('sessions')).toBe(true);
     expect(JIRA_PAGE_KEY).toBe('backlog-manager.jira-page');

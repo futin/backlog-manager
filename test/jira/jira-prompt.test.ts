@@ -539,7 +539,8 @@ describe('the review built-in', () => {
     expect(prompt).toContain('mr-review-loop');
     expect(prompt).toContain('!15958');
     expect(prompt).toContain('development/backend/microservice');
-    expect(prompt).toContain('@coderabbitai review');
+    // Spec §4.7: the prompt names no review bot — the skill's trigger step, or the repository's own bot account, says who to mention.
+    expect(prompt).not.toMatch(/coderabbit/i);
     expect(prompt).toMatch(/not installed[^.]*stop/i);
     expect(prompt.indexOf(readSentence)).toBeLessThan(prompt.indexOf('mr-review-loop'));
   });
@@ -553,7 +554,9 @@ describe('the review built-in', () => {
     const prompt = review('request', ws);
     expect(prompt).toMatch(/discovery step \(Step 1\) for the host, project and token only/);
     expect(prompt).toMatch(/skip[^.]*\(Steps 2 and 3\)/i);
-    expect(prompt).toContain('post a comment `@coderabbitai review`');
+    expect(prompt).toMatch(/Start at the trigger step: post the review trigger comment that step names on it/);
+    expect(prompt).toMatch(/names no trigger, mention the repository's review bot account with `review`, as the merge request's earlier review threads show it/);
+    expect(prompt).not.toContain('@coderabbitai');
     expect(prompt).toMatch(/push/);
     expect(prompt).toMatch(/reply and resolve/);
     expect(prompt).not.toMatch(/change nothing in the repository\./i);
@@ -567,7 +570,8 @@ describe('the review built-in', () => {
     expect(prompt).toMatch(/\(Step 1\) for the host, project and token only/);
     expect(prompt).toMatch(/start at the step that fetches the open findings/);
     expect(prompt).toMatch(/do not post/i);
-    expect(prompt).not.toMatch(/post (a comment of )?`?@coderabbitai review/);
+    expect(prompt).not.toMatch(/coderabbit/i);
+    expect(prompt).not.toMatch(/review bot account/);
     expect(prompt).toMatch(/push/);
     expect(prompt).toMatch(/reply and resolve/);
   });

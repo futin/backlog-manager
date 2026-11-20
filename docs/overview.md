@@ -216,8 +216,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
   all derived in `lib/tracker.ts`, plus GitHub › Settings' `Sync` card, whose one control is each repo's sync interval, and the read-only `Sources` card on
   Shared Settings (token, reach, connect commands, the Jira row). Jira is drawn only
-  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and four pages under its rail entry — Board, Sessions, Mentions and Setup,
-  switched by the tree alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](subsystems/board.md)
+  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and five pages under its rail entry — Board, Sessions, Mentions, Setup and,
+  while a ticket key is held, that ticket's page — switched by the tree alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](subsystems/board.md)
 - [`.claude/DESIGN.md`](../.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
   cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
   `invariants.md`.

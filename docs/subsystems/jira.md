@@ -321,10 +321,12 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   The rail draws the row only while the status says `configured: true` (or while a stored `jira` section is held for the first answer), `App` falls a `jira`
   section on `configured: false` and on nothing else — to the first drawn source row, Files before GitHub, or Runs when there is none (`firstDrawn`,
   `lib/sources.ts`) — and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
-  section) picks the page and holds the open issue. The four pages (`board | sessions | mentions | setup`), `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a `persistedStore`
+  section) picks the page and holds the open issue. The five pages (`board | sessions | mentions | setup | ticket`), `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a `persistedStore`
   (`hooks/persistedStore.ts`), and switched by the rail's tree or by `onOpenJiraPage` — the tree's own pair, built in `App` and handed down — never by an
-  in-page control. The rule and its reasons are
-  [invariants.md](invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+  in-page control. `ticket` (Jira detail tabs spec §2) is one ticket read by key at the main area's width, the key held by `hooks/useJiraTicketKey.ts`; it is a
+  page, and its rail row is drawn, only while a key is held, and the modal's `Open full page ↗` or a Cmd-, Ctrl- or middle-click on a card, list row or
+  Sessions title opens it. The rule and its reasons are
+  [invariants.md](invariants.md#the-jira-sections-five-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 - **The provider and the hooks.** `JiraProvider` (`hooks/JiraContext.tsx`) holds the shell's ONE `useJira`, beside `TrackersProvider`, so the rail, the chip,
   both pages and the Sources card's Jira row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus,
   a timer aimed at the sooner of the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` and the mentions deadline (`mentions.polledAt +
@@ -563,7 +565,7 @@ failed spawn. The write is not undone, and the sentence says so rather than invi
 
 ### The review action
 
-`{ action: 'review', mr: { project, iid }, half: 'request' | 'fix' }` is the third built-in, started from the delivery track's CodeRabbit row, never from `Run
+`{ action: 'review', mr: { project, iid }, half: 'request' | 'fix' }` is the third built-in, started from a Delivery tab target row's review split (the review row), never from `Run
 ▾`. The mechanism is in [`.claude/rules/jira.md`](../../.claude/rules/jira.md); the reasoning is the
 [spec](../superpowers/specs/2026-11-13-coderabbit-review-design.md). The controller validates `mr` (`parseReviewMr`: the path through `isGitlabProjectPath`, the
 iid a positive integer of at most nine digits) and `half` (`parseReviewHalf`), and `resolveJiraActionOrThrow` refuses a bare `review`. `JiraDispatchService`

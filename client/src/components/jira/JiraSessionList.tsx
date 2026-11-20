@@ -23,6 +23,7 @@ import {
 } from '../../lib/jira-list';
 import { openButtons, runLabel, stripTitle, surfaceWord } from '../../lib/jira-sessions';
 import type { JiraPage } from '../../lib/jira-page';
+import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
@@ -70,6 +71,7 @@ export function JiraSessionList({
   now,
   childrenOf,
   onOpenIssue,
+  onOpenPage,
   onRun,
   unavailable,
   boardName,
@@ -81,6 +83,8 @@ export function JiraSessionList({
   now: number;
   childrenOf: JiraChildrenIndex;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** A row's Cmd-, Ctrl- or middle-click: the ticket page on that issue (Jira detail tabs spec §2.3). */
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   /**
    * What the board cannot give (`jira.json` unreadable, no board, still loading, load failed), or `null`. The bar and the link-store warning draw whatever
@@ -226,6 +230,7 @@ export function JiraSessionList({
                     zone={zone}
                     childrenOf={childrenOf}
                     onOpenIssue={onOpenIssue}
+                    onOpenPage={onOpenPage}
                     onRun={onRun}
                     onHandover={(id) => handover.run(() => openDesktopJira(id))}
                   />
@@ -242,6 +247,7 @@ export function JiraSessionList({
                     zone={zone}
                     childrenOf={childrenOf}
                     onOpenIssue={onOpenIssue}
+                    onOpenPage={onOpenPage}
                     onRun={onRun}
                     onHandover={(id) => handover.run(() => openDesktopJira(id))}
                   />
@@ -288,6 +294,7 @@ function ListRowView({
   zone,
   childrenOf,
   onOpenIssue,
+  onOpenPage,
   onRun,
   onHandover
 }: {
@@ -296,6 +303,7 @@ function ListRowView({
   zone: string;
   childrenOf: JiraChildrenIndex;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   onHandover: (sessionId: string) => void;
 }) {
@@ -315,10 +323,16 @@ function ListRowView({
   const buttons = link !== null && sessionId !== null ? openButtons(link, sessionRow, state, { phone, wide: false }) : null;
   // The Run gate, read where the deck's and Detail's are: a Starting reservation or a live Run that is not quiet hides `Run ▾`; a quiet Run or a branch link does not.
   const canRun = row.ended && data !== null && runChipState(issue, data, payload) !== 'live';
-  const open = (): void => onOpenIssue(issue, row.onBoard ? childrenOf : null);
+  // A Cmd-, Ctrl- or middle-click opens the ticket page instead of Detail (spec §2.3); the row's middle-click passes `rowOpens` as its click does, with no
+  // selection to read, so one on `Open`, `Run ▾` or the title button stays that control's — the title button takes its own.
+  const open = (e: MouseEvent): void => (onOpenPage !== undefined && wantsPage(e) ? onOpenPage(issue) : onOpenIssue(issue, row.onBoard ? childrenOf : null));
   const onRowClick = (e: MouseEvent<HTMLTableRowElement>): void => {
-    if (rowOpens(e.currentTarget, e.target, window.getSelection()?.toString() ?? '')) open();
+    if (rowOpens(e.currentTarget, e.target, window.getSelection()?.toString() ?? '')) open(e);
   };
+  const onRowAux = (e: MouseEvent<HTMLTableRowElement>): void => {
+    if (onOpenPage !== undefined && e.button === 1 && rowOpens(e.currentTarget, e.target, '')) onOpenPage(issue);
+  };
+  const pageTitle = onOpenPage === undefined ? undefined : fullPageTitle(browserPlatform());
 
   return (
     <tr
@@ -328,14 +342,24 @@ function ListRowView({
       data-key={row.key}
       data-ended={row.ended ? 'true' : undefined}
       aria-label={`Session on ${row.key}`}
+      title={pageTitle}
       onClick={onRowClick}
+      onAuxClick={onRowAux}
     >
       <td className="jira-list-ticket">
         <span className="jira-list-key">
           {row.key}
           {row.via !== null && <span className="jira-list-mark">{` · via ${row.via}`}</span>}
         </span>
-        <button type="button" className="jira-list-title" title={issue.summary} onClick={open}>
+        <button
+          type="button"
+          className="jira-list-title"
+          title={pageTitle === undefined ? issue.summary : `${issue.summary}\n${pageTitle}`}
+          onClick={open}
+          onAuxClick={(e) => {
+            if (onOpenPage !== undefined && e.button === 1) onOpenPage(issue);
+          }}
+        >
           {issue.summary}
         </button>
       </td>

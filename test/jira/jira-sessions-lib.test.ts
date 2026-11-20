@@ -1,6 +1,17 @@
 import type { JiraSessionState } from '../../shared/jira-sessions';
 import type { DashboardRow, JiraLink, JiraSessionsPayload } from '../../shared/types';
-import { desktopButton, desktopHref, linkedHow, openButtons, primaryIsDesktop, sessionDuration, shortSessionId, surfaceWord, ticketSessions } from '../../client/src/lib/jira-sessions';
+import {
+  desktopButton,
+  desktopHref,
+  historySummary,
+  linkedHow,
+  openButtons,
+  primaryIsDesktop,
+  sessionDuration,
+  shortSessionId,
+  surfaceWord,
+  ticketSessions
+} from '../../client/src/lib/jira-sessions';
 
 /**
  * The open buttons' pure rules (Jira sessions spec C2, C3, §7.5): when Desktop may be pressed, which surface leads, and what each button says. One case per
@@ -301,5 +312,25 @@ describe('Detail’s pure readings (Jira sessions spec §7.3)', () => {
     expect(surfaceWord(link({ surface: 'dashboard' }), row({ surface: 'cloud' }))).toBe('Cloud');
     expect(surfaceWord(link({ surface: 'desktop' }), null)).toBe('Desktop');
     expect(surfaceWord(link({ surface: null }), null)).toBeNull();
+  });
+});
+
+describe('historySummary (Jira detail tabs spec §5.2)', () => {
+  const NOW = Date.parse('2026-11-19T12:00:00Z');
+
+  it('reads `<N> ended · last <mon> <day>, <HH:MM>` from the newest end, in the app’s date form and the zone it is given', () => {
+    const ended = [{ endedAt: '2026-11-13T16:33:00Z' }, { endedAt: '2026-11-12T09:05:00Z' }];
+    expect(historySummary(ended, NOW, 'UTC')).toBe('2 ended · last nov 13, 16:33');
+    expect(historySummary(ended, NOW, 'Europe/Belgrade')).toBe('2 ended · last nov 13, 17:33');
+    // Past midnight in the zone, the date moves with the clock.
+    expect(historySummary([{ endedAt: '2026-01-31T23:30:00Z' }], NOW, 'Europe/Belgrade')).toBe('1 ended · last feb 1, 00:30');
+  });
+
+  it('marks an end in another year the way every client date does', () => {
+    expect(historySummary([{ endedAt: '2025-12-30T08:00:00Z' }], NOW, 'UTC')).toBe("1 ended · last dec 30 '25, 08:00");
+  });
+
+  it('drops the `last` part when the newest end does not parse', () => {
+    expect(historySummary([{ endedAt: 'not a date' }, { endedAt: '2026-11-12T09:05:00Z' }], NOW, 'UTC')).toBe('2 ended');
   });
 });

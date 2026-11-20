@@ -1,0 +1,200 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>B — page, Development tab</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"><script src="./support.js"></script></head><body><x-dc><helmet><style>body{margin:0}
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hair:#eaeae8;--hair2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--fill-progress:#7DC242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--scrim:rgba(19,19,19,.28)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--board);color:var(--ink);font:13px/1.45 'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.app{display:flex;min-height:100vh}
+.rail{width:56px;flex:none;background:var(--steel);display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 0}
+.rail i{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;color:var(--ink3)}
+.rail i.on{background:var(--strip);color:var(--ink)}
+.main{flex:1;min-width:0;padding:18px 28px 40px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.crumbs{display:flex;align-items:center;gap:6px;color:var(--ink3);font-size:12px}
+.crumbs b{color:var(--ink);font-weight:600}
+.btns{display:flex;gap:8px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;background:var(--strip);border:1px solid var(--hair2);font:inherit;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink2)}
+.btn.sm{height:24px;padding:0 9px;font-size:12px;border-radius:7px}
+.split{display:inline-flex;border-radius:8px;overflow:hidden;background:var(--ink);color:#fff;height:28px;font-weight:600;font-size:12px;white-space:nowrap}
+.split span{display:inline-flex;align-items:center;gap:6px;padding:0 11px}
+.split span+span{border-left:1px solid rgba(255,255,255,.25);padding:0 8px}
+h1{font-size:22px;line-height:1.25;margin:4px 0 10px;font-weight:700;letter-spacing:-.01em}
+.key{font-weight:700;color:var(--ink2);font-size:12px;letter-spacing:.02em}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:600;background:var(--steel);color:var(--ink2);white-space:nowrap}
+.pill.done,.pill.ok{background:#e3eedb;color:var(--green)}
+.pill.draft{background:var(--steel);color:var(--ink2)}
+.pill.merged{background:#ebe6f4;color:var(--magenta)}
+.pill.closed{background:#f5e1dd;color:var(--red)}
+.pill.live{background:#fbe9d8;color:var(--amber-ink)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.panel{background:var(--strip);border-radius:12px;padding:16px;min-width:0}
+.lbl{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--ink3);margin:0 0 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.n{font-weight:500;letter-spacing:0;color:var(--ink3)}
+.facts{display:grid;grid-template-columns:92px minmax(0,1fr);gap:9px 12px;align-items:center;margin:0}
+.facts dt{color:var(--ink3);font-size:12px}
+.facts dd{margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.link{color:var(--ink);text-decoration:underline;text-decoration-color:var(--hair2);text-underline-offset:3px}
+.mrl{font-weight:600;color:var(--cyan);white-space:nowrap}
+.muted{color:var(--ink3)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.desc{font-size:13.5px;line-height:1.55}
+.desc h3{font-size:14px;margin:18px 0 6px}
+.desc p{margin:0 0 8px}
+.desc ul{margin:0 0 8px;padding-left:18px}
+.desc li{margin:3px 0}
+.desc ul.check{list-style:none;padding-left:0}
+.check li::before{content:'';display:inline-block;width:12px;height:12px;border:1.5px solid var(--hair2);border-radius:3px;margin-right:8px;vertical-align:-1px}
+details>summary{list-style:none;cursor:pointer;user-select:none}
+details>summary::-webkit-details-marker{display:none}
+.fold>summary{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--ink3);letter-spacing:.02em}
+.fold>summary::before,.tgt>summary .chev{content:'';flex:none;width:6px;height:6px;border-right:1.6px solid var(--ink3);border-bottom:1.6px solid var(--ink3);transform:rotate(-45deg);transition:transform .15s;margin:0 4px 0 1px}
+.fold[open]>summary::before,.tgt[open]>summary .chev{transform:rotate(45deg)}
+.fold>summary .r{margin-left:auto;font-weight:500;letter-spacing:0;display:flex;gap:6px;align-items:center}
+.fold>.body{margin-top:12px}
+.hr{height:1px;background:var(--hair);margin:14px 0}
+/* tabs */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--hair2);margin:14px 0 16px}
+.tabs label{padding:9px 14px;font-weight:600;color:var(--ink3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;gap:6px;align-items:center}
+.tabs label .c{font-size:11px;font-weight:600;background:var(--steel);border-radius:999px;padding:1px 7px;color:var(--ink2)}
+.tabs label .c.live{background:#fbe9d8;color:var(--amber-ink)}
+.tabpane{display:none}
+#tb1:checked~.tabs label[for=tb1],#tb2:checked~.tabs label[for=tb2],#tb3:checked~.tabs label[for=tb3],#tb4:checked~.tabs label[for=tb4]{color:var(--ink);border-bottom-color:var(--ink)}
+#tb1:checked~.panes .p1,#tb2:checked~.panes .p2,#tb3:checked~.panes .p3,#tb4:checked~.panes .p4{display:block}
+input.tb{display:none}
+.strip{display:flex;gap:26px;align-items:center;background:var(--strip);border-radius:12px;padding:12px 16px;flex-wrap:wrap}
+.strip .f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.strip .f>span:first-child{font-size:11px;color:var(--ink3);font-weight:600;letter-spacing:.02em}
+.tag{font-size:11px;font-weight:600;color:var(--ink2);background:var(--steel);border-radius:5px;padding:2px 7px}
+/* delivery: one card per target */
+.dhead{display:flex;align-items:center;gap:10px;margin-bottom:4px;font-size:12px;color:var(--ink2)}
+.dhead .r{margin-left:auto;color:var(--ink3)}
+.tgt{background:var(--strip);border-radius:12px;margin-top:10px;border:1px solid transparent}
+.tgt[open]{border-color:var(--hair2)}
+.tgt>summary{display:grid;grid-template-columns:14px 118px 74px minmax(0,1fr) auto auto auto;gap:12px;align-items:center;padding:12px 16px}
+.tgt>summary:hover{background:var(--strip-hi);border-radius:12px}
+.tgt .into{font-size:12px;color:var(--ink3)}
+.tgt .into b{font-size:13px;color:var(--ink)}
+.tgt .tbody{padding:2px 16px 16px;display:flex;flex-direction:column;gap:14px}
+/* compact track */
+.ctrack{display:inline-flex;align-items:center}
+.ctrack i{width:8px;height:8px;border-radius:50%;display:block}
+.ctrack b{width:6px;height:2px;display:block}
+.on{background:var(--fill-progress)}.grey{background:var(--ink3)}.green{background:var(--green-solid)}.mag{background:var(--magenta)}
+.off{background:var(--strip);box-shadow:inset 0 0 0 1.5px var(--hair2)}
+.ctrack b.off{background:var(--hair2);box-shadow:none}
+/* full track (today's DeliveryTrack) */
+.ftrack{list-style:none;margin:0;padding:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);isolation:isolate}
+.ftrack li{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center}
+.ftrack .bar{position:absolute;top:10px;right:50%;width:100%;height:2px}
+.ftrack .d{position:relative;z-index:1;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:var(--ink);font-size:11px}
+.ftrack .d.mag,.ftrack .d.red{color:#fff}
+.ftrack .d.off{box-shadow:inset 0 0 0 2px var(--hair2)}
+.ftrack .bar.off{background:var(--hair2);box-shadow:none}
+.ftrack .lb{font-size:12px;font-weight:500}
+.ftrack .lb.off{color:var(--ink3)}
+.ftrack .w{font-size:12px;color:var(--ink3)}
+.fhead{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.fhead .r{margin-left:auto;font-size:12px;color:var(--ink3)}
+.rv{display:flex;align-items:center;gap:12px;padding-top:14px;border-top:1px solid var(--hair);position:relative}
+.rvt{flex:1;min-width:0;display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink2);background:var(--strip-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rvt.amber{color:var(--amber-ink);background:#f7ecdf}
+.menu{position:absolute;right:0;top:52px;width:330px;background:var(--strip);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.14),0 0 0 1px var(--hair2);padding:6px;z-index:5}
+.menu .h{font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.02em;padding:8px 10px 4px}
+.menu .it{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;padding:7px 10px;border-radius:7px}
+.menu .it:hover,.menu .it.hl{background:var(--strip-hi)}
+.menu .it b{font-weight:600}
+.menu .it small{grid-column:1/3;color:var(--ink3);font-size:11.5px}
+.menu .sep{height:1px;background:var(--hair);margin:5px 4px}
+.older{border-top:1px dashed var(--hair2);padding-top:10px}
+.older>summary{font-size:12px;color:var(--ink3);display:flex;gap:7px;align-items:center}
+.older>summary::before{content:'+';display:inline-grid;place-items:center;width:15px;height:15px;border-radius:4px;background:var(--steel);font-weight:700;font-size:11px;color:var(--ink2)}
+.older[open]>summary::before{content:'\2013'}
+.orow{display:grid;grid-template-columns:62px 70px minmax(0,1fr) 40px;gap:10px;align-items:center;font-size:12px;padding:6px 0;color:var(--ink2)}
+.orow+.orow{border-top:1px solid var(--hair)}
+.callout{font-size:12px;color:var(--magenta);background:#f1edf8;border-radius:8px;padding:8px 10px;line-height:1.45}
+/* sessions */
+.srow{display:grid;grid-template-columns:110px 150px minmax(0,1fr) 46px auto;gap:12px;align-items:center;font-size:12px;padding:8px 0;color:var(--ink2)}
+.srow+.srow{border-top:1px solid var(--hair)}
+.srow .a{font-weight:600;color:var(--ink)}
+.warnb{color:var(--amber-ink)}
+.livecard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:12px 14px;border-radius:10px;background:#fdf3ea;border:1px solid #f3d9bf}
+.livecard small{grid-column:1/2;color:var(--ink3);font-size:12px}
+.empty{font-size:13px;color:var(--ink3);margin:0}
+.ctrack i.next{outline:1.5px dashed var(--cyan);outline-offset:2px}
+.ftrack .d.next{outline:2px dashed var(--cyan);outline-offset:3px}
+.ftrack .w.nx{color:var(--cyan);font-weight:700}
+.pill.nx{background:#e9f1e2;color:var(--cyan);box-shadow:inset 0 0 0 1px #b9d3a6}
+</style></helmet>
+<div class="app"><nav class="rail"><i>FILES</i><i>GH</i><i class="on">JIRA</i><i>RUNS</i><i>SET</i></nav><main class="main"><div class="topbar"><div class="crumbs">Jira <span>/</span> CAS board <span>/</span> <span class="link">TIMIFY-26078</span> Epic 1 &mdash; Contacts list and search <span>/</span> <b>TIMIFY-28667</b></div><div class="btns"><button class="btn ghost">&larr; Board</button><button class="btn">Open in Jira &#8599;</button><span class="split"><span>&#9654; Run</span><span>&#9662;</span></span></div></div><div class="row"><span class="tag">Task</span><span class="key">TIMIFY-28667</span><span class="tag">Stretch-Goal</span></div><h1>[BE] Calendar settings: store the Default search per user</h1><div class="strip">
+ <div class="f"><span>Status</span><span class="row"><span class="pill done"><span class="dot"></span>Done</span><button class="btn sm">Move to &#9662;</button></span></div>
+ <div class="f"><span>Assignee</span><span>Andreja Jevtic</span></div>
+ <div class="f"><span>Sprint</span><span>SP-04-Nov</span></div>
+ <div class="f"><span>Parent</span><span class="link">TIMIFY-26078</span></div>
+ <div class="f"><span>Delivery</span><span class="row"><span class="pill draft">develop &middot; draft</span><span class="pill draft">demo &middot; draft</span></span></div>
+ <div class="f"><span>Agent</span><span class="muted">idle &middot; 5 ended</span></div>
+</div><input type="radio" name="tb" id="tb1" class="tb"><input type="radio" name="tb" id="tb2" class="tb" checked><input type="radio" name="tb" id="tb3" class="tb"><input type="radio" name="tb" id="tb4" class="tb"><div class="tabs"><label for="tb1">Ticket</label><label for="tb2">Delivery <span class="c">2 targets</span></label><label for="tb3">Agent <span class="c">5</span></label><label for="tb4">Children &amp; comments</label></div>
+<div class="panes">
+ <div class="tabpane p1"><div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start"><section class="panel"><div class="desc">
+<p><b>Goal.</b> Each user chooses in Calendar settings which contact search the booking form and the fast booking widget open with. The calendar settings get one more element to store that choice.</p>
+<h3>Build</h3>
+<ul>
+<li><b>One new element in the user's calendar settings: Default search.</b> It's stored per user and per account, and saved and read together with the other settings of the panel.</li>
+<li><b>Five values:</b> name (<i>Name, surname or company</i>), email, mobile number, birthday, external ID.</li>
+<li><b>A user who never chose gets the name search.</b></li>
+<li><b>The value stays stored when the plan changes.</b> After a downgrade the frontend decides what applies, so the choice is there again after an upgrade.</li>
+<li><b>No QA of its own.</b> The value is tested through the FE story.</li>
+</ul>
+<p><b>Documentation:</b> <span class="link">Calendar Settings &sect;4.10.4</span></p>
+<h3>Acceptance criteria</h3>
+<ul class="check">
+<li>The frontend can save and read the Default search with the other calendar settings.</li>
+<li>Without a stored value, the name search is returned.</li>
+<li>Two users of the same account keep separate values, and so does one user on two accounts.</li>
+</ul>
+</div></section><section class="panel"><p class="lbl">Details</p><dl class="facts">
+<dt>Status</dt><dd><span class="pill done"><span class="dot"></span>Done</span><button class="btn sm">Move to &#9662;</button></dd>
+<dt>Assignee</dt><dd>Andreja Jevtic</dd>
+<dt>Reporter</dt><dd>Boyan</dd>
+<dt>Parent</dt><dd><span class="link">TIMIFY-26078</span></dd>
+<dt>Sprint</dt><dd>SP-04-Nov</dd>
+<dt>Priority</dt><dd class="muted">Not prioritized</dd>
+<dt>Created</dt><dd class="muted">13 Nov, 10:40</dd>
+<dt>Resolved</dt><dd class="muted">14 Nov, 13:37</dd>
+<dt>On boards</dt><dd>CAS board</dd>
+</dl></section></div></div>
+ <div class="tabpane p2"><div class="dhead"><span class="muted">Branch</span><span class="mono">timify-16803-combined-service-foundation-combo</span><span class="r">2 targets &middot; 6 MRs &middot; newest per target shown &middot; click a row for the full track</span></div>
+<details class="tgt" open><summary><span class="chev"></span><span class="into">into <b>develop</b></span><span class="mrl">!16033</span><span class="ell" style="color:var(--ink2)">timify-16803 | combined service foundation</span><span class="ctrack"><i class="on"></i><b class="grey"></b><i class="grey"></i><b class="off"></b><i class="off next"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i></span><span class="pill nx">next: review</span><span class="row" style="gap:10px;flex-wrap:nowrap"><span class="muted">not reviewed</span><span></span><span class="muted">2d</span></span></summary><div class="tbody">
+  <div class="fhead"><span class="mrl">!16033 &#8599;</span><span class="muted" style="font-size:12px">microservice &rarr; develop</span><span class="muted ell" style="font-size:12px;max-width:520px">&middot; timify-16803 | combined service foundation</span><span class="r">polled 1m ago</span></div>
+  <ol class="ftrack"><li><span class="d on">&#10003;</span><span class="lb">Pushed</span><span class="w">2d</span></li><li><span class="bar grey"></span><span class="d grey">&#10003;</span><span class="lb">MR open</span><span class="w">draft</span></li><li><span class="bar off"></span><span class="d off next"></span><span class="lb off">Review</span><span class="w nx">next &middot; review</span></li><li><span class="bar off"></span><span class="d off"></span><span class="lb off">Pipeline</span></li><li><span class="bar off"></span><span class="d off"></span><span class="lb off">Merged</span></li></ol>
+  <div class="rv"><span class="rvt">Review &middot; not reviewed yet</span><span class="btns"><span class="split"><span>&#9654; Request review</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span><div class="menu">
+ <div class="h">BUILT IN</div>
+ <div class="it hl"><b>Review bot &mdash; request review</b><span class="muted">default</span><small>Posts the review request on !16033; fix half once findings land</small></div>
+ <div class="sep"></div>
+ <div class="h">YOUR REVIEW SKILLS</div>
+ <div class="it"><b>Claude code review</b><span class="mono muted">/code-review high</span><small>Reviews source &rarr; develop, posts inline MR comments</small></div>
+ <div class="it"><b>Backlog reviewer</b><span class="mono muted">backlog-review</span><small>One reviewer per file group, report into the MR</small></div>
+ <div class="it"><b>MR review loop</b><span class="mono muted">mr-review-loop</span><small>Review bot + fix rounds until clean</small></div>
+ <div class="sep"></div>
+ <div class="it"><b style="font-weight:500">Manage review skills&hellip;</b><span class="muted">Settings</span></div>
+</div></div>
+  
+</div></details>
+<details class="tgt"><summary><span class="chev"></span><span class="into">into <b>demo</b></span><span class="mrl">!16057</span><span class="ell" style="color:var(--ink2)">timify-16803 | a step waiting for its turn holds no resource and stops a&hellip;</span><span class="ctrack"><i class="on"></i><b class="grey"></b><i class="grey"></i><b class="off"></b><i class="off next"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i></span><span class="pill nx">next: review</span><span class="row" style="gap:10px;flex-wrap:nowrap"><span class="muted">not reviewed</span><span class="muted">+4 earlier</span><span class="muted">today</span></span></summary><div class="tbody">
+  <div class="fhead"><span class="mrl">!16057 &#8599;</span><span class="muted" style="font-size:12px">microservice &rarr; demo</span><span class="muted ell" style="font-size:12px;max-width:520px">&middot; timify-16803 | a step waiting for its turn holds no resource and stops a&hellip;</span><span class="r">polled 1m ago</span></div>
+  <ol class="ftrack"><li><span class="d on">&#10003;</span><span class="lb">Pushed</span><span class="w">today</span></li><li><span class="bar grey"></span><span class="d grey">&#10003;</span><span class="lb">MR open</span><span class="w">draft</span></li><li><span class="bar off"></span><span class="d off next"></span><span class="lb off">Review</span><span class="w nx">next &middot; review</span></li><li><span class="bar off"></span><span class="d off"></span><span class="lb off">Pipeline</span></li><li><span class="bar off"></span><span class="d off"></span><span class="lb off">Merged</span></li></ol>
+  <div class="rv"><span class="rvt">Review &middot; not reviewed yet</span><span class="btns"><span class="split"><span>&#9654; Request review</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span></div>
+  <details class="older"><summary>4 earlier MRs into demo &middot; 3 merged, 1 closed</summary>
+ <div class="orow"><span class="mrl">!16042</span><span class="pill merged">merged</span><span class="ell">from <span class="mono">&hellip;-combo-to-demo</span> &middot; stamp mergeId on combination sub-tickets at fan-out</span><span class="muted">1d</span></div>
+ <div class="orow"><span class="mrl">!16036</span><span class="pill merged">merged</span><span class="ell">from <span class="mono">&hellip;-combo-to-demo</span> &middot; stamp mergeId on combination sub-tickets at fan-out</span><span class="muted">2d</span></div>
+ <div class="orow"><span class="mrl">!16034</span><span class="pill merged">merged</span><span class="ell">stamp mergeId on combination sub-tickets at fan-out</span><span class="muted">2d</span></div>
+ <div class="orow"><span class="mrl">!16035</span><span class="pill closed">closed</span><span class="ell">stamp mergeId on combination sub-tickets at fan-out</span><span class="muted">2d</span></div>
+</details>
+</div></details>
+<details class="fold" style="margin-top:18px"><summary>Worktrees<span class="r">1</span></summary><div class="fold body"><div class="srow" style="grid-template-columns:minmax(0,1fr) auto"><span class="mono ell">microservice/.worktrees/timify-28667-calendar-settings-store</span><span class="muted">clean</span></div></div></details></div>
+ <div class="tabpane p3"><section class="panel" style="max-width:900px"><div class="row" style="justify-content:space-between"><span class="empty">No live session on this ticket.</span><span class="split"><span>&#9654; Run</span><span>&#9662;</span></span></div><div class="hr"></div>
+<details class="fold"><summary>History<span class="r">5 ended &middot; last 13 Nov, 17:33</span></summary><div class="body"><div class="srow"><span class="muted">13 Nov 16:50</span><span class="a">Review the MR</span><span class="ell">Review &middot; fix half</span><span class="muted">43m</span><button class="btn sm">Reopen</button></div><div class="srow"><span class="muted">13 Nov 16:34</span><span class="a">Work it end to end</span><span class="ell">Run from board</span><span class="muted">13m</span><button class="btn sm">Reopen</button></div><div class="srow"><span class="muted">13 Nov 14:31</span><span class="a">Execute plan</span><span class="ell">desktop session, linked</span><span class="muted">13m</span><button class="btn sm">Reopen</button></div><div class="srow"><span class="muted">13 Nov 13:43</span><span class="a">/timify-jira:plan</span><span class="ell">Run from board</span><span class="muted">58m</span><button class="btn sm">Reopen</button></div><div class="srow"><span class="muted">13 Nov 13:34</span><span class="a">/timify-jira:plan</span><span class="ell"><span class="warnb">on feature/timify-26150-new-contacts</span></span><span class="muted">8m</span><button class="btn sm">Reopen</button></div></div></details></section></div>
+ <div class="tabpane p4"><section class="panel" style="max-width:900px"><details class="fold" open><summary>Children<span class="r">none</span></summary><div class="body"><p class="empty">No child tickets.</p></div></details><div class="hr"></div><details class="fold"><summary>Comments<span class="r">read in Jira</span></summary><div class="body"><p class="empty">Comments are read in Jira &#8599;</p></div></details></section></div>
+</div></main></div>
+</x-dc><script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>class Component extends DCLogic { renderVals(){ return {}; } }</script></body></html>

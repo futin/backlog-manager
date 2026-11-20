@@ -6,6 +6,7 @@ import { ticketDelivery } from '../../lib/delivery';
 import { openDesktopJira } from '../../lib/jira';
 import { deckCrumb, deckTally, type DeckEntry } from '../../lib/jira-deck';
 import { openButtons, stripTitle } from '../../lib/jira-sessions';
+import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
@@ -40,7 +41,18 @@ import { SessionOpen } from './SessionOpen';
  * POST for a dashboard session at rest) lives in one place. That POST's refusal draws under the buttons in the card's own alert line. A Starting card has none:
  * every button needs the session's id, and a reservation has no id yet.
  */
-export function JiraAgentDeck({ entries, now, onOpenIssue }: { entries: readonly DeckEntry[]; now: number; onOpenIssue: (issue: JiraIssue) => void }) {
+export function JiraAgentDeck({
+  entries,
+  now,
+  onOpenIssue,
+  onOpenPage
+}: {
+  entries: readonly DeckEntry[];
+  now: number;
+  onOpenIssue: (issue: JiraIssue) => void;
+  /** The title button's Cmd-, Ctrl- or middle-click: the ticket page (Jira detail tabs spec §2.3). */
+  onOpenPage?: (issue: JiraIssue) => void;
+}) {
   if (entries.length === 0) return null;
   const tally = deckTally(entries);
   return (
@@ -52,14 +64,24 @@ export function JiraAgentDeck({ entries, now, onOpenIssue }: { entries: readonly
       </div>
       <div className="jira-deck-cards">
         {entries.map((e) => (
-          <DeckCard key={e.id} entry={e} now={now} onOpenIssue={onOpenIssue} />
+          <DeckCard key={e.id} entry={e} now={now} onOpenIssue={onOpenIssue} onOpenPage={onOpenPage} />
         ))}
       </div>
     </section>
   );
 }
 
-function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; onOpenIssue: (issue: JiraIssue) => void }) {
+function DeckCard({
+  entry,
+  now,
+  onOpenIssue,
+  onOpenPage
+}: {
+  entry: DeckEntry;
+  now: number;
+  onOpenIssue: (issue: JiraIssue) => void;
+  onOpenPage?: (issue: JiraIssue) => void;
+}) {
   const { data } = useJiraContext();
   const phone = useNarrow();
   const handover = useAction();
@@ -88,7 +110,15 @@ function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; 
           <span className="jira-card-key">{issue.key}</span>
           {entry.parent !== null && <FoldMark issueKey={entry.parent.key} title={entry.parent.summary} />}
         </div>
-        <button type="button" className="jira-deck-title" onClick={() => onOpenIssue(issue)}>
+        <button
+          type="button"
+          className="jira-deck-title"
+          title={onOpenPage === undefined ? undefined : fullPageTitle(browserPlatform())}
+          onClick={(e) => (onOpenPage !== undefined && wantsPage(e) ? onOpenPage(issue) : onOpenIssue(issue))}
+          onAuxClick={(e) => {
+            if (onOpenPage !== undefined && e.button === 1) onOpenPage(issue);
+          }}
+        >
           {issue.summary}
         </button>
         {crumb !== '' && <span className="jira-card-crumb">{crumb}</span>}

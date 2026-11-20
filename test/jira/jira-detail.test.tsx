@@ -8,15 +8,18 @@ import '@testing-library/jest-dom';
 import { JiraDetail } from '../../client/src/components/jira/JiraDetail';
 import JiraView from '../../client/src/components/jira/JiraView';
 import { JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext';
+import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
+import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { formatCreated } from '../../client/src/lib/item-age';
 import { pollAge } from '../../client/src/lib/tracker';
 import type { JiraChildrenIndex } from '../../client/src/lib/jira';
 import { daysAgoStamp } from '../helpers/dates';
 import { NoGitlab } from '../helpers/no-gitlab';
+import { resolveFixture, ticketBodyCases, type BodyFixture, type ResolvedFixture } from '../helpers/ticket-body-cases';
 import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraLink, type JiraSessionsPayload, type JiraAction, type JiraBoardStatus, type JiraIssue, type JiraIssueDetail, type JiraStatusPayload } from '../../shared/types';
 
 /**
@@ -139,6 +142,8 @@ function mount(
     back?: JiraIssue | null;
     /** `GET /api/jira/sessions`' answer, handed to the context the section's provider would fill; absent is "not landed yet" (`null`). */
     sessions?: JiraSessionsPayload | null;
+    /** `Open full page ↗`'s handler (Jira detail tabs Task 8 wires it); absent, the head draws no such chip. */
+    onOpenPage?: (key: string) => void;
   } = {}
 ) {
   reloadSessions = jest.fn(() => Promise.resolve());
@@ -160,6 +165,7 @@ function mount(
             onBack={onBack}
             onWrote={onWrote}
             onRun={onRun}
+            onOpenPage={opts.onOpenPage}
             onClose={opts.onClose ?? (() => {})}
           />
         </JiraSessionsContext.Provider>
@@ -177,7 +183,7 @@ const posts = (): { url: string; init?: RequestInit }[] => calls.filter((c) => c
 const reads = (key: string, from: readonly string[] = urls): number => from.filter((u) => u === `/api/jira/issue/${key}`).length;
 const assignChip = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Assign to me' });
 /** The Status chip — `Move to` is its accessible name and the popover's too, so the chip is looked up inside the Modal's own dialog, by role button. */
-const moveSelect = (): HTMLElement => within(screen.getByRole('dialog', { name: /PAY-131/ })).getByRole('button', { name: 'Move to' });
+const moveSelect = (): HTMLElement => within(modal()).getByRole('button', { name: 'Move to' });
 /** The open Move-to popover's rows, in document order. */
 const moveRows = (): HTMLElement[] => within(screen.getByRole('dialog', { name: 'Move to' })).getAllByRole('button');
 const rowNames = (): string[] => moveRows().map((r) => r.textContent ?? '');
@@ -208,7 +214,45 @@ const kid = (key: string, summary: string, category: JiraIssue['status']['catego
 const treeRows = (): string[] =>
   Array.from(document.querySelectorAll<HTMLElement>('.jira-tree > li')).map((li) => `${li.querySelector('.jira-tree-key')?.textContent}/${li.dataset.depth}`);
 
-/** The facts column's value for one label, or null when that fact is not drawn. */
+/** The Detail dialog itself — the `ui/Modal` shell, whatever its name — as opposed to a popover's dialog inside it. */
+const modal = (): HTMLElement => document.querySelector('.ui-modal[role="dialog"]') as HTMLElement;
+/** Selects one of the body's tabs (Jira detail tabs §1.3), as the reader's click would: everything below the strip is a tab's since Task 7. */
+/**
+ * Selects a tab, flushed inside `act`: the pane it mounts may start a read of its own (the Agent pane asks the agents status for Stop), and a case that
+ * asserts nothing about that answer would otherwise end with it landing outside `act` — a stray warning.
+ */
+const openTab = async (name: RegExp): Promise<void> => {
+  await act(async () => {
+    fireEvent.click(within(modal()).getByRole('tab', { name }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+/** The Children & comments tab, selected, once its tree has drawn — the detail read must land with children first. */
+async function childrenTree(): Promise<HTMLElement> {
+  await openTab(/^Children/);
+  return waitFor(() => {
+    const tree = document.querySelector<HTMLElement>('.jira-tree');
+    if (tree === null) throw new Error('no Children tree yet');
+    return tree;
+  });
+}
+/**
+ * The detail read has landed: the strip's Status chip carries a title only then (`no transitions offered` for the default detail, which offers none). The
+ * sync point for a case that opens on a tab other than Ticket, where the description it used to wait for is not drawn.
+ */
+const landed = (): Promise<void> =>
+  waitFor(() => expect(within(modal()).getByRole('button', { name: 'Move to' })).toHaveAttribute('title', 'no transitions offered'));
+/** Opens the Agent tab's `History` fold (closed by default, spec §5.2). */
+const openHistory = (): void => {
+  fireEvent.click(within(modal()).getByText('History', { selector: '.jira-fold-label' }));
+};
+/** The Children fold's direct count — the pill the old section head carried, on the fold's summary since the tabs. */
+const childCount = (): string | null =>
+  Array.from(document.querySelectorAll('.jira-fold-label'))
+    .find((l) => l.textContent === 'Children')
+    ?.parentElement?.querySelector('.jira-tab-count')?.textContent ?? null;
+
+/** A fact's value for one label — a strip cell or a Details fact, both a `<dt>`/`<dd>` pair — or null when that fact is not drawn. */
 function fact(label: string): HTMLElement | null {
   const dialog = screen.getByRole('dialog');
   const dt = within(dialog)
@@ -218,6 +262,8 @@ function fact(label: string): HTMLElement | null {
 }
 
 beforeEach(() => {
+  // The remembered tab is a module store shared by every mount: each case opens on Ticket, as a first open would.
+  setJiraDetailTab('ticket');
   urls = [];
   calls = [];
   answer = () => json(detail());
@@ -245,7 +291,7 @@ describe('JiraDetail — the read', () => {
     mount();
     await screen.findByText(/not/);
 
-    expect(screen.getByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Refund partial captures' })).toBeInTheDocument();
     // The type, parent and sprint ride the head's crumbs, as the mock draws them (the flex gap is the space jsdom does not see); the parent and sprint
     // are facts in the ticket pane too.
     expect(document.querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-131· Story· in PAY-120 Refund flows· Sprint 42');
@@ -267,6 +313,78 @@ describe('JiraDetail — the read', () => {
     expect(link).toHaveAttribute('href', CARD.url);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link.getAttribute('rel')).toContain('noreferrer');
+  });
+});
+
+/*
+  The frame (Jira detail tabs spec §7, mock `B-Modal.html`): `Modal`'s single shape — a head band and one body, no facts slot. The head holds the crumbs,
+  `Open full page ↗`, `Open in Jira ↗`, `Run ▾` and the shell's close; the body is `JiraTicketBody`, whose tablist is the proof it is the one drawn.
+*/
+const dialog = (): HTMLElement => screen.getByRole('dialog', { name: 'Refund partial captures' });
+const head = (): HTMLElement => dialog().querySelector('.ui-modal-head') as HTMLElement;
+
+describe('JiraDetail — the frame (Jira detail tabs §7)', () => {
+  it('holds the crumbs, Open full page, Open in Jira, Run ▾ and the close in the head, and the tabbed body under it', async () => {
+    mount({ onOpenPage: jest.fn() });
+    await screen.findByText(/not/);
+    expect(within(head()).getByText('PAY-131')).toBeInTheDocument();
+    expect(head().querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-131· Story· in PAY-120 Refund flows· Sprint 42');
+    expect(within(head()).getByRole('button', { name: 'Open full page ↗' })).toBeInTheDocument();
+    expect(within(head()).getByRole('link', { name: 'Open in Jira ↗' })).toHaveAttribute('href', CARD.url);
+    expect(within(head()).getByRole('button', { name: 'Run PAY-131' })).toBeInTheDocument();
+    expect(within(dialog()).getByRole('button', { name: 'close' })).toBeInTheDocument();
+    const body = dialog().querySelector('.ui-modal-body') as HTMLElement;
+    expect(within(body).getByRole('tablist')).toBeInTheDocument();
+    expect(within(body).getByRole('tabpanel')).toBeInTheDocument();
+  });
+
+  it('draws no facts column: the single shape, not the split', async () => {
+    mount();
+    await screen.findByText(/not/);
+    expect(dialog()).toHaveClass('ui-modal-single');
+    expect(dialog()).not.toHaveClass('ui-modal-split');
+    expect(dialog().querySelector('.ui-modal-facts')).toBeNull();
+  });
+
+  it('is named by the body’s one title: aria-labelledby points at the single h2', async () => {
+    mount();
+    await screen.findByText(/not/);
+    const titles = within(dialog()).getAllByRole('heading', { level: 2 });
+    expect(titles).toHaveLength(1);
+    expect(dialog()).toHaveAttribute('aria-labelledby', titles[0].id);
+    expect(titles[0]).toHaveTextContent('Refund partial captures');
+    expect(dialog()).not.toHaveAttribute('aria-label');
+  });
+
+  it('`Open full page ↗` hands the key up, and is not drawn without `onOpenPage`', async () => {
+    const onOpenPage = jest.fn();
+    const view = mount({ onOpenPage });
+    await screen.findByText(/not/);
+    fireEvent.click(within(head()).getByRole('button', { name: 'Open full page ↗' }));
+    expect(onOpenPage).toHaveBeenCalledWith('PAY-131');
+    view.unmount();
+    mount();
+    await screen.findByText(/not/);
+    expect(within(head()).queryByRole('button', { name: 'Open full page ↗' })).toBeNull();
+  });
+
+  it('Escape closes the whole dialog, on any tab', async () => {
+    const onClose = jest.fn();
+    mount({ onClose });
+    await screen.findByText(/not/);
+    fireEvent.click(screen.getByRole('tab', { name: /^Agent/ }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('the walk’s `← <key>` still pops', async () => {
+    const child = kid('PAY-140', 'Partial refund API', 'new');
+    answer = () => json(detail({ ...child }));
+    mount({ issue: child, back: CARD });
+    await screen.findByText(/not/);
+    const body = screen.getByRole('dialog', { name: 'Partial refund API' }).querySelector('.ui-modal-body') as HTMLElement;
+    fireEvent.click(within(body).getByRole('button', { name: 'Back to PAY-131' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -336,9 +454,9 @@ describe('JiraDetail — the body', () => {
       );
     mount();
 
-    expect(await screen.findByRole('heading', { name: 'Children' })).toBeInTheDocument();
+    expect(await childrenTree()).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Subtasks' })).toBeNull();
-    expect((document.querySelector('.jira-tree-head .ui-pill') as HTMLElement).textContent).toBe('2');
+    expect(childCount()).toBe('2');
     const rows = within(document.querySelector('.jira-tree') as HTMLElement).getAllByRole('button');
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveAccessibleName(expect.stringContaining('PAY-132'));
@@ -363,11 +481,11 @@ describe('JiraDetail — the body', () => {
     ]);
     mount({ childrenOf });
 
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     expect(treeRows()).toEqual(['PAY-160/0', 'PAY-162/1', 'PAY-161/1', 'PAY-170/0']);
     const lis = Array.from(document.querySelectorAll<HTMLElement>('.jira-tree > li'));
     expect(lis.map((li) => li.style.paddingLeft)).toEqual(['0px', '22px', '22px', '0px']);
-    expect((document.querySelector('.jira-tree-head .ui-pill') as HTMLElement).textContent).toBe('2');
+    expect(childCount()).toBe('2');
     expect(screen.getByText('4 in all')).toBeInTheDocument();
     expect(screen.getByRole('dialog').querySelector('.ui-spread-caption')).toHaveTextContent('2 done · 1 in progress · 1 to do');
   });
@@ -377,7 +495,7 @@ describe('JiraDetail — the body', () => {
     answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate'), kid('PAY-175', 'New child', 'new')] }));
     mount({ childrenOf: new Map([['PAY-160', [kid('PAY-161', 'Ledger schema', 'done', 'PAY-160')]]]) });
 
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     expect(treeRows()).toEqual(['PAY-160/0', 'PAY-161/1', 'PAY-175/0']);
     expect(screen.getByText('3 in all')).toBeInTheDocument();
     expect(screen.getByRole('dialog').querySelector('.ui-spread-caption')).toHaveTextContent('1 done · 1 in progress · 1 to do');
@@ -391,7 +509,7 @@ describe('JiraDetail — the body', () => {
       childrenOf: new Map([['PAY-160', [kid('PAY-161', 'Ledger schema', 'done', 'PAY-160'), kid('PAY-162', 'Ledger rounding fix', 'new', 'PAY-160')]]])
     });
 
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     expect(treeRows()).toEqual(['PAY-160/0', 'PAY-162/1', 'PAY-161/0']);
     expect(screen.getByText('3 in all')).toBeInTheDocument();
   });
@@ -402,7 +520,8 @@ describe('JiraDetail — the body', () => {
     const childrenOf: JiraChildrenIndex = new Map([['PAY-160', [deep]]]);
     mount({ childrenOf });
 
-    await userEvent.click(await screen.findByRole('button', { name: /PAY-162 Ledger rounding fix/ }));
+    await childrenTree();
+    await userEvent.click(screen.getByRole('button', { name: /PAY-162 Ledger rounding fix/ }));
     expect(onOpenIssue).toHaveBeenCalledTimes(1);
     expect(onOpenIssue.mock.calls[0][0]).toBe(deep);
     expect(onOpenIssue.mock.calls[0][1]).toBe(childrenOf);
@@ -429,6 +548,9 @@ describe('JiraDetail — the body', () => {
   it('says comments stay in Jira, with the link', async () => {
     mount();
     await screen.findByText('not');
+    // The Children & comments tab's closed `Comments` fold (spec §6).
+    await openTab(/^Children/);
+    fireEvent.click(within(modal()).getByText('Comments', { selector: '.jira-fold-label' }));
     const line = screen.getByText(/Comments stay in Jira — v1 neither reads nor writes them/);
     expect(within(line).getByRole('link')).toHaveAttribute('href', CARD.url);
   });
@@ -593,11 +715,11 @@ describe('JiraDetail — the session fact (Jira phase 5)', () => {
 });
 
 describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
-  it('draws the chip in the controls row, beside Assign and Move, and a pick hands the issue and the action up', async () => {
+  it('draws the chip in the frame’s head, and a pick hands the issue and the action up', async () => {
     mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] } });
     await screen.findByText('not');
-    const dialog = screen.getByRole('dialog');
-    expect(dialog.querySelector('.jira-detail-agent-band')).toContainElement(modalRun());
+    // The frame's head since Jira detail tabs (spec §7.1), beside `Open in Jira ↗`.
+    expect(modal().querySelector('.ui-modal-head')).toContainElement(modalRun());
 
     await userEvent.click(modalMore());
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.context) }));
@@ -617,9 +739,9 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-131' }), 'execute' satisfies JiraAction);
   });
 
-  it('opens its panel inside the facts column: the row-wide width, every label as a title, and scrolled into view', async () => {
+  it('opens its 300 px panel, every label as a title, and scrolled into view', async () => {
     // jsdom has no layout and no `scrollIntoView`, so the call is stubbed onto the prototype and the width is read off the custom property `Popover` sets.
-    // The CSS half — the controls row as the positioning parent — is layout, so it was measured on the running board rather than pinned here.
+    // The CSS half — the head's actions row (`.jira-detail-acts`) as the positioning parent — is layout, left to the running board, not pinned here.
     const scrolled = jest.fn();
     Element.prototype.scrollIntoView = scrolled;
     try {
@@ -667,9 +789,13 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
 });
 
 describe('JiraDetail — Stop session (Jira phase 5)', () => {
+  // The session cards, the band and History are the Agent tab's since Jira detail tabs (spec §5); the head's `Run ▾` and the strip are on every tab.
+  beforeEach(() => setJiraDetailTab('agent'));
+
+
   it('is drawn for a session whose row says it can be stopped, with agents on, and asks before it posts', async () => {
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
-    await screen.findByText('not');
+    await landed();
     await waitFor(() => expect(moreChip()).not.toBeNull());
 
     await pressRow('Stop session');
@@ -684,7 +810,7 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
 
   it('posts `{ key, sessionId }` to /api/agents/jira-stop on accept, then reloads the status and nudges the board', async () => {
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
-    await screen.findByText('not');
+    await landed();
     await waitFor(() => expect(moreChip()).not.toBeNull());
 
     await pressRow('Stop session');
@@ -702,7 +828,7 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
   it('says the server\'s sentence and reloads nothing when the stop is refused', async () => {
     post = () => json({ error: 'no live session on PAY-131' }, { status: 409 });
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
-    await screen.findByText('not');
+    await landed();
     await waitFor(() => expect(moreChip()).not.toBeNull());
 
     await pressRow('Stop session');
@@ -715,7 +841,7 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
   it('is not drawn with agents off, for a starting entry, or with no session — and a key with none never asks the agents status', async () => {
     agentsStatus = { ...AGENTS_ON, enabled: false };
     const off = mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
-    await screen.findByText('not');
+    await landed();
     await waitFor(() => expect(agentsReads()).toBeGreaterThan(0));
     // The card's menu still holds its secondary Open (a disabled Desktop), so the chevron stays; Stop is the row that is not there.
     expect(await menuHas('Stop session')).toBe(false);
@@ -724,19 +850,22 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
     agentsStatus = AGENTS_ON;
     calls = [];
     const starting = mount({ status: { live: SESSION({ starting: true }) }, sessions: payload() });
-    await screen.findByText('not');
+    await landed();
     expect(moreChip()).toBeNull();
     expect(agentsReads()).toBe(0);
     starting.unmount();
 
     mount();
-    await screen.findByText('not');
+    await landed();
     expect(moreChip()).toBeNull();
     expect(agentsReads()).toBe(0);
   });
 });
 
 describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
+  // The session cards, the band and History are the Agent tab's since Jira detail tabs (spec §5); the head's `Run ▾` and the strip are on every tab.
+  beforeEach(() => setJiraDetailTab('agent'));
+
   it('draws one card per live session, newest first, and counts live and ended in its heading', async () => {
     mount({
       sessions: payload(
@@ -745,9 +874,11 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
         link({ sessionId: 'gone-one', startedAt: hoursAgo(9), endedAt: hoursAgo(8), endReason: 'idle', state: 'ended' })
       )
     });
-    await screen.findByText('not');
+    await landed();
     expect(cards().map((c) => c.getAttribute('aria-label'))).toEqual(['Session new-one', 'Session old-one']);
-    expect(within(screen.getByRole('dialog')).getByText('2 live · 1 ended')).toBeInTheDocument();
+    // The band's old `2 live · 1 ended` label is the tab's count since the tabs (spec §1.3); the ended one is History's.
+    expect(within(modal()).getByRole('tab', { name: 'Agent 2 live' })).toBeInTheDocument();
+    expect(within(modal()).getByText('1 ended', { exact: false, selector: '.jira-fold-meta' })).toBeInTheDocument();
     // The strip says the state and how long it has held, in the one age the page uses everywhere.
     expect(within(cards()[1]).getByText('Working')).toBeInTheDocument();
     expect(within(cards()[1]).getByText(pollAge(hoursAgo(5), Date.now()) as string)).toBeInTheDocument();
@@ -759,7 +890,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
         link({ sessionId: '0123456789abcdef', how: 'manual', action: null, name: 'my own session', state: 'answer', row: row({ remoteQuestion: true }) })
       )
     });
-    await screen.findByText('not');
+    await landed();
     const [card] = cards();
     expect(within(card).getByText('linked by hand')).toBeInTheDocument();
     expect(within(card).getByText('0123…cdef')).toBeInTheDocument();
@@ -773,7 +904,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
         link({ sessionId: 'branch-one', how: 'branch', action: null, branch: 'PAY-131-x', startedAt: hoursAgo(2), stateSince: hoursAgo(2) })
       )
     });
-    await screen.findByText('not');
+    await landed();
     const [runCard, branchCard] = cards();
     // A run link offers neither row, so its card has no menu at all; a branch link's menu holds Unlink.
     expect(moreChip(runCard)).toBeNull();
@@ -795,7 +926,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
         link({ sessionId: 'no-row', startedAt: hoursAgo(3), stateSince: hoursAgo(3), row: null })
       )
     });
-    await screen.findByText('not');
+    await landed();
     await waitFor(() => expect(moreChip(cards()[0])).not.toBeNull());
     expect(await menuHas('Stop session', cards()[1])).toBe(false);
     expect(await menuHas('Stop session', cards()[2])).toBe(false);
@@ -817,7 +948,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
         link({ sessionId: 'no-row', startedAt: hoursAgo(3), stateSince: hoursAgo(3), row: null })
       )
     });
-    await screen.findByText('not');
+    await landed();
     await waitFor(() => expect(cards()).toHaveLength(3));
     // The first card's chevron is there once the agents answer has landed (its Stop row needs agents on), so every read the cards would make has been made.
     await waitFor(() => expect(moreChip(cards()[0])).not.toBeNull());
@@ -826,27 +957,29 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
 
   it('draws a `Starting…` card from the shell\'s reservation, which the sessions payload never carries', async () => {
     mount({ status: { live: SESSION({ starting: true }) }, sessions: payload() });
-    await screen.findByText('not');
+    await landed();
     const [card] = cards();
     expect(card).toHaveAttribute('aria-label', 'Session starting');
     expect(within(card).getByText('Starting…')).toBeInTheDocument();
     expect(within(card).queryByRole('button')).toBeNull();
+    await openTab(/^Ticket/);
     expect(fact('Session')).toHaveTextContent(/^starting$/);
   });
 
   it('says so when no session is running, and reads from the shell\'s live entry until the sessions payload lands', async () => {
     const none = mount({ sessions: payload() });
-    await screen.findByText('not');
+    await landed();
     expect(within(screen.getByRole('dialog')).queryByText('no session is running on this ticket')).toBeNull();
     expect(within(screen.getByRole('dialog')).getByText('No session on this ticket')).toBeInTheDocument();
     none.unmount();
 
     // `sessions: null` is "not landed yet": no card can be drawn, but the fact and the Run gate still read the shell's entry (the old behaviour).
     mount({ status: { live: SESSION() } });
-    await screen.findByText('not');
+    await landed();
     expect(cards()).toHaveLength(0);
-    expect(fact('Session')).toHaveTextContent('jira PAY-131 · pay · 3h');
     expect(modalRun()).toBeDisabled();
+    await openTab(/^Ticket/);
+    expect(fact('Session')).toHaveTextContent('jira PAY-131 · pay · 3h');
   });
 
   it('draws the history newest first, `<how> · ended <age> ago` with the age pollAge gives, and a Reopen on each', async () => {
@@ -858,7 +991,8 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
         link({ sessionId: 'newer-run', startedAt: hoursAgo(3), endedAt: run, endReason: 'stopped', state: 'ended' })
       )
     });
-    await screen.findByText('not');
+    await landed();
+    openHistory();
     const items = Array.from(document.querySelectorAll<HTMLElement>('.jira-hist'));
     expect(items).toHaveLength(2);
     expect(within(items[0]).getByText(`run · ended ${pollAge(run, Date.now())} ago`)).toBeInTheDocument();
@@ -872,43 +1006,46 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
 
   it('keeps Run ▾ enabled with only a branch link live, and disables it for a live run link or a starting reservation', async () => {
     const branch = mount({ sessions: payload(link({ how: 'branch', action: null, branch: 'PAY-131-x' })) });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeEnabled();
     branch.unmount();
 
     const manual = mount({ sessions: payload(link({ how: 'manual', action: null })) });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeEnabled();
     manual.unmount();
 
     const run = mount({ sessions: payload(link()) });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeDisabled();
     expect(modalRun()).toHaveAttribute('title', 'a Run on PAY-131 is not seen by the dashboard');
     run.unmount();
 
     // An ENDED run link does not hold the gate, and a reservation does even though no link exists for it yet.
     const ended = mount({ sessions: payload(link({ endedAt: hoursAgo(1), endReason: 'idle', state: 'ended' })) });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeEnabled();
     ended.unmount();
 
     mount({ status: { live: SESSION({ starting: true }) }, sessions: payload() });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeDisabled();
   });
 
-  it('draws Run ▾ in the Agent band, which precedes the history', async () => {
+  it('draws Run ▾ in the frame’s head, and the Agent band precedes the history', async () => {
     mount({ sessions: payload(link({ how: 'branch', action: null }), link({ sessionId: 'e1', endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' })) });
-    await screen.findByText('not');
+    await landed();
+    openHistory();
     const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
-    expect(band).toContainElement(modalRun());
+    // `Run ▾` left the band for the frame's head (spec §7.1), so it is on every tab.
+    expect(modal().querySelector('.ui-modal-head')).toContainElement(modalRun());
+    expect(band).not.toContainElement(modalRun());
     expect(band.compareDocumentPosition(document.querySelector('.jira-hist-list') as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('draws the empty band with the default action and the last run, and a live card inside the band', async () => {
     const none = mount({ sessions: payload() });
-    await screen.findByText('not');
+    await landed();
     const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
     expect(within(band).getByText('No session on this ticket')).toBeInTheDocument();
     expect(band).toHaveTextContent('default: Work it end to end');
@@ -920,7 +1057,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
       status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] },
       sessions: payload(link({ sessionId: 'e1', startedAt: hoursAgo(2), endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' }))
     });
-    await screen.findByText('not');
+    await landed();
     const again = document.querySelector('.jira-detail-agent-band') as HTMLElement;
     expect(again).toHaveTextContent('default: Groom ticket');
     expect(again.querySelector('.jira-detail-agent-sub')?.textContent).toMatch(/· last run 1h$/);
@@ -928,7 +1065,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     skilled.unmount();
 
     mount({ sessions: payload(link()) });
-    await screen.findByText('not');
+    await landed();
     const live = document.querySelector('.jira-detail-agent-band') as HTMLElement;
     expect(live.querySelector('.jira-sess')).not.toBeNull();
     expect(within(live).queryByText('No session on this ticket')).toBeNull();
@@ -939,7 +1076,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
   // the band line says which of the two the ticket is in; with no live Run on the key there is nothing to wait for, so no line.
   it('opens Run ▾ beside a quiet Run and says so, and draws no band line with only a branch link live', async () => {
     const quiet = mount({ sessions: payload(link({ quietSince: hoursAgo(1), state: 'quiet', row: row({ status: 'idle' }) })) });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeEnabled();
     expect(modalRun()).not.toHaveAttribute('title');
     const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
@@ -947,22 +1084,26 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     quiet.unmount();
 
     mount({ sessions: payload(link({ how: 'branch', action: null, branch: 'PAY-131-x', row: row({ status: 'working' }), state: 'working' })) });
-    await screen.findByText('not');
+    await landed();
     expect(modalRun()).toBeEnabled();
     expect(document.querySelector('.jira-detail-next')).toBeNull();
   });
 
-  it('draws the priority as a toned pill, each label as a chip, and every fact label behind an aria-hidden glyph', async () => {
+  it('draws the priority as a toned pill, each label as a chip, and every Details fact label behind an aria-hidden glyph', async () => {
     mount();
-    await screen.findByText('not');
+    await landed();
+    await openTab(/^Ticket/);
     expect(fact('Priority')?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'high');
     const labels = document.querySelectorAll('.jira-detail-label');
     expect(Array.from(labels).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
     const dts = Array.from(document.querySelectorAll('.jira-detail-facts dt'));
     expect(dts.map((d) => Array.from(d.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join(''))).toEqual(
-      expect.arrayContaining(['Status', 'Assignee', 'Reporter', 'Priority', 'Sprint', 'Parent', 'Labels', 'Created · updated', 'Repository', 'Session'])
+      expect.arrayContaining(['Reporter', 'Priority', 'Labels', 'Created · updated', 'Repository', 'Session'])
     );
     for (const d of dts) expect(d.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    // Status, Assignee, Sprint and Parent are the strip's cells since the tabs (spec §1.2), label over value, with no glyph.
+    const cells = Array.from(screen.getByRole('group', { name: 'Summary' }).querySelectorAll('dt')).map((d) => d.textContent);
+    expect(cells).toEqual(expect.arrayContaining(['Status', 'Assignee', 'Sprint', 'Parent']));
   });
 });
 
@@ -974,7 +1115,7 @@ describe('JiraDetail — a session on a child (the epic that reads `Working` on 
   it('wears the session\u2019s state on the Children row it runs on, at any depth, and on no other row', async () => {
     answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate'), kid('PAY-170', 'Payout story', 'done')] }));
     mount({ childrenOf: childrenOf(), sessions: payload(link({ key: 'PAY-162', sessionId: 'deep', state: 'plan' })) });
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     expect(within(rowOf('PAY-162')).getByText('Waiting for plan approval')).toBeInTheDocument();
     expect(rowOf('PAY-162').querySelector('.jira-tree-session .ui-stripe-dot')).toHaveAttribute('data-tone', 'amber');
     for (const key of ['PAY-160', 'PAY-170']) expect(rowOf(key).querySelector('.jira-tree-session')).toBeNull();
@@ -984,6 +1125,8 @@ describe('JiraDetail — a session on a child (the epic that reads `Working` on 
     answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate')] }));
     const index = childrenOf();
     mount({ childrenOf: index, sessions: payload(link({ key: 'PAY-162', sessionId: 'deep' }), link({ key: 'PAY-160', sessionId: 'mid', startedAt: hoursAgo(6) })) });
+    await screen.findByText('not');
+    await openTab(/^Agent/);
     const line = await screen.findByRole('button', { name: /^Working on PAY-162 →/ });
     expect(within(screen.getByRole('dialog')).getByText('No session on this ticket')).toBeInTheDocument();
     expect(line).toHaveTextContent('+1 more');
@@ -996,12 +1139,12 @@ describe('JiraDetail — a session on a child (the epic that reads `Working` on 
   it('draws no child line while this ticket has a session of its own, nor when no child has one', async () => {
     answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate')] }));
     const own = mount({ sessions: payload(link(), link({ key: 'PAY-160', sessionId: 'kid' })) });
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     expect(screen.queryByRole('button', { name: /on PAY-160 →/ })).toBeNull();
     own.unmount();
 
     mount({ sessions: payload(link({ key: 'PAY-160', sessionId: 'old', state: 'ended', endedAt: hoursAgo(1) })) });
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     expect(screen.queryByRole('button', { name: / on PAY-160 →/ })).toBeNull();
     expect(document.querySelector('.jira-tree-session')).toBeNull();
   });
@@ -1121,7 +1264,7 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
     expect(document.activeElement).toBe(moveRows()[0]);
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
-    expect(screen.getByRole('dialog', { name: /PAY-131/ })).toBeInTheDocument();
+    expect(modal()).toBeInTheDocument();
     expect(document.activeElement).toBe(moveSelect());
   });
 
@@ -1272,7 +1415,7 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
-    expect(await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Refund partial captures' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -1303,14 +1446,14 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
-    const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+    const modal = await screen.findByRole('dialog', { name: 'Refund partial captures' });
     await userEvent.click(within(modal).getByRole('button', { name: 'Run options for PAY-131' }));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.execute) }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
 
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'run PAY-131' })).toBeNull());
-    expect(screen.getByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Refund partial captures' })).toBeInTheDocument();
 
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -1380,12 +1523,12 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     const requested = mountView({ 'PAY-120': { children: [G_160, G_170] } });
 
     await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
-    expect(await screen.findByRole('dialog', { name: 'PAY-120 Payments epic' })).toBeInTheDocument();
-    await screen.findByRole('heading', { name: 'Children' });
+    expect(await screen.findByRole('dialog', { name: 'Payments epic' })).toBeInTheDocument();
+    await childrenTree();
     expect(treeRows()).toEqual(['PAY-160/0', 'PAY-162/1', 'PAY-161/1', 'PAY-170/0']);
 
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-162/ }));
-    expect(await screen.findByRole('dialog', { name: 'PAY-162 Ledger rounding fix' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Ledger rounding fix' })).toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     await waitFor(() => expect(requested.filter((u) => u.startsWith('/api/jira/issue/PAY-162'))).toHaveLength(1));
 
@@ -1399,10 +1542,10 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     mountView({ 'PAY-120': { children: [G_160, PAY_175] }, 'PAY-175': { ...PAY_175, children: [] } });
 
     await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-175/ }));
 
-    expect(await screen.findByRole('dialog', { name: 'PAY-175 New child' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'New child' })).toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Children' })).toBeNull());
     await userEvent.keyboard('{Escape}');
@@ -1415,12 +1558,12 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     const out = held();
     const requested = mountView({ 'PAY-120': { children: [G_160, G_170], assignee: null } }, () => out.promise);
     await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     await waitFor(() => expect(assignChip()).toBeEnabled());
 
     await userEvent.click(assignChip());
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-160/ }));
-    await screen.findByRole('dialog', { name: 'PAY-160 Ledger story' });
+    await screen.findByRole('dialog', { name: 'Ledger story' });
     const before = reads('PAY-120', requested);
 
     await act(async () => out.release(json({ error: 'Jira refused: User cannot be assigned' }, { status: 409 })));
@@ -1432,12 +1575,12 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     const out = held();
     const requested = mountView({ 'PAY-120': { children: [G_160, G_170], assignee: null } }, () => out.promise);
     await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
-    await screen.findByRole('heading', { name: 'Children' });
+    await childrenTree();
     await waitFor(() => expect(assignChip()).toBeEnabled());
 
     await userEvent.click(assignChip());
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-160/ }));
-    await screen.findByRole('dialog', { name: 'PAY-160 Ledger story' });
+    await screen.findByRole('dialog', { name: 'Ledger story' });
     const before = reads('PAY-120', requested);
     const lists = (): number => requested.filter((u) => u.includes('/issues')).length;
     const listsBefore = lists();
@@ -1468,13 +1611,13 @@ describe('JiraView — the open-issue slot draws the modal', () => {
       { wrapper: NoGitlab }
     );
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
-    await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+    await screen.findByRole('dialog', { name: 'Refund partial captures' });
 
     act(() => setJiraPage('setup'));
-    expect(screen.queryByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Refund partial captures' })).toBeNull();
     act(() => setJiraPage('board'));
     await screen.findByRole('button', { name: /Refund partial captures/ });
-    expect(screen.queryByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Refund partial captures' })).toBeNull();
   });
 });
 
@@ -1483,9 +1626,15 @@ describe('JiraView — the open-issue slot draws the modal', () => {
 describe('JiraDetail — Worktrees (Jira repo/branch)', () => {
   const PAY_TREE = { repo: '/Users/ada/pay', path: '/Users/ada/pay/.worktrees/PAY-131-refund', branch: 'PAY-131-refund', main: false };
   const worktreeCalls = (): number => calls.filter((c) => c.url === '/api/jira/worktrees').length;
+  // The list is a closed fold now (Jira detail tabs §4.6), on the Ticket tab here because `NoGitlab` draws no Delivery tab: open it once, then hand it back.
   const section = async (): Promise<HTMLElement> => {
-    const heading = await screen.findByRole('heading', { name: 'Worktrees' });
-    return heading.closest('section') as HTMLElement;
+    const fold = await waitFor(() => {
+      const f = document.querySelector<HTMLDetailsElement>('.jira-wt-fold');
+      if (f === null) throw new Error('no Worktrees fold yet');
+      return f;
+    });
+    if (!fold.open) await userEvent.click(fold.querySelector('summary') as HTMLElement);
+    return fold;
   };
   const setClipboard = (value: { writeText: jest.Mock } | undefined): void => {
     Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
@@ -1511,10 +1660,10 @@ describe('JiraDetail — Worktrees (Jira repo/branch)', () => {
     expect(worktreeCalls()).toBe(1);
   });
 
-  it('draws no Worktrees heading when the ticket has no tree, and none when the read fails', async () => {
+  it('draws no Worktrees fold when the ticket has no tree, and none when the read fails', async () => {
     mount();
     await screen.findByText('not');
-    expect(screen.queryByRole('heading', { name: 'Worktrees' })).toBeNull();
+    expect(document.querySelector('.jira-wt-fold')).toBeNull();
     expect(worktreeCalls()).toBe(1);
 
     cleanup();
@@ -1522,7 +1671,7 @@ describe('JiraDetail — Worktrees (Jira repo/branch)', () => {
     mount();
     await screen.findByText('not');
     await waitFor(() => expect(worktreeCalls()).toBe(2));
-    expect(screen.queryByRole('heading', { name: 'Worktrees' })).toBeNull();
+    expect(document.querySelector('.jira-wt-fold')).toBeNull();
   });
 
   it('Remove copies the quoted command, with no --force, and runs nothing', async () => {
@@ -1569,7 +1718,8 @@ describe('JiraDetail — Worktrees (Jira repo/branch)', () => {
         <JiraDetail issue={CARD} childrenOf={null} onOpenIssue={onOpenIssue} back={null} onBack={jest.fn()} onWrote={onWrote} onRun={onRun} onClose={() => {}} />
       </JiraContext.Provider>
     );
-    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: /^Remove/ })).toBeEnabled());
+    // The rerender's wrapper differs from mount's, so the body remounts with its fold closed again: `section()` re-opens it.
+    await waitFor(async () => expect(within(await section()).getByRole('button', { name: /^Remove/ })).toBeEnabled());
   });
 });
 
@@ -1590,27 +1740,29 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
   const PARENT: JiraIssueDetail = detail({ key: 'P-1', id: '1001', summary: 'S', url: 'https://acme.atlassian.net/browse/P-1', project: { key: 'P', name: 'Parent project' }, parent: null });
   let parentAnswer: () => Response | Promise<Response>;
   const minutesAgo = (m: number): string => new Date(Date.now() - m * 60_000).toISOString();
-  const parentLink = (where: 'crumb' | 'fact'): HTMLElement =>
-    within(where === 'crumb' ? (document.querySelector('.jira-detail-crumbs') as HTMLElement) : (fact('Parent') as HTMLElement)).getByRole('button', { name: 'P-1 S' });
-  const alerts = (): string[] => within(screen.getByRole('dialog', { name: /PAY-175/ })).queryAllByRole('alert').map((a) => a.textContent ?? '');
+  // The one parent link since Task 7: the strip's Parent cell. The head crumb names the parent as text, so the link and its read have one home, the body.
+  const parentLink = (): HTMLElement => within(fact('Parent') as HTMLElement).getByRole('button', { name: 'P-1 S' });
+  const alerts = (): string[] => within(modal()).queryAllByRole('alert').map((a) => a.textContent ?? '');
 
   beforeEach(() => {
     parentAnswer = () => json(PARENT);
     answer = () => (urls[urls.length - 1] === '/api/jira/issue/P-1' ? parentAnswer() : json(detail({ ...SUB })));
   });
 
-  it('links the head crumb and the Parent fact; a double click reads P-1 once and pushes it with the same childrenOf', async () => {
+  it('names the parent in the head crumb as text and links it in the strip; a double click reads P-1 once and pushes it with the same childrenOf', async () => {
     const pending = held();
     parentAnswer = () => pending.promise;
     const index: JiraChildrenIndex = new Map();
     mount({ issue: SUB, childrenOf: index });
     await screen.findByText(/not/);
-    expect(document.querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-175· Sub-task· in P-1 S· Sprint 42');
-    expect(parentLink('fact')).toBeInTheDocument();
-    await userEvent.click(parentLink('crumb'));
-    await userEvent.click(parentLink('fact'));
+    const crumbs = document.querySelector('.jira-detail-crumbs') as HTMLElement;
+    expect(crumbs).toHaveTextContent('PAY-175· Sub-task· in P-1 S· Sprint 42');
+    expect(within(crumbs).queryByRole('button')).toBeNull();
+    expect(within(modal()).getAllByRole('button', { name: 'P-1 S' })).toHaveLength(1);
+    await userEvent.click(parentLink());
+    await userEvent.click(parentLink());
     expect(reads('P-1')).toBe(1);
-    expect(parentLink('crumb')).toHaveAttribute('aria-busy', 'true');
+    expect(parentLink()).toHaveAttribute('aria-busy', 'true');
     await act(async () => pending.release(json(PARENT)));
     await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
     expect(onOpenIssue.mock.calls[0][0].key).toBe('P-1');
@@ -1621,7 +1773,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     parentAnswer = () => json({ error: 'boom' }, { status: 500 });
     mount({ issue: SUB });
     await screen.findByText(/not/);
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     await waitFor(() => expect(alerts()).toEqual(['boom']));
     expect(onOpenIssue).not.toHaveBeenCalled();
   });
@@ -1642,7 +1794,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     parentAnswer = () => pending.promise;
     const view = mount({ issue: SUB });
     await screen.findByText(/not/);
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     const other: JiraIssue = { ...CARD, key: 'PAY-9', summary: 'Another' };
     view.rerender(
       <SettingsProvider>
@@ -1663,7 +1815,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     parentAnswer = () => pending.promise;
     const view = mount({ issue: SUB });
     await screen.findByText(/not/);
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     view.unmount();
     await act(async () => pending.release(json(PARENT)));
     await act(async () => {});
@@ -1675,7 +1827,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     parentAnswer = () => pending.promise;
     mount({ issue: SUB });
     await screen.findByText(/not/);
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-175' }));
     await userEvent.click(within(screen.getByRole('group', { name: 'Run on' })).getByRole('button', { name: /^P-1\b/ }));
     expect(reads('P-1')).toBe(1);
@@ -1685,6 +1837,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
   it('draws the parent-live line under the empty band\'s sub-line, and its click opens the parent', async () => {
     mount({ issue: SUB, sessions: payload(link({ key: 'P-1', sessionId: 'p', state: 'working', repo: '/r/microservice' })) });
     await screen.findByText(/not/);
+    await openTab(/^Agent/);
     const line = screen.getByRole('button', { name: 'Parent P-1 · Working · microservice →' });
     expect(line.previousElementSibling).toHaveClass('jira-detail-agent-sub');
     expect(line.querySelector('.ui-stripe-dot')).toHaveAttribute('data-tone');
@@ -1693,7 +1846,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     expect(onOpenIssue.mock.calls[0][0].key).toBe('P-1');
   });
 
-  it("leads the live band with the parent's newest live session, right under the label row, with +1 more", async () => {
+  it("leads the live band with the parent's newest live session, right under the next-step line, with +1 more", async () => {
     mount({
       issue: SUB,
       sessions: payload(
@@ -1703,8 +1856,11 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
       )
     });
     await screen.findByText(/not/);
+    await openTab(/^Agent/);
     const line = document.querySelector('.jira-detail-agent-band .jira-detail-parent-line') as HTMLElement;
-    expect(line.previousElementSibling).toHaveClass('jira-detail-agent-row');
+    // The Agent tab's band has no label row since Run ▾ moved to the modal head (Task 7): the next-step line is the one row above the parent line.
+    expect(line.previousElementSibling).toHaveClass('jira-detail-next');
+    expect(line.previousElementSibling?.previousElementSibling ?? null).toBeNull();
     expect(line.querySelector('.jira-detail-agent-child-text')).toHaveTextContent(/^Parent P-1 · Working · microservice →$/);
     expect(line).toHaveTextContent('+1 more');
   });
@@ -1714,13 +1870,13 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     post = () => json({ error: 'Jira refused: nope' }, { status: 502 });
     mount({ issue: SUB });
     await screen.findByText(/not/);
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     await waitFor(() => expect(alerts()).toEqual(['boom']));
     await userEvent.click(assignChip());
     await waitFor(() => expect(alerts()).toEqual(['Jira refused: nope', 'boom']));
     const pending = held();
     parentAnswer = () => pending.promise;
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     expect(alerts()).toEqual(['Jira refused: nope']);
     await act(async () => pending.release(json(PARENT)));
   });
@@ -1734,7 +1890,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     await waitFor(() => expect(document.querySelector('.jira-run-target-note')).toHaveTextContent('boom'));
     expect(alerts()).toEqual([]);
     await userEvent.keyboard('{Escape}');
-    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink());
     await waitFor(() => expect(alerts()).toEqual(['boom']));
     const pending = held();
     parentAnswer = () => pending.promise;
@@ -1749,5 +1905,94 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     await screen.findByText(/not/);
     expect(screen.queryByRole('button', { name: /^Parent PAY-120/ })).toBeNull();
     expect(document.querySelector('.jira-detail-parent-line')).toBeNull();
+  });
+});
+
+/*
+  §9 cases 8–16 through the modal (Jira detail tabs Task 7): the body's shared table (`test/helpers/ticket-body-cases.ts`), whose fixtures reach the screen
+  the way the shell's would — the GitLab, Jira and sessions answers through their contexts, the detail through this frame's own read. The page runs the same
+  table through its frame (Task 8). The fetch stub answers only the fixture's own key, so a stray read of another issue stays pending rather than drawing a
+  ticket the case did not ask for; a landed write is the modal's `onWrote` plus its re-read of the detail, which is what the body's `onWrote(true)` asks of it.
+*/
+describe('JiraDetail — the ticket body, through the modal', () => {
+  let current: ResolvedFixture;
+  let sent: string[];
+  let detailReads: Record<string, number>;
+
+  beforeEach(() => {
+    sent = [];
+    detailReads = {};
+    global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST') {
+        sent.push(url);
+        return json({ ok: true, reread: true });
+      }
+      if (url === '/api/agents/status') return json(current.agents);
+      if (url === '/api/jira/worktrees') return json({ worktrees: [], unavailable: [] });
+      if (url.startsWith('/api/jira/issue/')) {
+        const key = url.slice('/api/jira/issue/'.length);
+        detailReads[key] = (detailReads[key] ?? 0) + 1;
+        if (key === current.issue.key) return json(current.detail);
+      }
+      return new Promise<Response>(() => {});
+    }) as unknown as typeof fetch;
+  });
+
+  interface Frame {
+    onOpenIssue: jest.Mock;
+    onBack: jest.Mock;
+    onReview: jest.Mock;
+    onWrote: jest.Mock;
+  }
+  const frame = (f: ResolvedFixture, cb: Frame) => (
+    <SettingsProvider>
+      <GitlabContext.Provider value={{ data: f.gitlab, error: null, refresh: () => Promise.resolve(f.gitlab) }}>
+        <JiraContext.Provider value={{ data: f.status, loading: false, error: false, reload: jest.fn() }}>
+          <JiraSessionsContext.Provider value={{ data: f.sessions, reload: jest.fn(() => Promise.resolve()) }}>
+            <JiraDetail
+              issue={f.issue}
+              childrenOf={null}
+              onOpenIssue={cb.onOpenIssue}
+              back={f.back}
+              onBack={cb.onBack}
+              onWrote={cb.onWrote}
+              onRun={jest.fn()}
+              onReview={cb.onReview}
+              onClose={() => {}}
+            />
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </GitlabContext.Provider>
+    </SettingsProvider>
+  );
+  /** Waits for the shown key's read to be asked, then lets every answer already queued — the detail, the agents status, the worktrees — land inside `act`. */
+  const settle = async (key: string): Promise<void> => {
+    await waitFor(() => expect(detailReads[key] ?? 0).toBeGreaterThan(0));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  };
+
+  ticketBodyCases(async (f: BodyFixture) => {
+    current = resolveFixture(f);
+    const cb: Frame = { onOpenIssue: jest.fn(), onBack: jest.fn(), onReview: jest.fn(), onWrote: jest.fn() };
+    const view = render(frame(current, cb));
+    await settle(current.issue.key);
+    return {
+      rerender: async (next: BodyFixture) => {
+        current = resolveFixture(next);
+        view.rerender(frame(current, cb));
+        await settle(current.issue.key);
+      },
+      onOpenIssue: cb.onOpenIssue,
+      onBack: cb.onBack,
+      onReview: cb.onReview,
+      posts: () => [...sent],
+      wrote: async () => {
+        await waitFor(() => expect(cb.onWrote).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(detailReads[current.issue.key]).toBe(2));
+      }
+    };
   });
 });

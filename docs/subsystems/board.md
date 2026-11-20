@@ -32,7 +32,7 @@ answered; the conditional half is the shell's. The rail's `drawn` skips the Jira
 still unknown while `jira` is the section on screen; `App` falls a `jira` section to the first drawn source row (`firstDrawn`, Runs when there is none) on
 `configured: false` and holds it on anything else, drawn in `JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only
 while configured. Why each half is the way it is:
-[invariants.md](invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+[invariants.md](invariants.md#the-jira-sections-five-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 
 `files` and `github` are members of the list unconditionally for the same reason, and their conditional half is the projects answer's. `ProjectsProvider`
 (`client/src/hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects` — through `useRefreshing`, mount and focus, no poll — keeping its last
@@ -804,7 +804,7 @@ The rules this surface is held to — one implementation per derivation, board-v
 click through, the dialog escape stack and its nine dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
-row](invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
+row](invariants.md#the-jira-sections-five-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
 their registered-only rows](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree), and [the content-width stamp that
 the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),
 with the failure each one encodes. Not restated here.

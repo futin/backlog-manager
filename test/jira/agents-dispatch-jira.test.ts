@@ -960,7 +960,8 @@ describe('review', () => {
     it('a stale review starts the request half', async () => {
       seed(mr({ review: review({ open: 0, commitsSince: 3 }) }));
       await post(body({ half: 'request' })).expect(200);
-      expect(sent.spawns[0].prompt).toContain('`@coderabbitai review`');
+      expect(sent.spawns[0].prompt).toContain('post the review trigger comment');
+      expect(sent.spawns[0].prompt).not.toContain('@coderabbitai');
     });
   });
 

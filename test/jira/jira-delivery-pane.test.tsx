@@ -1,23 +1,27 @@
 /**
  * @jest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import type { ReactNode } from 'react';
 
 import { DeliveryPane } from '../../client/src/components/jira/DeliveryPane';
+import { JiraDeliveryTab } from '../../client/src/components/jira/JiraDeliveryTab';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
+import { deliveryTargets, targetRowId, type DeliveryNext } from '../../client/src/lib/delivery';
 import type { AgentsStatus, GitlabMr, GitlabPayload, GitlabProjectView, GitlabReview, GitlabStatus, JiraIssue, JiraSessionsPayload, JiraStatusPayload } from '../../shared/types';
 import { ruleBlocks, readStyles } from '../helpers/css-rule';
 import { daysAgoStamp } from '../helpers/dates';
 
 /**
- * Jira Detail's Delivery pane (GitLab connection spec §7.1, mock `OptionC.dc.html`): the lead MR's head, its track with each step's word, the `Also:` line,
- * the inherited `via` mark, and the one-line no-MR and unknown sentences. Rendered under the RAW `GitlabContext` with a payload in hand, so no fetch runs and
- * the pane is read exactly as the shell's one answer would hand it over. Every MR stamp is relative to `now`, which the pane takes as a prop, so the ages
- * asserted here are fixed whatever the real clock says; the issue's own `created`/`updated` go through `daysAgoStamp` for the fixture-clock guard.
+ * Jira Detail's Delivery pane (GitLab connection spec §7.1, mock `OptionC.dc.html`; one target's expanded body since Jira detail tabs spec §4.2): an MR's
+ * head and its track with each step's word, then the next row for a Review step (the CodeRabbit row's rules, now `NextRow`'s `request`/`fix` branch). The
+ * pane is drawn with a QUIET next (nothing ringed), so the step words asserted here are the track's own; the ring, the `Also:` line's replacement (one row
+ * per target), the `via` mark and the no-MR, unknown, hidden and not-shown shapes are the tab's and live in `jira-delivery-tab.test.tsx`. Rendered under the
+ * RAW `GitlabContext` with a payload in hand, so no fetch runs. Every MR stamp is relative to `now`, which the pane takes as a prop, so the ages asserted
+ * here are fixed whatever the real clock says; the issue's own `created`/`updated` go through `daysAgoStamp` for the fixture-clock guard.
  */
 
 // The CodeRabbit row asks the dashboard whether agents are on (`useAgents`); the hook fetches, so it is replaced by a status this suite sets per case.
@@ -97,10 +101,14 @@ function issue(over: Partial<JiraIssue> = {}): JiraIssue {
   };
 }
 
-function draw(data: GitlabPayload | null, of: JiraIssue = issue()) {
+/** A next step that rings nothing and offers nothing, so the track draws every step's own word. */
+const QUIET: DeliveryNext = { step: null, word: null, pill: '', sentence: null, button: null, ignore: null, ignored: { review: false, pipeline: false } };
+
+/** The pane for one MR — the payload's first, a target's lead as the tab would hand it down. */
+function draw(data: GitlabPayload) {
   return render(
     <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
-      <DeliveryPane issue={of} now={now} />
+      <DeliveryPane mr={data.mrs[0]} now={now} next={QUIET} onUnignore={jest.fn()} />
     </GitlabContext.Provider>
   );
 }
@@ -121,7 +129,7 @@ afterEach(() => {
 describe('DeliveryPane', () => {
   it('draws an open MR with a passing pipeline: head, link, repo → target, polled age, and the five-step track', () => {
     const { container } = draw(payload([mr()]));
-    expect(screen.getByText('Delivery')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '!412 into develop' })).toBeInTheDocument();
     const link = screen.getByRole('link', { name: '!412' });
     expect(link).toHaveAttribute('href', 'https://gitlab.example.test/development/backend/microservice/-/merge_requests/412');
     expect(link).toHaveAttribute('target', '_blank');
@@ -152,76 +160,6 @@ describe('DeliveryPane', () => {
     expect(stepWord('Pipeline')).toBeNull();
     expect(stepWord('Pushed')).toBe('2h');
     expect(step('Merged').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'magenta');
-  });
-
-  it('lists the other MRs on an Also: line, each with its state word and `<repo> · <age>`', () => {
-    const lead = mr();
-    const failing = mr({ iid: 415, pipeline: 'failed', updatedAt: ago(90) });
-    const merged = mr({
-      iid: 420,
-      project: PROXY.path,
-      webUrl: 'https://gitlab.example.test/development/graphql/dev-api-graphql-proxy/-/merge_requests/420',
-      state: 'merged',
-      pipeline: null,
-      mergedAt: ago(60 * 50),
-      updatedAt: ago(60 * 50)
-    });
-    draw(payload([merged, failing, lead]));
-    // The lead is the newest opened MR, so the head names !412 and the others ride the Also: line.
-    expect(screen.getByText('microservice → develop')).toBeInTheDocument();
-    const also = screen.getByText('Also:').parentElement as HTMLElement;
-    const a415 = within(also).getByRole('link', { name: '!415' });
-    const a420 = within(also).getByRole('link', { name: '!420' });
-    expect(a415).toHaveAttribute('href', failing.webUrl);
-    expect(a420).toHaveAttribute('href', merged.webUrl);
-    expect(a420).toHaveAttribute('target', '_blank');
-    expect(within(also).getByText('pipeline failed')).toBeInTheDocument();
-    expect(within(also).getByText('merged')).toBeInTheDocument();
-    expect(within(also).getByText('microservice · 1h')).toBeInTheDocument();
-    expect(within(also).getByText('dev-api-graphql-proxy · 2d')).toBeInTheDocument();
-  });
-
-  it('marks a sub-task showing its parent’s MRs with `via <PARENT-KEY>` after the link', () => {
-    const sub = issue({ key: 'TIMIFY-144', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'TIMIFY-100', summary: 'the story', type: null, status: null } });
-    draw(payload([mr({ keys: ['TIMIFY-100'] })]), sub);
-    const link = screen.getByRole('link', { name: '!412' });
-    const via = screen.getByText('via TIMIFY-100');
-    expect(link.compareDocumentPosition(via) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('says there is no merge request in every mapped repo, in the payload’s order', () => {
-    draw(payload([]), issue({ key: 'TIMIFY-144' }));
-    expect(screen.getByText('no merge request for TIMIFY-144 in microservice, dev-api-graphql-proxy in the last 30 days')).toBeInTheDocument();
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-  });
-
-  it('names the one repo when only one is mapped', () => {
-    draw(payload([], { TIMIFY: [MICRO] }), issue({ key: 'TIMIFY-144' }));
-    expect(screen.getByText('no merge request for TIMIFY-144 in microservice in the last 30 days')).toBeInTheDocument();
-  });
-
-  it.each<[string, GitlabProjectView, string]>([
-    ['never read', { ...MICRO, polledAt: null }, 'GitLab not read yet'],
-    ['never read and failed', { ...MICRO, polledAt: null, failed: true }, 'GitLab could not be read — Settings › Shared › Sources'],
-    ['capped', { ...MICRO, capped: true }, 'more merge requests than were read — some may be missing']
-  ])('an unknown ticket (%s) reads its unknown line, not the no-MR one', (_name, v, line) => {
-    draw(payload([], { TIMIFY: [v] }), issue({ key: 'TIMIFY-144' }));
-    expect(screen.getByText(line)).toBeInTheDocument();
-    expect(screen.queryByText(/no merge request/)).not.toBeInTheDocument();
-  });
-
-  it('draws nothing for a ticket whose Jira project maps no GitLab project', () => {
-    const { container } = draw(payload([mr()], { OTHER: [MICRO] }));
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it.each<[string, GitlabPayload | null]>([
-    ['no payload', null],
-    ['unconfigured', payload([mr()], { TIMIFY: [MICRO] }, { state: 'unconfigured', armed: false })],
-    ['not armed', payload([mr()], { TIMIFY: [MICRO] }, { armed: false })]
-  ])('draws nothing while delivery is not shown (%s)', (_name, data) => {
-    const { container } = draw(data);
-    expect(container).toBeEmptyDOMElement();
   });
 });
 
@@ -286,7 +224,7 @@ function link(over: Partial<JiraSessionsPayload['links'][number]> = {}): JiraSes
 }
 
 /** The pane under every context the row reads: GitLab, the Jira status (its `live` map) and the sessions payload. */
-function drawRow(mrs: GitlabMr[], opts: { links?: JiraSessionsPayload['links']; live?: JiraStatusPayload['live']; onReview?: jest.Mock; projects?: GitlabProjectView[]; of?: JiraIssue } = {}) {
+function drawRow(mrs: GitlabMr[], opts: { links?: JiraSessionsPayload['links']; live?: JiraStatusPayload['live']; onReview?: jest.Mock; projects?: GitlabProjectView[] } = {}) {
   const data = payload(mrs, { TIMIFY: opts.projects ?? [MICRO_R, PROXY] });
   const jira = { repos: { TIMIFY: REPOS }, live: opts.live ?? {} } as unknown as JiraStatusPayload;
   const wrap = (children: ReactNode) => (
@@ -296,9 +234,42 @@ function drawRow(mrs: GitlabMr[], opts: { links?: JiraSessionsPayload['links']; 
       </JiraSessionsContext.Provider>
     </JiraContext.Provider>
   );
-  return render(wrap(<DeliveryPane issue={opts.of ?? issue()} now={now} onReview={opts.onReview} />));
+  return render(wrap(<DeliveryPane mr={mrs[0]} now={now} next={QUIET} onUnignore={jest.fn()} />));
 }
-const rowEl = (): HTMLElement | null => document.querySelector('.jira-dlv-review');
+
+/**
+ * The next row lives in the tab now (spec §4.4: every expanded target with an open lead gets one), so its cases draw `JiraDeliveryTab` with every row open,
+ * under every context the row reads: GitLab, the Jira status (its `live` map) and the sessions payload. `onReview` keeps the old pane's three-argument shape
+ * by dropping the issue the tab adds.
+ */
+function drawNext(
+  mrs: GitlabMr[],
+  opts: { links?: JiraSessionsPayload['links']; live?: JiraStatusPayload['live']; onReview?: jest.Mock; projects?: GitlabProjectView[] } = {}
+) {
+  const data = payload(mrs, { TIMIFY: opts.projects ?? [MICRO_R, PROXY] });
+  const jira = { repos: { TIMIFY: REPOS }, live: opts.live ?? {} } as unknown as JiraStatusPayload;
+  const onReview = opts.onReview;
+  return render(
+    <JiraContext.Provider value={{ data: jira, loading: false, error: false, reload: jest.fn() }}>
+      <JiraSessionsContext.Provider value={{ data: { links: opts.links ?? [], reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>
+        <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
+          <JiraDeliveryTab
+            issue={issue()}
+            now={now}
+            onReview={onReview === undefined ? undefined : (_issue, half, m, repos) => onReview(half, m, repos)}
+            onRun={jest.fn()}
+            openRows={new Set(deliveryTargets(mrs).map(targetRowId))}
+            onToggleRow={jest.fn()}
+            onOpenRow={jest.fn()}
+            liveReviewLink={null}
+            worktrees={null}
+          />
+        </GitlabContext.Provider>
+      </JiraSessionsContext.Provider>
+    </JiraContext.Provider>
+  );
+}
+const rowEl = (): HTMLElement | null => document.querySelector('.jira-dlv-next');
 
 describe('the Review step', () => {
   it.each<[string, GitlabReview | null, string, string | null]>([
@@ -325,8 +296,6 @@ describe('the Review step', () => {
     expect(stepWord('Pipeline')).toBe('pipeline passed');
     expect(stepWord('Review')).toBe('2 open · 1 major');
     expect(container.querySelector('.jira-dlv-head .jira-dlv-word')).toBeNull();
-    const also = screen.getByText('Also:').parentElement as HTMLElement;
-    expect(within(also).getByText('2 to fix')).toHaveAttribute('data-tone', 'amber');
   });
 
   it('draws a merged lead’s Review step magenta with no word', () => {
@@ -336,15 +305,15 @@ describe('the Review step', () => {
   });
 });
 
-describe('the CodeRabbit row', () => {
+describe('the next row on a Review step (was the CodeRabbit row)', () => {
   it('open: the sentence in amber and a `Fix review` button, which launches the fix half on the lead with the candidate repos', () => {
     const onReview = jest.fn();
     const lead = mr({ review: review() });
-    drawRow([lead], { onReview });
-    expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
+    drawNext([lead], { onReview });
+    expect(rowEl()?.textContent).toContain('Review · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
     expect(rowEl()?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'amber');
     // The sentence ellipsises before the button gives way (a failed read's suffix overflowed 505 > 495 at 1440 in /ui-verify), so it is its own title.
-    expect(rowEl()?.querySelector('.jira-dlv-review-text')).toHaveAttribute('title', 'CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
+    expect(rowEl()?.querySelector('.jira-dlv-next-text')).toHaveAttribute('title', 'Review · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
     const btn = screen.getByRole('button', { name: 'Fix review' });
     expect(btn).toBeEnabled();
     expect(btn.closest('.ui-split')).toHaveClass('ui-split-28');
@@ -354,55 +323,57 @@ describe('the CodeRabbit row', () => {
 
   it('none: `not reviewed yet` and `Request review`, launching the request half', () => {
     const onReview = jest.fn();
-    drawRow([mr({ review: NONE })], { onReview });
-    expect(rowEl()?.textContent).toContain('CodeRabbit · not reviewed yet');
+    drawNext([mr({ review: NONE })], { onReview });
+    expect(rowEl()?.textContent).toContain('Review · not reviewed yet');
     fireEvent.click(screen.getByRole('button', { name: 'Request review' }));
     expect(onReview).toHaveBeenCalledWith('request', expect.objectContaining({ iid: 412 }), REPOS);
   });
 
   it('stale offers `Request review` too', () => {
-    drawRow([mr({ review: review({ open: 0, worst: null, commitsSince: 3 }) })], { onReview: jest.fn() });
+    drawNext([mr({ review: review({ open: 0, worst: null, commitsSince: 3 }) })], { onReview: jest.fn() });
     expect(rowEl()?.textContent).toContain('3 commits since the last review');
     expect(screen.getByRole('button', { name: 'Request review' })).toBeInTheDocument();
   });
 
-  it.each<[string, GitlabMr]>([
-    ['reviewing', mr({ review: review({ open: 0, triggeredAt: ago(4), landedAt: null }) })],
-    ['clean', mr({ review: review({ open: 0, worst: null }) })],
-    ['unknown', mr({ review: review({ open: 0, capped: true }) })],
-    ['not read', mr({ review: null })],
-    ['a merged lead', mr({ state: 'merged', pipeline: null, mergedAt: ago(60), review: review() })]
-  ])('draws no row for %s', (_n, lead) => {
-    drawRow([lead]);
-    expect(rowEl()).toBeNull();
+  // No review split for any of these. Since the next step (spec §4.5) a row still draws for the ones with a later step or an `Ignore`: a clean, green MR's
+  // is the Merge row, an `unknown` review's is `Ignore` alone, an unread one's is its sentence and `Ignore`; a review in flight and a merged lead draw none.
+  it.each<[string, GitlabMr, string | null]>([
+    ['reviewing', mr({ review: review({ open: 0, triggeredAt: ago(4), landedAt: null }) }), null],
+    ['clean', mr({ review: review({ open: 0, worst: null }) }), 'Reviewed and green — merge happens in GitLab.Merge in GitLab ↗'],
+    ['unknown', mr({ review: review({ open: 0, capped: true }) }), 'Ignore'],
+    ['not read', mr({ review: null }), 'The review has not been read yet.Ignore'],
+    ['a merged lead', mr({ state: 'merged', pipeline: null, mergedAt: ago(60), review: review() }), null]
+  ])('draws no review split for %s', (_n, lead, text) => {
+    drawNext([lead], { onReview: jest.fn() });
+    expect(rowEl()?.textContent ?? null).toBe(text);
     expect(screen.queryByRole('button', { name: /review/i })).not.toBeInTheDocument();
   });
 
   it('draws the row without a button when no repo is a candidate', () => {
-    drawRow([mr({ review: review() })], { projects: [{ ...MICRO, repos: [] }] });
-    expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings');
+    drawNext([mr({ review: review() })], { projects: [{ ...MICRO, repos: [] }] });
+    expect(rowEl()?.textContent).toContain('Review · 2 open findings');
     expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
   });
 
   it('draws no button while agents are off or not yet answered', () => {
     mockAgents = { enabled: false } as AgentsStatus;
-    drawRow([mr({ review: review() })]);
+    drawNext([mr({ review: review() })]);
     expect(rowEl()).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
     cleanup();
     mockAgents = null;
-    drawRow([mr({ review: review() })]);
+    drawNext([mr({ review: review() })]);
     expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
   });
 
   it('draws no button without an `onReview` to call', () => {
-    drawRow([mr({ review: review() })]);
+    drawNext([mr({ review: review() })]);
     expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
   });
 
   describe('the live-session gate', () => {
     const open = (): GitlabMr => mr({ review: review() });
-    const why = (): HTMLElement | null => document.querySelector('.jira-dlv-review-why');
+    const why = (): HTMLElement | null => document.querySelector('.jira-dlv-next-why');
     const blocked = (title: string) => {
       const btn = screen.getByRole('button', { name: 'Fix review' });
       expect(btn).toBeDisabled();
@@ -417,12 +388,12 @@ describe('the CodeRabbit row', () => {
     };
 
     it('names the session in bold on the reason line', () => {
-      drawRow([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
+      drawNext([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
       expect(why()?.querySelector('strong')?.textContent).toBe('TIMIFY-123 execute');
     });
 
     it('says the request half’s own label on the line', () => {
-      drawRow([mr({ review: NONE })], {
+      drawNext([mr({ review: NONE })], {
         onReview: jest.fn(),
         links: [link({ name: 'TIMIFY-123 execute' })]
       });
@@ -431,12 +402,12 @@ describe('the CodeRabbit row', () => {
     });
 
     it('a live `run` link on the key disables it, naming the session', () => {
-      drawRow([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
+      drawNext([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
       blocked('TIMIFY-123 execute is live on this ticket');
     });
 
     it('a `starting` reservation on the key disables it the same way', () => {
-      drawRow([open()], {
+      drawNext([open()], {
         onReview: jest.fn(),
         live: { 'TIMIFY-123': { name: 'TIMIFY-123 execute', sessionId: null, startedAt: ago(1), repo: '/a/one', starting: true } }
       });
@@ -444,18 +415,18 @@ describe('the CodeRabbit row', () => {
     });
 
     it('a live link on another key whose stored branch is the MR’s source branch disables it, naming the branch', () => {
-      drawRow([open()], { onReview: jest.fn(), links: [link({ key: 'TIMIFY-9', how: 'branch', name: 'my session', branch: 'timify-123-change-412', repo: '/a/two' })] });
+      drawNext([open()], { onReview: jest.fn(), links: [link({ key: 'TIMIFY-9', how: 'branch', name: 'my session', branch: 'timify-123-change-412', repo: '/a/two' })] });
       blocked('my session is live on timify-123-change-412');
     });
 
     it('a live link whose dashboard row is on the source branch in a candidate checkout disables it', () => {
       const row = { status: 'working', gitBranch: 'timify-123-change-412', projectPath: '/a/one/.worktrees/x' } as JiraSessionsPayload['links'][number]['row'];
-      drawRow([open()], { onReview: jest.fn(), links: [link({ key: 'TIMIFY-9', how: 'manual', name: 'hand session', row })] });
+      drawNext([open()], { onReview: jest.fn(), links: [link({ key: 'TIMIFY-9', how: 'manual', name: 'hand session', row })] });
       blocked('hand session is live on timify-123-change-412');
     });
 
     it('does not block on an ended link, a branch link on another branch, or a branch outside the candidates', () => {
-      drawRow([open()], {
+      drawNext([open()], {
         onReview: jest.fn(),
         links: [
           link({ key: 'TIMIFY-9', how: 'branch', branch: 'timify-123-change-412', endedAt: ago(1) }),

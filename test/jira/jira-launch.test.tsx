@@ -11,6 +11,7 @@ import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
+import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { daysAgoStamp } from '../helpers/dates';
 import type {
@@ -154,6 +155,8 @@ const realFetch = global.fetch;
 
 beforeEach(() => {
   localStorage.clear();
+  // The Detail's tab is a module store that outlives a mount (and the storage clear above): every case opens on Ticket, as a first open does.
+  setJiraDetailTab('ticket');
   calls = [];
   server = {
     agents: agents(),
@@ -1655,7 +1658,9 @@ describe('JiraView — the review button opens the launch sheet', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
-    const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+    const modal = await screen.findByRole('dialog', { name: 'Refund partial captures' });
+    // The review button is the Delivery tab's since Jira detail tabs (spec §4); the dialog opens on Ticket.
+    await userEvent.click(within(modal).getByRole('tab', { name: /^Delivery/ }));
     await userEvent.click(await within(modal).findByRole('button', { name: 'Fix review' }));
 
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });

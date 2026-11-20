@@ -15,6 +15,7 @@ import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext, JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext';
 import { resetJiraListFilters, useJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
 import { useJiraPage } from '../../client/src/hooks/useJiraPage';
+import { setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
 import { setJiraView, useJiraView } from '../../client/src/hooks/useJiraView';
 import type { JiraStatusPayload, JiraSessionsPayload, PullRequestsPayload } from '../../shared/types';
 import { repo, row } from '../helpers/pr-fixtures';
@@ -666,6 +667,19 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(view.result.current[0]).toBe('list');
   });
 
+  it('draws no row for the `ticket` page while it is the stored one — the tree shows four pages until Task 8 draws the held key', () => {
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('ticket'));
+    try {
+      render(tree(payload([]), jest.fn(), 'jira'));
+      const rows = Array.from(screen.getByRole('group', { name: 'Jira pages' }).querySelectorAll('.rail-sublink'));
+      expect(rows.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
+      expect(rows.some((b) => b.getAttribute('aria-current') === 'true')).toBe(false);
+    } finally {
+      act(() => page.result.current[1]('board'));
+    }
+  });
+
   it('draws Board, Sessions, Mentions, Setup in the open Jira tree; Sessions carries the count as its own button, and the row itself still just sets the page', async () => {
     const onChange = jest.fn();
     const page = renderHook(() => useJiraPage());
@@ -693,6 +707,27 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(page.result.current[0]).toBe('sessions');
     expect(filters.result.current[0]).toMatchObject({ chip: 'needs-you', allTickets: true });
     expect(onChange).toHaveBeenLastCalledWith('jira');
+  });
+
+  // T21 (Jira detail tabs spec §2.2): the tree's fifth row is the ticket page's, drawn only while the key store holds a key, named by that key and led by
+  // the ticket glyph; clicking it opens the page like any other row. Emptying the key takes the row away.
+  it('draws the ticket row only while a key is held, labelled with the key, and clicking it sets page `ticket`', async () => {
+    const onChange = jest.fn();
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('board'));
+    act(() => setJiraTicketKey(''));
+    render(tree(payload([]), onChange, 'jira'));
+    const labels = (): string[] => Array.from(screen.getByRole('group', { name: 'Jira pages' }).querySelectorAll('.rail-sublink')).map((b) => b.textContent ?? '');
+    expect(labels()).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
+    act(() => setJiraTicketKey('PAY-12'));
+    expect(labels()).toEqual(['Board', 'Sessions', 'Mentions', 'Setup', 'PAY-12']);
+    const row = within(screen.getByRole('group', { name: 'Jira pages' })).getByRole('button', { name: 'PAY-12' });
+    expect(row.querySelector('.rail-sub-glyph svg')).not.toBeNull();
+    await userEvent.click(row);
+    expect(page.result.current[0]).toBe('ticket');
+    expect(onChange).toHaveBeenLastCalledWith('jira');
+    act(() => setJiraTicketKey(''));
+    expect(labels()).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
   });
 
   it('keeps the Sessions pill’s last count while the dashboard is unreachable, with the Jira tree open', () => {

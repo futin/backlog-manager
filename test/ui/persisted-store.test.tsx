@@ -7,7 +7,7 @@ import '@testing-library/jest-dom';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { persistedStore } from '../../client/src/hooks/persistedStore';
+import { persistedJsonStore, persistedStore } from '../../client/src/hooks/persistedStore';
 
 /*
   `persistedStore` is the one home of the client's persisted module store (#464): the subscribe, read and write body `useFilesPage`, `useGithubPage`,
@@ -117,6 +117,58 @@ describe('persistedStore', () => {
     } finally {
       deleted.mockRestore();
       added.mockRestore();
+    }
+  });
+});
+
+/*
+  `persistedJsonStore` is the body under `persistedStore` (Jira detail tabs, Task 3): the reader decides what a stored value means, and gets `null` — never the
+  raw text — for anything that is not there to parse.
+*/
+describe('persistedJsonStore', () => {
+  const JSON_KEY = 'test.persisted-json-store';
+  const seen: unknown[] = [];
+  const json = persistedJsonStore<number>(JSON_KEY, (v) => {
+    seen.push(v);
+    return typeof v === 'number' ? v : -1;
+  });
+
+  function Num({ id }: { id: string }) {
+    return <span data-testid={id}>{json.useValue()}</span>;
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    seen.length = 0;
+  });
+
+  it('hands the reader the parsed value, and null for absent and for non-JSON text', () => {
+    render(<Num id="a" />);
+    localStorage.setItem(JSON_KEY, '7');
+    render(<Num id="b" />);
+    localStorage.setItem(JSON_KEY, 'board');
+    render(<Num id="c" />);
+    expect(seen).toEqual([null, 7, null]);
+    expect(screen.getByTestId('b')).toHaveTextContent('7');
+    expect(screen.getByTestId('c')).toHaveTextContent('-1');
+  });
+
+  it('moves every mounted reader on a write, even when setItem throws', () => {
+    render(
+      <>
+        <Num id="a" />
+        <Num id="b" />
+      </>
+    );
+    const setItem = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      expect(() => act(() => json.set(9))).not.toThrow();
+      expect(screen.getByTestId('a')).toHaveTextContent('9');
+      expect(screen.getByTestId('b')).toHaveTextContent('9');
+    } finally {
+      setItem.mockRestore();
     }
   });
 });

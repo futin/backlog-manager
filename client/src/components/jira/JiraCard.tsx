@@ -18,6 +18,7 @@ import { PersonMark } from '../ui/PersonMark';
 import { PriorityPill } from '../ui/PriorityPill';
 import { RepoMark } from '../ui/RepoMark';
 import { TreeMark } from '../ui/TreeMark';
+import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
 import { JiraRunMenu } from './JiraRunMenu';
 import { MrChip } from './MrChip';
 import { OpenChip, SessionOpen } from './SessionOpen';
@@ -54,6 +55,10 @@ import { OpenChip, SessionOpen } from './SessionOpen';
  * The whole card is a `role="button"` that opens the issue (`onOpen`), Enter and Space included, exactly as `ItemCard`; the link out, `Run ▾`, the session's
  * open control and Reopen each stop both the click and those two keys — without that one press opens Jira AND the modal, and the card's `preventDefault()`
  * on Enter would cancel the inner control's own activation.
+ *
+ * **Modal or page** (Jira detail tabs spec §2.3). Given `onOpenPage`, a Cmd-, Ctrl- or middle-click on the card opens the full ticket page instead of the
+ * modal (`wantsPage`), and the card's title names the modifier. The inner controls stop `auxclick` as they stop `click`: a middle-click on the `↗` link is
+ * the browser's own new tab, and a middle-click on `Run ▾` is nobody's, so neither may also move the section to the page.
  */
 export function JiraCard({
   issue,
@@ -65,6 +70,7 @@ export function JiraCard({
   ended,
   trees,
   onOpen,
+  onOpenPage,
   onRun
 }: {
   issue: JiraIssue;
@@ -76,6 +82,8 @@ export function JiraCard({
   ended: readonly SessionLink[];
   trees: readonly JiraWorktree[];
   onOpen: (issue: JiraIssue) => void;
+  /** A Cmd-, Ctrl- or middle-click: the ticket page on this issue. Absent, every click opens the modal. */
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
   const kind = crumbOf(issue, board, me, parent);
@@ -92,7 +100,11 @@ export function JiraCard({
       data-key={issue.key}
       role="button"
       tabIndex={0}
-      onClick={open}
+      title={onOpenPage === undefined ? undefined : fullPageTitle(browserPlatform())}
+      onClick={(e) => (onOpenPage !== undefined && wantsPage(e) ? onOpenPage(issue) : open())}
+      onAuxClick={(e) => {
+        if (onOpenPage !== undefined && e.button === 1) onOpenPage(issue);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -137,6 +149,7 @@ function Contained({ children, className }: { children: ReactNode; className?: s
     <span
       className={className}
       onClick={(e) => e.stopPropagation()}
+      onAuxClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
       }}
@@ -156,6 +169,7 @@ export function IssueLinkOut({ issueKey, url }: { issueKey: string; url: string 
       rel="noreferrer"
       aria-label={`open ${issueKey} in Jira`}
       onClick={(e) => e.stopPropagation()}
+      onAuxClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
       }}

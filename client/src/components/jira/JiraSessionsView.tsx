@@ -31,11 +31,14 @@ import { JiraSessionList } from './JiraSessionList';
 export function JiraSessionsView({
   onOpenJiraPage,
   onOpenIssue,
+  onOpenPage,
   onRun,
   nudge
 }: {
   onOpenJiraPage: (p: JiraPage) => void;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** A row's Cmd-, Ctrl- or middle-click: the ticket page (Jira detail tabs spec §2.3). */
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   nudge: number;
 }) {
@@ -96,6 +99,7 @@ export function JiraSessionsView({
         now={now}
         childrenOf={lanes.childrenOf}
         onOpenIssue={onOpenIssue}
+        onOpenPage={onOpenPage}
         onRun={onRun}
         unavailable={unavailable}
         boardName={shown?.name ?? ''}

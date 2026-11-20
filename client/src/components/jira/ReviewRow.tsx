@@ -1,31 +1,22 @@
-import { useId } from 'react';
-import { useAgents } from '../../hooks/useAgents';
-import { useJiraContext } from '../../hooks/JiraContext';
-import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
-import { reviewBlockedTail, reviewButtonLabel, reviewGateText, reviewRowText } from '../../lib/review-copy';
-import { reviewHalf, reviewState } from '../../../../shared/review';
-import type { GitlabMr, JiraIssue, JiraSessionsPayload, JiraStatusPayload, ReviewHalf } from '../../../../shared/types';
+import { reviewBlockedTail, reviewGateText } from '../../lib/review-copy';
+import type { GitlabMr, JiraIssue, JiraSessionsPayload, JiraStatusPayload } from '../../../../shared/types';
 import { Glyph } from '../ui/Glyphs';
 
 /**
- * ReviewRow — Jira Detail's CodeRabbit row under the delivery track (CodeRabbit review spec §5.2; mocks `opt-b-open.png` and `opt-b-none.png`; DESIGN.md
- * §8.9.2, Delivery track › Review step / CodeRabbit row). A hairline, then the state's sentence on a tint of its tone at the left and an ink `ui-split-28`
- * button with the play glyph at the right. The button is a lone half of the Run split — no chevron, since there is no menu behind it — and it opens the Run
- * launch sheet pre-set to the review action; it dispatches nothing itself (Task 8 owns the launch, this row only reports the pick through `onReview`).
+ * ReviewRow — the review button's rules and its two drawn pieces, for the Delivery tab's next row (Jira detail tabs spec §4.4, §4.5; CodeRabbit review spec
+ * §5.2; DESIGN.md §8.9.6, Delivery › the next row). `NextRow` composes them on its `request` and `fix` branches; this file keeps what was the CodeRabbit
+ * row's own — the live-session gate, the split and the reason line — so the rules did not change when the row became one branch of a larger one.
  *
- * It acts on the LEAD MR only, the one the track draws: `Also:` MRs get no row. The row is absent where the sentence is (`reviewRowText` is `null` for
- * `reviewing`, `clean`, `unknown` and an unread review) and for a lead that is not open, which only this caller knows.
+ * - **`ReviewSplit`** — an ink `ui-split-28` with the play glyph: a lone half of the Run split, no chevron, since there is no menu behind it. It opens the Run
+ *   launch sheet pre-set to the review; it dispatches nothing itself. Blocked, it is DISABLED, wears the dashed skin (`.ui-split-dashed`, as `Run ▾` with no
+ *   repo and a blocked Merge do — the ink skin has no :disabled look of its own, so a disabled ink split read as clickable, 2026-11-16), carries the gate's
+ *   sentence as its title on both the button and its wrapper (a disabled button takes no hover), and points (`aria-describedby`) at the reason line.
+ * - **`ReviewWhy`** — the reason on screen, under the row rather than inside its pill: the session's name in bold, where it is live, and that the button
+ *   waits until it ends or is stopped. The pill ellipsises and a branch name is long; this line wraps instead.
  *
- * **The button is hidden, not disabled,** where it can never work: no review candidate repo (`repos`, the lead's GitLab project view's local paths), agents
- * off or not yet answered (a board load must not flash a dead control), or no `onReview` to call. It is DISABLED, with a title naming the session, while the
- * live-session gate holds (`reviewGate`) — two sessions pushing one MR branch is the failure it prevents, and the server's 409s are the authority for what
- * this view cannot see (another tab's in-flight reservation). A blocked button also wears the dashed skin and points (`aria-describedby`) at a reason line
- * under the row — the session's name in bold, where it is live, and that the button waits until it ends or is stopped — because a hover-only title was
- * not found: a disabled ink split drew exactly like an enabled one (2026-11-16).
- *
- * `useAgents` is read HERE, beside the one decision it feeds, rather than threaded down from the pane. Hooks run before the early returns below, so the row
- * mounts its own `/api/agents/status` poller whenever the pane draws a lead, open or not, sentence or not — one instance per open Detail, which is the cost.
- * The sentence carries itself as a `title`: it ellipsises before the button gives up any width, and a failed read's suffix overflows at 1440 px.
+ * Whether the split draws at all is the caller's (hidden, not disabled, where it can never work: no candidate repo, agents off or not yet answered, no
+ * `onReview`), because only the caller knows all three; `reviewGate` is the disabled half, and dispatch's 409s stay the authority for what this view cannot
+ * see.
  */
 
 /** Whether a dashboard row's checkout is one of the candidates: the main checkout itself or one of its `.worktrees/` trees (how a Jira worktree is laid out). */
@@ -60,71 +51,46 @@ export function reviewGate(
   return onBranch === undefined ? null : { name: onBranch.name, where: mr.sourceBranch };
 }
 
-export function ReviewRow({
-  issue,
-  lead,
-  now,
-  repos,
-  onReview
+/** The review play-button split; `blocked` is `reviewGateText`'s sentence while the gate holds, `whyId` the reason line it points at. */
+export function ReviewSplit({
+  label,
+  blocked,
+  whyId,
+  onClick
 }: {
-  issue: JiraIssue;
-  lead: GitlabMr;
-  now: number;
-  /** The review candidates: local repo paths mapped to the lead's GitLab project under the issue's Jira project (`GitlabProjectView.repos`). */
-  repos: string[];
-  /** The Run launch sheet's opener (Task 8). Absent, the row draws its sentence and no button. */
-  onReview?: (half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  label: 'Fix review' | 'Request review';
+  blocked: string | null;
+  whyId: string;
+  onClick: () => void;
 }) {
-  const { status: agents } = useAgents();
-  const { data: jira } = useJiraContext();
-  const { data: sessions } = useJiraSessionsContext();
-  const whyId = useId();
-  if (lead.state !== 'opened') return null;
-  const text = reviewRowText(lead.review, now);
-  if (text === null || lead.review === null) return null;
-  const state = reviewState(lead.review, now);
-  const half = reviewHalf(state);
-  const label = reviewButtonLabel(state);
-  const tone = state === 'open' ? 'amber' : 'grey';
-  const showButton = half !== null && label !== null && onReview !== undefined && repos.length > 0 && agents !== null && agents.enabled;
-  const gate = showButton ? reviewGate(issue, lead, repos, jira?.live ?? {}, sessions?.links ?? []) : null;
-  const blocked = gate === null ? null : reviewGateText(gate);
   return (
-    <>
-      <div className="jira-dlv-review">
-        <span className="jira-dlv-review-text" data-tone={tone} title={text}>
-          {text}
+    <span className={blocked === null ? 'ui-split ui-split-28' : 'ui-split ui-split-28 ui-split-dashed'} title={blocked ?? undefined}>
+      <button
+        type="button"
+        className="ui-split-main"
+        disabled={blocked !== null}
+        title={blocked ?? undefined}
+        aria-describedby={blocked === null ? undefined : whyId}
+        onClick={onClick}
+      >
+        <span className="ui-split-icon" aria-hidden="true">
+          <Glyph name="play" />
         </span>
-        {showButton && (
-          // Blocked, the split wears the board's dashed skin (`.ui-split-dashed`, as `Run ▾` with no repo and a blocked Merge do): the ink skin has no
-          // :disabled look of its own, so a disabled ink button read as clickable.
-          <span className={blocked === null ? 'ui-split ui-split-28' : 'ui-split ui-split-28 ui-split-dashed'} title={blocked ?? undefined}>
-            <button
-              type="button"
-              className="ui-split-main"
-              disabled={blocked !== null}
-              title={blocked ?? undefined}
-              aria-describedby={blocked === null ? undefined : whyId}
-              onClick={() => onReview(half, lead, repos)}
-            >
-              <span className="ui-split-icon" aria-hidden="true">
-                <Glyph name="play" />
-              </span>
-              {label}
-            </button>
-          </span>
-        )}
-      </div>
-      {gate !== null && label !== null && (
-        // The reason on screen, under the row rather than inside its pill: the pill ellipsises and a branch name is long; this line wraps instead.
-        <p className="jira-dlv-review-why" id={whyId}>
-          <span>
-            <strong>{gate.name}</strong>
-            {reviewGateText(gate).slice(gate.name.length)}
-            {reviewBlockedTail(label)}
-          </span>
-        </p>
-      )}
-    </>
+        {label}
+      </button>
+    </span>
+  );
+}
+
+/** The blocked split's reason line: who holds the MR (bold), where, and that the button waits. */
+export function ReviewWhy({ gate, label, id }: { gate: { name: string; where: string | null }; label: 'Fix review' | 'Request review'; id: string }) {
+  return (
+    <p className="jira-dlv-next-why" id={id}>
+      <span>
+        <strong>{gate.name}</strong>
+        {reviewGateText(gate).slice(gate.name.length)}
+        {reviewBlockedTail(label)}
+      </span>
+    </p>
   );
 }

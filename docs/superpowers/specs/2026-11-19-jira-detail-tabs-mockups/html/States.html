@@ -1,0 +1,161 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Delivery states and next step</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0}
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hair:#eaeae8;--hair2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--fill-progress:#7DC242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--scrim:rgba(19,19,19,.28)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--board);color:var(--ink);font:13px/1.45 'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.app{display:flex;min-height:100vh}
+.rail{width:56px;flex:none;background:var(--steel);display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 0}
+.rail i{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:700;color:var(--ink3)}
+.rail i.on{background:var(--strip);color:var(--ink)}
+.main{flex:1;min-width:0;padding:18px 28px 40px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.crumbs{display:flex;align-items:center;gap:6px;color:var(--ink3);font-size:12px}
+.crumbs b{color:var(--ink);font-weight:600}
+.btns{display:flex;gap:8px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;background:var(--strip);border:1px solid var(--hair2);font:inherit;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink2)}
+.btn.sm{height:24px;padding:0 9px;font-size:12px;border-radius:7px}
+.split{display:inline-flex;border-radius:8px;overflow:hidden;background:var(--ink);color:#fff;height:28px;font-weight:600;font-size:12px;white-space:nowrap}
+.split span{display:inline-flex;align-items:center;gap:6px;padding:0 11px}
+.split span+span{border-left:1px solid rgba(255,255,255,.25);padding:0 8px}
+h1{font-size:22px;line-height:1.25;margin:4px 0 10px;font-weight:700;letter-spacing:-.01em}
+.key{font-weight:700;color:var(--ink2);font-size:12px;letter-spacing:.02em}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:600;background:var(--steel);color:var(--ink2);white-space:nowrap}
+.pill.done,.pill.ok{background:#e3eedb;color:var(--green)}
+.pill.draft{background:var(--steel);color:var(--ink2)}
+.pill.merged{background:#ebe6f4;color:var(--magenta)}
+.pill.closed{background:#f5e1dd;color:var(--red)}
+.pill.live{background:#fbe9d8;color:var(--amber-ink)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.panel{background:var(--strip);border-radius:12px;padding:16px;min-width:0}
+.lbl{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--ink3);margin:0 0 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.n{font-weight:500;letter-spacing:0;color:var(--ink3)}
+.facts{display:grid;grid-template-columns:92px minmax(0,1fr);gap:9px 12px;align-items:center;margin:0}
+.facts dt{color:var(--ink3);font-size:12px}
+.facts dd{margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.link{color:var(--ink);text-decoration:underline;text-decoration-color:var(--hair2);text-underline-offset:3px}
+.mrl{font-weight:600;color:var(--cyan);white-space:nowrap}
+.muted{color:var(--ink3)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.desc{font-size:13.5px;line-height:1.55}
+.desc h3{font-size:14px;margin:18px 0 6px}
+.desc p{margin:0 0 8px}
+.desc ul{margin:0 0 8px;padding-left:18px}
+.desc li{margin:3px 0}
+.desc ul.check{list-style:none;padding-left:0}
+.check li::before{content:'';display:inline-block;width:12px;height:12px;border:1.5px solid var(--hair2);border-radius:3px;margin-right:8px;vertical-align:-1px}
+details>summary{list-style:none;cursor:pointer;user-select:none}
+details>summary::-webkit-details-marker{display:none}
+.fold>summary{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--ink3);letter-spacing:.02em}
+.fold>summary::before,.tgt>summary .chev{content:'';flex:none;width:6px;height:6px;border-right:1.6px solid var(--ink3);border-bottom:1.6px solid var(--ink3);transform:rotate(-45deg);transition:transform .15s;margin:0 4px 0 1px}
+.fold[open]>summary::before,.tgt[open]>summary .chev{transform:rotate(45deg)}
+.fold>summary .r{margin-left:auto;font-weight:500;letter-spacing:0;display:flex;gap:6px;align-items:center}
+.fold>.body{margin-top:12px}
+.hr{height:1px;background:var(--hair);margin:14px 0}
+/* tabs */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--hair2);margin:14px 0 16px}
+.tabs label{padding:9px 14px;font-weight:600;color:var(--ink3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;gap:6px;align-items:center}
+.tabs label .c{font-size:11px;font-weight:600;background:var(--steel);border-radius:999px;padding:1px 7px;color:var(--ink2)}
+.tabs label .c.live{background:#fbe9d8;color:var(--amber-ink)}
+.tabpane{display:none}
+#tb1:checked~.tabs label[for=tb1],#tb2:checked~.tabs label[for=tb2],#tb3:checked~.tabs label[for=tb3],#tb4:checked~.tabs label[for=tb4]{color:var(--ink);border-bottom-color:var(--ink)}
+#tb1:checked~.panes .p1,#tb2:checked~.panes .p2,#tb3:checked~.panes .p3,#tb4:checked~.panes .p4{display:block}
+input.tb{display:none}
+.strip{display:flex;gap:26px;align-items:center;background:var(--strip);border-radius:12px;padding:12px 16px;flex-wrap:wrap}
+.strip .f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.strip .f>span:first-child{font-size:11px;color:var(--ink3);font-weight:600;letter-spacing:.02em}
+.tag{font-size:11px;font-weight:600;color:var(--ink2);background:var(--steel);border-radius:5px;padding:2px 7px}
+/* delivery: one card per target */
+.dhead{display:flex;align-items:center;gap:10px;margin-bottom:4px;font-size:12px;color:var(--ink2)}
+.dhead .r{margin-left:auto;color:var(--ink3)}
+.tgt{background:var(--strip);border-radius:12px;margin-top:10px;border:1px solid transparent}
+.tgt[open]{border-color:var(--hair2)}
+.tgt>summary{display:grid;grid-template-columns:14px 118px 74px minmax(0,1fr) auto auto auto;gap:12px;align-items:center;padding:12px 16px}
+.tgt>summary:hover{background:var(--strip-hi);border-radius:12px}
+.tgt .into{font-size:12px;color:var(--ink3)}
+.tgt .into b{font-size:13px;color:var(--ink)}
+.tgt .tbody{padding:2px 16px 16px;display:flex;flex-direction:column;gap:14px}
+/* compact track */
+.ctrack{display:inline-flex;align-items:center}
+.ctrack i{width:8px;height:8px;border-radius:50%;display:block}
+.ctrack b{width:6px;height:2px;display:block}
+.on{background:var(--fill-progress)}.grey{background:var(--ink3)}.green{background:var(--green-solid)}.mag{background:var(--magenta)}
+.off{background:var(--strip);box-shadow:inset 0 0 0 1.5px var(--hair2)}
+.ctrack b.off{background:var(--hair2);box-shadow:none}
+/* full track (today's DeliveryTrack) */
+.ftrack{list-style:none;margin:0;padding:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);isolation:isolate}
+.ftrack li{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center}
+.ftrack .bar{position:absolute;top:10px;right:50%;width:100%;height:2px}
+.ftrack .d{position:relative;z-index:1;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:var(--ink);font-size:11px}
+.ftrack .d.mag,.ftrack .d.red{color:#fff}
+.ftrack .d.off{box-shadow:inset 0 0 0 2px var(--hair2)}
+.ftrack .bar.off{background:var(--hair2);box-shadow:none}
+.ftrack .lb{font-size:12px;font-weight:500}
+.ftrack .lb.off{color:var(--ink3)}
+.ftrack .w{font-size:12px;color:var(--ink3)}
+.fhead{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.fhead .r{margin-left:auto;font-size:12px;color:var(--ink3)}
+.rv{display:flex;align-items:center;gap:12px;padding-top:14px;border-top:1px solid var(--hair);position:relative}
+.rvt{flex:1;min-width:0;display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink2);background:var(--strip-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rvt.amber{color:var(--amber-ink);background:#f7ecdf}
+.menu{position:absolute;right:0;top:52px;width:330px;background:var(--strip);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.14),0 0 0 1px var(--hair2);padding:6px;z-index:5}
+.menu .h{font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.02em;padding:8px 10px 4px}
+.menu .it{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;padding:7px 10px;border-radius:7px}
+.menu .it:hover,.menu .it.hl{background:var(--strip-hi)}
+.menu .it b{font-weight:600}
+.menu .it small{grid-column:1/3;color:var(--ink3);font-size:11.5px}
+.menu .sep{height:1px;background:var(--hair);margin:5px 4px}
+.older{border-top:1px dashed var(--hair2);padding-top:10px}
+.older>summary{font-size:12px;color:var(--ink3);display:flex;gap:7px;align-items:center}
+.older>summary::before{content:'+';display:inline-grid;place-items:center;width:15px;height:15px;border-radius:4px;background:var(--steel);font-weight:700;font-size:11px;color:var(--ink2)}
+.older[open]>summary::before{content:'\2013'}
+.orow{display:grid;grid-template-columns:62px 70px minmax(0,1fr) 40px;gap:10px;align-items:center;font-size:12px;padding:6px 0;color:var(--ink2)}
+.orow+.orow{border-top:1px solid var(--hair)}
+.callout{font-size:12px;color:var(--magenta);background:#f1edf8;border-radius:8px;padding:8px 10px;line-height:1.45}
+/* sessions */
+.srow{display:grid;grid-template-columns:110px 150px minmax(0,1fr) 46px auto;gap:12px;align-items:center;font-size:12px;padding:8px 0;color:var(--ink2)}
+.srow+.srow{border-top:1px solid var(--hair)}
+.srow .a{font-weight:600;color:var(--ink)}
+.warnb{color:var(--amber-ink)}
+.livecard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:12px 14px;border-radius:10px;background:#fdf3ea;border:1px solid #f3d9bf}
+.livecard small{grid-column:1/2;color:var(--ink3);font-size:12px}
+.empty{font-size:13px;color:var(--ink3);margin:0}
+.ctrack i.next{outline:1.5px dashed var(--cyan);outline-offset:2px}
+.ftrack .d.next{outline:2px dashed var(--cyan);outline-offset:3px}
+.ftrack .w.nx{color:var(--cyan);font-weight:700}
+.pill.nx{background:#e9f1e2;color:var(--cyan);box-shadow:inset 0 0 0 1px #b9d3a6}
+
+.stwrap{padding:40px 48px;display:flex;flex-direction:column;gap:6px}
+.stwrap h1{font-size:22px;margin:0}
+.stwrap .sub{font-size:13px;color:var(--ink3);margin:2px 0 18px;max-width:1100px;line-height:1.5}
+.st{display:grid;grid-template-columns:30px 230px 100px 190px 150px minmax(0,1fr) 200px;gap:14px;align-items:center;background:var(--strip);border-radius:12px;padding:11px 16px}
+.st.hd{background:none;padding:0 16px 4px;font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.02em}
+.st .n{font-size:12px;color:var(--ink3);font-weight:600}
+.st .case b{display:block;font-size:13px}
+.st .case small{font-size:12px;color:var(--ink3)}
+.st .cr{font-size:12px;color:var(--ink3)}
+.st .act{justify-self:end}
+.st .wait{font-size:12px;color:var(--ink3);font-style:italic}
+.pill.red{background:#f5e1dd;color:var(--red)}
+.pill.amb{background:#f7ecdf;color:var(--amber-ink)}
+.btn.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.grp{font-size:12px;font-weight:600;color:var(--ink2);margin:14px 0 2px 2px}
+.exp{background:var(--strip);border-radius:12px;border:1px solid var(--hair2);padding:14px 16px;display:flex;flex-direction:column;gap:14px}
+.legend{display:flex;gap:18px;font-size:12px;color:var(--ink2);align-items:center;margin-bottom:6px}
+.legend span{display:inline-flex;gap:6px;align-items:center}
+</style></head><body>
+<div class="stwrap"><h1>Delivery &mdash; every MR state and its next step</h1>
+<p class="sub">One target row per state, compact as on the Delivery tab. The first unfinished step (Pushed &rarr; MR open &rarr; Review &rarr; Pipeline &rarr; Merged) gets a dashed ring, the pill reads <b>next: &hellip;</b>, and the row's one button does that step. Review comes before Pipeline before Merge, so findings + a failed pipeline is #5. A pipeline that is <i>null</i> does not block. <b>Ignore</b> skips a Review or Pipeline step for that MR in this browser until the step's state changes; the step reads <i>ignored</i> (click to undo) and the marker moves on. Open findings get <b>Open session</b>: the live review session asks fix or leave. Detail only &mdash; the board card and List keep today's chip.</p>
+<div class="legend"><span><i class="ctrack"><i class="on next" style="width:8px;height:8px;border-radius:50%;display:block"></i></i>dashed ring = next step</span><span><span class="pill nx">next: &hellip;</span> compact pill names it</span><span>row button does exactly that step</span></div>
+<div class="st hd"><span>#</span><span>CASE</span><span>TRACK</span><span>COMPACT PILL</span><span>REVIEW</span><span>MR</span><span style="justify-self:end">ROW BUTTON</span></div><div class="grp">Next: Review</div><div class="st"><span class="n">1</span><span class="case"><b>Draft, not reviewed</b><small>open draft &middot; review none</small></span><span class="ctrack"><i class="on"></i><b class="grey"></b><i class="grey"></i><b class="off"></b><i class="off next"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: review</span></span><span class="cr">not reviewed</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns"><span class="split"><span>&#9654; Request review</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span></span></div><div class="st"><span class="n">3</span><span class="case"><b>Open, not reviewed</b><small>review none &middot; pipeline not read</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="off"></b><i class="off next"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: review</span></span><span class="cr">not reviewed</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns"><span class="split"><span>&#9654; Request review</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span></span></div><div class="st"><span class="n">11</span><span class="case"><b>Pipeline passed, never reviewed</b><small>review none &middot; pipeline success</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="off"></b><i class="off next"></i><b class="green"></b><i class="green"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: review</span></span><span class="cr">not reviewed</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns"><span class="split"><span>&#9654; Request review</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span></span></div><div class="st"><span class="n">5</span><span class="case"><b>Findings to fix</b><small>review open &middot; pipeline failed</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="amber"></b><i class="amber next"></i><b class="red"></b><i class="red"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: fix 3</span></span><span class="cr">3 open &middot; 1 major</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns" style="flex-direction:column;align-items:flex-end;gap:2px"><span class="btns"><button class="btn">Open session</button><button class="btn ghost sm">Ignore</button></span><small class="muted" style="font-size:11px">no live review session: review split, fix half</small></span></span></div><div class="st"><span class="n">6</span><span class="case"><b>Review stale</b><small>2 commits since review</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="grey"></b><i class="grey next"></i><b class="green"></b><i class="green"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: re-review</span></span><span class="cr">2 commits since review</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns"><span class="split"><span>&#9654; Request review</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span></span></div><div class="grp">Next: Pipeline</div><div class="st"><span class="n">8</span><span class="case"><b>Clean, pipeline failed</b><small>review clean &middot; pipeline failed</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="green"></b><i class="green"></i><b class="red"></b><i class="red next"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: fix pipeline</span></span><span class="cr">0 open &middot; 4 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns"><span class="split"><span>&#9654; Run</span><span>&#9662;</span></span><button class="btn ghost sm">Ignore</button></span></span></div><div class="st"><span class="n">12</span><span class="case"><b>Clean, pipeline canceled</b><small>review clean &middot; pipeline canceled</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="green"></b><i class="green"></i><b class="grey"></b><i class="grey next"></i><b class="off"></b><i class="off"></i></span><span><span class="pill nx">next: re-run</span></span><span class="cr">0 open &middot; 4 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="btns"><button class="btn">GitLab &#8599;</button><button class="btn ghost sm">Ignore</button></span></span></div><div class="grp">Next: Merge</div><div class="st"><span class="n">9</span><span class="case"><b>Clean, pipeline passed</b><small>review clean &middot; pipeline success</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="green"></b><i class="green"></i><b class="green"></b><i class="green"></i><b class="off"></b><i class="off next"></i></span><span><span class="pill nx">next: merge</span></span><span class="cr">0 open &middot; 4 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><button class="btn">Merge in GitLab &#8599;</button></span></div><div class="st"><span class="n">10</span><span class="case"><b>Clean, no pipeline</b><small>review clean &middot; pipeline null (does not block)</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="green"></b><i class="green"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off next"></i></span><span><span class="pill nx">next: merge</span></span><span class="cr">0 open &middot; 4 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><button class="btn">Merge in GitLab &#8599;</button></span></div><div class="st"><span class="n">15</span><span class="case"><b>Clean draft</b><small>draft &middot; review clean</small></span><span class="ctrack"><i class="on"></i><b class="grey"></b><i class="grey"></i><b class="green"></b><i class="green"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off next"></i></span><span><span class="pill nx">next: mark ready</span></span><span class="cr">0 open &middot; 2 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><button class="btn">GitLab &#8599;</button></span></div><div class="grp">Next: Ignored &mdash; step skipped in this browser</div><div class="st"><span class="n">16</span><span class="case"><b>Pipeline failed, ignored</b><small>review clean &middot; pipeline failed &rarr; Ignore</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="green"></b><i class="green"></i><b class="grey"></b><i class="grey"></i><b class="off"></b><i class="off next"></i></span><span><span class="pill nx">next: merge</span></span><span class="cr">0 open &middot; 4 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><button class="btn">Merge in GitLab &#8599;</button></span></div><div class="st"><span class="n">17</span><span class="case"><b>No review bot, review ignored</b><small>review none &rarr; Ignore &middot; pipeline success</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="grey"></b><i class="grey"></i><b class="green"></b><i class="green"></i><b class="off"></b><i class="off next"></i></span><span><span class="pill nx">next: merge</span></span><span class="cr">ignored</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><button class="btn">Merge in GitLab &#8599;</button></span></div><div class="grp">Waiting &mdash; no button</div><div class="st"><span class="n">2</span><span class="case"><b>Review not read yet</b><small>review null (first poll pending)</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i></span><span><span class="pill draft">open</span></span><span class="cr">&mdash;</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="wait">waiting for GitLab poll</span></span></div><div class="st"><span class="n">4</span><span class="case"><b>Review running</b><small>review reviewing</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="grey"></b><i class="grey"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i></span><span><span class="pill draft">reviewing&hellip; 4m</span></span><span class="cr">reviewing&hellip; 4m</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="wait">review bot is reviewing</span></span></div><div class="st"><span class="n">7</span><span class="case"><b>Clean, pipeline running</b><small>review clean &middot; pipeline running</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="green"></b><i class="green"></i><b class="amber"></b><i class="amber"></i><b class="off"></b><i class="off"></i></span><span><span class="pill amb">pipeline running</span></span><span class="cr">0 open &middot; 4 resolved</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="wait">pipeline running</span></span></div><div class="grp">Done</div><div class="st"><span class="n">13</span><span class="case"><b>Merged</b><small>every step reached</small></span><span class="ctrack"><i class="mag"></i><b class="mag"></b><i class="mag"></i><b class="mag"></b><i class="mag"></i><b class="mag"></b><i class="mag"></i><b class="mag"></b><i class="mag"></i></span><span><span class="pill merged">merged</span></span><span class="cr">&mdash;</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="wait">done</span></span></div><div class="st"><span class="n">14</span><span class="case"><b>Closed</b><small>lands under older MRs</small></span><span class="ctrack"><i class="on"></i><b class="on"></b><i class="on"></i><b class="off"></b><i class="off"></i><b class="off"></b><i class="off"></i><b class="grey"></b><i class="grey"></i></span><span><span class="pill closed">closed</span></span><span class="cr">&mdash;</span><span class="muted ell" style="font-size:12px">!16033 &middot; into develop</span><span class="act"><span class="wait">closed</span></span></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px"><div><div class="grp">Expanded &mdash; #5 findings to fix</div><div class="exp">
+  <div class="fhead"><span class="mrl">!16033 &#8599;</span><span class="muted" style="font-size:12px">microservice &rarr; develop</span><span class="r">polled 1m ago</span></div>
+  <ol class="ftrack"><li><span class="d on">&#10003;</span><span class="lb">Pushed</span><span class="w">2d</span></li><li><span class="bar on"></span><span class="d on">&#10003;</span><span class="lb">MR open</span><span class="w">open</span></li><li><span class="bar amber"></span><span class="d amber next"></span><span class="lb">Review</span><span class="w nx">next &middot; fix 3</span></li><li><span class="bar red"></span><span class="d red">&#10003;</span><span class="lb">Pipeline</span><span class="w">pipeline failed</span></li><li><span class="bar off"></span><span class="d off"></span><span class="lb off">Merged</span></li></ol>
+  <div class="rv"><span class="rvt amber">Review &middot; 3 open &middot; 1 major &middot; the live review session asks fix or leave</span><span class="btns"><button class="btn">Open session</button><button class="btn ghost sm">Ignore</button></span></div></div></div><div><div class="grp">Expanded &mdash; #16 failed pipeline ignored</div><div class="exp">
+  <div class="fhead"><span class="mrl">!16033 &#8599;</span><span class="muted" style="font-size:12px">microservice &rarr; develop</span><span class="r">polled 1m ago</span></div>
+  <ol class="ftrack"><li><span class="d on">&#10003;</span><span class="lb">Pushed</span><span class="w">2d</span></li><li><span class="bar on"></span><span class="d on">&#10003;</span><span class="lb">MR open</span><span class="w">open</span></li><li><span class="bar green"></span><span class="d green">&#10003;</span><span class="lb">Review</span><span class="w">0 open</span></li><li><span class="bar grey"></span><span class="d grey">&#10003;</span><span class="lb">Pipeline</span><span class="w"><u title="ignored in this browser &mdash; click to stop ignoring">ignored</u></span></li><li><span class="bar off"></span><span class="d off next"></span><span class="lb off">Merged</span><span class="w nx">next &middot; merge</span></li></ol>
+  <div class="rv"><span class="rvt">Reviewed and green &mdash; merge happens in GitLab</span><button class="btn">Merge in GitLab &#8599;</button></div></div></div></div>
+</div>
+</body></html>

@@ -229,6 +229,8 @@ button.rail-count { cursor: pointer }
 }
 .rail-sublink:hover { color: var(--ink) }
 .rail-sublink.on { color: var(--ink); font-weight: 600; background: var(--strip) }
+/* A glyph led into a tree row's label — the Jira ticket page's row, `<KEY>` with the ticket glyph (Jira detail tabs spec §2.2). */
+.rail-sub-glyph { display: inline-flex; flex: none; margin-right: 6px; color: var(--ink3) }
 
 /* Settings sits under a 1 px rule with 24 px of air either side: it is about
    the board, the rows above it are about the work (§8.0). Inset 4 px at each
@@ -717,7 +719,7 @@ button.rail-count { cursor: pointer }
 .jira-status-dot[data-tone="done"] { background: var(--green-solid) }
 .jira-card-status { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
 /* The MR chip (GitLab connection spec §7.2, `MrChip`): the lead MR's card-chip words on a tint of its tone, and the amber `not merged` beside it. The mock's
-   22 px pill at 11 px, but 500 rather than its 600 — §1's pill weight, as Detail's state pill beside an `Also:` MR (`.jira-dlv-word`, whose tone table it
+   22 px pill at 11 px, but 500 rather than its 600 — §1's pill weight, as Detail's state pill on a Delivery target row (`.jira-dlv-word`, whose tone table it
    shares below). It shrinks and ellipsises like the worktree chip, so `Run ▾` keeps its width, and is a block box rather than a flex one, because
    `text-overflow` does not reach a flex container's text. */
 .jira-mr-chip {
@@ -1475,10 +1477,13 @@ button.rail-count { cursor: pointer }
 .jira-detail-crumb-parent { display: inline-flex; align-items: baseline; gap: .25em; min-width: 0 }
 .jira-detail-crumb-in { flex: none; white-space: nowrap }
 .jira-detail-out {
-  margin-left: auto; display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
+  display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
   border: 1px solid var(--hairline2); border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--ink); text-decoration: none; white-space: nowrap
 }
 .jira-detail-out:hover { background: var(--strip-hi) }
+/* The frame's actions (Jira detail tabs spec §7.1, `B-Modal.html`): `Open full page ↗`, `Open in Jira ↗` and `Run ▾`, pushed to the head's right edge. The
+   wrapper is `Run ▾`'s row too, so its popover hangs under the chip, right-anchored as the base popover is, inside the dialog's head. */
+.jira-detail-acts { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0 }
 .jira-detail-title { flex-basis: 100%; margin: 0; font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -.02em; color: var(--ink); text-wrap: balance }
 .jira-detail-agent, .jira-detail-ticket { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
 .jira-detail-lbl {
@@ -1515,9 +1520,9 @@ button.rail-count { cursor: pointer }
 .jira-move-row > svg { flex: none; color: var(--green) }
 .jira-move-note { padding: 6px 10px 4px; margin-top: 4px; border-top: 1px solid var(--hairline2); font-size: 11px; color: var(--ink3) }
 .jira-detail-pane .jira-modal-error { margin-top: 12px }
-/* The Delivery pane (GitLab connection spec §7.1, `OptionC.dc.html`): a `.jira-detail-pane` in the Agent column holding the head (label, `!iid ↗`, `via`,
-   `<repo> → <target>`, `polled <age>` pushed right — wrapping rather than clipping in the column's width), the track, and the `Also:` line under a hairline.
-   The mock's 480 px column is its own artefact; the column keeps Detail's width (spec §7.1), so the head wraps and the step words wrap under their dots. */
+/* The Delivery pane (GitLab connection spec §7.1, `OptionC.dc.html`; one target's open body since Jira detail tabs spec §4.2): the head (`!iid ↗`,
+   `<repo> → <target>`, `polled <age>` pushed right — wrapping rather than clipping in the column's width), the track, and the next row under a hairline.
+   `.jira-dlv` alone is also the no-MR and unknown sentence's pane. The step words wrap under their dots at any width. */
 .jira-dlv { display: flex; flex-direction: column; gap: 14px }
 .jira-dlv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0 }
 .jira-dlv-link { font-size: 13px; font-weight: 600; color: var(--cyan); text-decoration: none; white-space: nowrap }
@@ -1563,30 +1568,82 @@ button.rail-count { cursor: pointer }
 .jira-dlv-track.compact .jira-dlv-dot { width: 8px; height: 8px }
 .jira-dlv-track.compact .jira-dlv-dot[data-mark='off'] { border-width: 1.5px }
 .jira-dlv-track.compact .jira-dlv-bar { width: 6px; height: 2px }
-/* `Also:` — the other MRs, each its link, its state word on a tint of its tone (the `Pill` shape, page-local because `Pill` has no magenta), and
-   `<repo> · <age>`. */
-/* The CodeRabbit row (`ReviewRow`, spec §5.2, mocks `opt-b-*.png`): a hairline above, the state's sentence on a tint of its tone filling the left, the ink button at
-   the right. Amber is findings to fix, grey everything the row offers a request for. The sentence ellipsises before the button gives any width. */
-.jira-dlv-review { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--hairline) }
-.jira-dlv-review-text {
-  flex: 1; min-width: 0; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis
+/* The next row (`NextRow`, Jira detail tabs spec §4.5, mocks `Main.html` `.rv` and `States.html`; was the CodeRabbit row, spec §5.2, mocks `opt-b-*.png`):
+   a hairline above, the step's sentence on a tint of its tone filling the left, then the row's one control and a quiet `Ignore` at the right. Amber is
+   findings to fix, grey every other sentence. The sentence ellipsises before the controls give any width; on a phone the controls wrap under it. */
+.jira-dlv-next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 14px; border-top: 1px solid var(--hairline) }
+.jira-dlv-next-text {
+  flex: 1 1 240px; min-width: 0; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px;
+  font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis
 }
-.jira-dlv-review-text[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
-.jira-dlv-review-text[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
+.jira-dlv-next-text[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
+.jira-dlv-next-text[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
+.jira-dlv-next-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto }
 /* The blocked button's reason under the row: a green live dot (the session holding it is running), the session's name at 500 --ink, the rest --ink2. It
    wraps rather than ellipsising — a branch name is long and this sentence is the only on-screen answer to "why can't I click it". */
-.jira-dlv-review-why { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink2) }
-.jira-dlv-review-why::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid); transform: translateY(-1px) }
-.jira-dlv-review-why strong { font-weight: 500; color: var(--ink) }
-.jira-dlv-also { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
-.jira-dlv-also-mr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
+.jira-dlv-next-why { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink2) }
+.jira-dlv-next-why::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid); transform: translateY(-1px) }
+.jira-dlv-next-why strong { font-weight: 500; color: var(--ink) }
+/* The next step's ring (spec §4.5): a dashed `--cyan` outline around the step's dot — dashed so it never reads as a reached green step — and its word in the
+   same accent; the compact track rings the same dot at a smaller offset. An ignored step's word is a text button back to the step (`--ink3`, underlined on
+   hover), its dot grey with a tick. */
+.jira-dlv-dot[data-next] { outline: 2px dashed var(--cyan); outline-offset: 3px }
+.jira-dlv-track.compact .jira-dlv-dot[data-next] { outline-width: 1.5px; outline-offset: 2px }
+.jira-dlv-step-word[data-next] { color: var(--cyan); font-weight: 700 }
+.jira-dlv-ignored { padding: 0; border: 0; background: none; font: inherit; font-size: 12px; color: var(--ink3); cursor: pointer }
+.jira-dlv-ignored:hover { color: var(--ink2); text-decoration: underline }
+/* The Delivery tab (spec §4.2, `Main.html` `.dhead` and `details.tgt`): the head line — `Branch <source>` (the branch in --ink, one face, §8.1), the
+   counts and `via` pushed right — then one fold row per target on the pane's --strip ground, a hairline ring once open. The summary only folds: chevron,
+   `into <target>`, the repo when two projects, `!iid ↗`, the title taking what is left and ellipsising, the compact track, the state pill and the quiet
+   words; on a narrow frame it wraps rather than clipping. */
+.jira-dlv-thead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 4px; font-size: 12px; color: var(--ink2) }
+.jira-dlv-branch code { color: var(--ink); font-weight: 500; overflow-wrap: anywhere }
+.jira-dlv-counts { display: inline-flex; gap: 8px; margin-left: auto; color: var(--ink3) }
+.jira-dlv-tgt { background: var(--strip); border-radius: 12px; margin-top: 10px; border: 1px solid transparent }
+.jira-dlv-tgt[open] { border-color: var(--hairline2) }
+.jira-dlv-tgt > summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px; border-radius: 12px; cursor: pointer; list-style: none;
+  color: var(--ink3)
+}
+.jira-dlv-tgt > summary::-webkit-details-marker,
+.jira-dlv-older > summary::-webkit-details-marker,
+.jira-wt-fold > summary::-webkit-details-marker,
+.jira-fold > summary::-webkit-details-marker { display: none }
+.jira-dlv-tgt > summary:hover { background: var(--strip-hi) }
+.jira-dlv-into { font-size: 12px; color: var(--ink3); white-space: nowrap }
+.jira-dlv-into b { font-size: 13px; font-weight: 600; color: var(--ink) }
+.jira-dlv-repo { font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-dlv-title { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink2) }
+.jira-dlv-tbody { display: flex; flex-direction: column; gap: 14px; padding: 2px 16px 16px }
+/* The older MRs (spec §4.3, `Main.html` `.older`): a nested fold under a dashed hairline, its summary the counts line; each row the link, the state pill,
+   `from <branch>` when it differs, the title ellipsised and the age. */
+.jira-dlv-older { border-top: 1px dashed var(--hairline2); padding-top: 10px }
+.jira-dlv-older > summary { font-size: 12px; color: var(--ink3); cursor: pointer; list-style: none }
+.jira-dlv-older > summary:hover { color: var(--ink2) }
+.jira-dlv-older-list { list-style: none; margin: 6px 0 0; padding: 0 }
+.jira-dlv-orow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0; font-size: 12px; color: var(--ink2) }
+.jira-dlv-orow + .jira-dlv-orow { border-top: 1px solid var(--hairline) }
+.jira-dlv-otitle { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-dlv-from { margin-right: 8px; font-weight: 500; color: var(--ink) }
+/* The Worktrees fold (spec §4.6): closed by default, `Worktrees <n>` on its summary in the Children head's weight, the rows once open. */
+.jira-wt-fold > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--ink)
+}
+/* The Agent and Children & comments tabs' folds (spec §5.2, §6: History, Children, Comments) — the Worktrees fold's summary, with the mock's right-aligned
+   meta (`5 ended · last nov 13, 17:33`, `N in all`) at 12 px `--ink3`, and the body 12 px under it. */
+.jira-fold > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--ink)
+}
+.jira-fold-meta { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--ink3); text-align: right }
+.jira-fold > .jira-fold-body { margin-top: 12px }
 .jira-dlv-word { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap }
 .jira-dlv-word[data-tone='green'], .jira-mr-chip[data-tone='green'] { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
 .jira-dlv-word[data-tone='red'], .jira-mr-chip[data-tone='red'] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
 .jira-dlv-word[data-tone='amber'], .jira-mr-chip[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
 .jira-dlv-word[data-tone='magenta'], .jira-mr-chip[data-tone='magenta'] { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 14%, var(--strip)) }
 .jira-dlv-word[data-tone='grey'], .jira-mr-chip[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
+/* A target row's pill when a step is next (`next: …`): the action colour on its own tint, as the ring is. */
+.jira-dlv-word[data-tone='next'] { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, var(--strip)) }
 /* The Agent band (restyle §4.4): the pane's own ground, 12 px radius, 16 px padding. Its row is the Run menu's positioning parent, so the panel hangs from the
    row (right edges aligned) and not from the band's foot; the wrapper's own `position: relative` is switched off for it. */
 .jira-detail-agent-band { display: flex; flex-direction: column; gap: 12px; background: var(--strip); border-radius: 12px; padding: 16px; min-width: 0 }
@@ -1612,6 +1669,63 @@ button.rail-count { cursor: pointer }
 .jira-detail-agent-child-more { flex: none; color: var(--ink3); font-weight: 400 }
 .jira-detail-assignee { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
 .jira-detail-label { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 8px; background: var(--strip-hi); font-size: 11px; font-weight: 500; color: var(--ink2) }
+
+/* The Detail body (Jira detail tabs spec §1, `Main.dc.html`; DESIGN.md §8.9.2): heading, summary strip, tab row and panes, one column under whichever
+   frame draws it. The heading's key and tags are `Main.dc.html`'s `.row` — the key bold at 12 px in --ink2 (no mono: the one face is the rule), the type
+   and labels as small --strip-hi tags — and the title keeps `.jira-detail-title`'s 22 px. */
+.jira-body { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+.jira-body-head { display: flex; flex-direction: column; gap: 6px; min-width: 0 }
+.jira-body-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0 }
+.jira-body-key { font-size: 12px; font-weight: 700; letter-spacing: .02em; color: var(--ink2) }
+.jira-body-tag { font-size: 11px; font-weight: 600; color: var(--ink2); background: var(--strip-hi); border-radius: 5px; padding: 2px 7px }
+/* The summary strip (spec §1.2, `.strip`): label-over-value cells on one --strip band, wrapping on a narrow frame. Its Delivery pills are buttons wearing
+   `.jira-dlv-word`'s tone table, so a pill reads in exactly the colour the Delivery pane gives the same word; the reset below only strips the button's
+   own chrome. The Agent pill is led by the card's `ui-stripe-dot`. */
+.jira-strip {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 26px; margin: 0; padding: 12px 16px; border-radius: 12px; background: var(--strip);
+  min-width: 0
+}
+.jira-strip-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.jira-strip-cell > dt { font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--ink3) }
+.jira-strip-cell > dd {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; min-height: 28px; font-size: 13px; color: var(--ink)
+}
+.jira-strip-pill { border: 0; cursor: pointer }
+.jira-strip-pill:hover { filter: brightness(1.1) }
+.jira-strip-agent {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--strip-hi);
+  font-size: 12px; font-weight: 500; color: var(--ink); cursor: pointer; white-space: nowrap
+}
+.jira-strip-agent:hover { background: var(--hover-fill) }
+.jira-strip-more, .jira-strip-idle { font-size: 12px; color: var(--ink3) }
+/* The tab row (spec §1.3, `.tabs`): an underline on the selected tab over one hairline rule, the count at 12 px --ink3 beside each label, the Agent
+   count green while a session is live. Scrolls sideways rather than wrapping, so a narrow frame keeps one row. */
+.jira-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--hairline); overflow-x: auto; min-width: 0 }
+.jira-tab {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 9px 14px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent;
+  background: none; font-size: 13px; font-weight: 600; color: var(--ink3); white-space: nowrap; cursor: pointer
+}
+.jira-tab:hover { color: var(--ink2) }
+.jira-tab[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--ink) }
+.jira-tab-count { font-size: 12px; font-weight: 500; color: var(--ink3) }
+.jira-tab-count[data-live] { color: var(--green) }
+.jira-tabpanel { min-width: 0 }
+/* The ticket page (Jira detail tabs spec §2.1, `Main.html` `.topbar`): the crumbs on the left — `Jira`, the board, the parent, in --ink3, the key bold in --ink —
+   and `← <origin>`, `Open in Jira ↗` and `Run ▾` on the right, wrapping under the crumbs on a narrow main. The body sits at the main area's width; the tab
+   panes are capped at a readable ~900 px, the builder's single-column measure. `.jira-page-acts` is `Run ▾`'s row, so its popover hangs under the chip. */
+.jira-page { display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+.jira-page-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-width: 0 }
+.jira-page-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.jira-page-crumbs b { color: var(--ink); font-weight: 600 }
+.jira-page-crumb-parent { overflow-wrap: anywhere }
+.jira-page-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0 }
+.jira-page-body .jira-tabpanel { max-width: 900px }
+.jira-page-pre { display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+.jira-page-failed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2) }
+.jira-page-failed p { margin: 0 }
+/* The Ticket pane (spec §1.4): the description and a 340 px Details pane, stacked under 700 px. */
+.jira-ticket-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; min-width: 0 }
+@media (max-width: 700px) { .jira-ticket-grid { grid-template-columns: minmax(0, 1fr) } }
 
 /* One live session's card: the deck card's face, widened to Detail's half. The strip is the board card's own band (`ui/LiveStrip`), clipped to the card's
    radius; under it the facts are a grid of label-over-value cells, four across where the column has the width and fewer where it does not, then the
@@ -4546,6 +4660,21 @@ button.rail-count { cursor: pointer }
 .ui-modal-split.ui-modal-narrow .ui-modal-facts { max-height: none; overflow: visible; border-bottom: none; padding: 16px 16px 0 }
 .ui-modal-split.ui-modal-narrow .ui-modal-body { overflow: visible; padding: 16px }
 .ui-modal-split.ui-modal-narrow .ui-modal-head { padding: 16px 52px 16px 16px }
+/* The single shape (Modal's header, "`head` with no `facts`"): Jira Detail since its tabs (spec §7.1, `B-Modal.html`) — the split's head band and its
+   width, and under it ONE column, the ticket body, which brought its own strip and tabs. The row track is the head's `auto` over the clamped
+   `minmax(0, 1fr)` the `.ui-modal` comment explains, so the body scrolls under a head that stays put — the head holds the exits. Folded, the head and
+   the body stack and the body stays the one scroller: there is no second column to fold above it, so the split's whole-panel scroll buys nothing. */
+.ui-modal-single {
+  width: min(1320px, calc(100vw / var(--font-scale, 1) - 48px));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--board);
+}
+.ui-modal-single .ui-modal-close { top: 18px; right: 18px }
+.ui-modal-single .ui-modal-body { padding: 20px 24px 24px }
+.ui-modal-single.ui-modal-narrow { width: calc(100vw / var(--font-scale, 1)) }
+.ui-modal-single.ui-modal-narrow .ui-modal-head { padding: 16px 52px 16px 16px }
+.ui-modal-single.ui-modal-narrow .ui-modal-body { padding: 16px }
 /* `foot` (Modal's header): a full-width band under both columns. It adds an `auto` ROW after the clamped `minmax(0, 1fr)` content row rather than
    replacing it — the content row keeps the clamp the `.ui-modal` comment explains, so the columns still scroll and the band stays in view below them.
    One rule per shape, after every shape's own row template, so each wins by order at equal specificity; the folded split has no row template (one

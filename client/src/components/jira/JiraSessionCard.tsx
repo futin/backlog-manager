@@ -53,7 +53,7 @@ import { OpenChip, SessionOpen } from './SessionOpen';
  *   it at the next reconcile. `stopping` draws the chip disabled — the signal is already on its way. And, as before the sessions page, only while the
  *   dashboard has agents enabled (the card is handed `agentsOn` by `JiraSessionCards`, which asks `useAgents()` once per list and is mounted only while
  *   there is a live link; `Stop session` is a row of `SessionOpen`'s menu and its `Confirm` is `SessionOpen`'s), so a Stop the dashboard would refuse is
- *   not drawn.
+ *   not drawn. A `review` session gets none either (Jira detail tabs spec §5.1), whatever its row carries.
  */
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -102,7 +102,8 @@ export function JiraSessionCard({
     ? '—'
     : [formatZonedClock(started, zone), elapsedSince(link.startedAt, now)].filter((p) => p !== null).join(' · ');
   const pct = row?.contextPct;
-  const stoppable = row?.stopState !== undefined;
+  // A review session is never offered Stop (Jira detail tabs spec §5.1, decision 5) — on every surface that draws this card, whatever its row carries.
+  const stoppable = row?.stopState !== undefined && link.action !== 'review';
   const stopping = row?.stopState === 'stopping';
 
   return (

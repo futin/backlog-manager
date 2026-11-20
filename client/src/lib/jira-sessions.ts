@@ -1,7 +1,8 @@
 import { QUIET_TITLE, type JiraSessionState } from '../../../shared/jira-sessions';
 import { JIRA_BUILTIN_LABELS, type DashboardRow, type JiraLink, type JiraSessionsPayload } from '../../../shared/types';
 import { sessionUrl } from './agents';
-import { elapsedSince } from './item-age';
+import { elapsedSince, formatCreated } from './item-age';
+import { formatZonedClock } from './time-zone';
 
 /**
  * jira-sessions.ts — which "open" buttons a linked Jira session shows, and whether the Desktop one may be pressed (Jira sessions spec C2, C3, §7.5).
@@ -188,6 +189,20 @@ export function ticketSessions(key: string, payload: JiraSessionsPayload | null)
     live: mine.filter((l) => l.endedAt === null).sort(newest('startedAt')),
     ended: mine.filter((l) => l.endedAt !== null).sort(newest('endedAt'))
   };
+}
+
+/**
+ * The History fold's summary (Jira detail tabs spec §5.2): `<N> ended · last <date, time>` over `ticketSessions`' `ended`, whose first entry is the newest
+ * end. The date is `formatCreated`'s — the one every client date reads through (`nov 13`, `nov 13 '25` in another year), the Ticket pane's `Resolved` fact
+ * among them — and the time `formatZonedClock`'s, both in the board's shared `zone`, so `nov 13, 17:33`. A newest end that does not parse leaves
+ * `<N> ended` alone rather than printing a date nobody can trust.
+ */
+export function historySummary(ended: readonly Pick<JiraLink, 'endedAt'>[], now: number, zone: string): string {
+  const count = `${ended.length} ended`;
+  const last = ended.length === 0 ? null : ended[0].endedAt;
+  const at = last === null ? NaN : Date.parse(last);
+  if (last === null || Number.isNaN(at)) return count;
+  return `${count} · last ${formatCreated(last, now, zone)}, ${formatZonedClock(at, zone)}`;
 }
 
 /** `7f3c…a91e` — the first and last four of a session id, which is what a person matches against the dashboard's own list. A short id is returned whole. */
