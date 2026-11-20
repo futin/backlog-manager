@@ -57,8 +57,11 @@ import { NotMergedChip } from './MrChip';
  *   The row itself opens nothing: there is no issue behind it until the read lands.
  * - **`No parent`** — the label beside the chevron and the count; every other cell empty, and no row click.
  *
- * **Indent** is padding inside the Key cell, never a column: `data-depth` is `Math.min(depth, LANE_INDENT_CAP)` for a header row and one more for its card
- * rows, read by CSS — an attribute, because the CSP allows no inline style.
+ * **Columns** run Type, Status, Key, Summary, Updated, [Delivery], Session, Assignee, Sprint, Priority, Run — the user's order (2026-11-20).
+ *
+ * **Indent** is padding inside the Summary cell, never a column: `data-depth` is `Math.min(depth, LANE_INDENT_CAP)` for a header row and one more for its
+ * card rows, read by CSS — an attribute, because the CSP allows no inline style. It lived in the Key cell until the keys of a parent and its children read
+ * staggered; in Summary a card's title lines up under its header's title, and every key starts at one edge.
  *
  * **Every row is its own issue** (§4.3). The Session cell is that key's `SessionCell` — a stripe dot, the state's word and an age, and `+N` when the key has
  * several live sessions; a session on a child marks the child's row and never its parent's, so no `FoldMark` is needed to say which ticket it runs on.
@@ -66,13 +69,13 @@ import { NotMergedChip } from './MrChip';
  * marks, so a row and its card cannot disagree on what a colour means. The last cell is the card's split Run, shown on row hover or focus only (it stays in
  * the DOM and tabbable — the stylesheet fades it, never removes it), on every row with an issue behind it.
  *
- * **Delivery** (GitLab connection spec §7.3, mock `List.dc.html`), after Status and drawn only while GitLab is shown at all (`useDeliveryIndex`): the row's
+ * **Delivery** (GitLab connection spec §7.3, mock `List.dc.html`), after Updated and drawn only while GitLab is shown at all (`useDeliveryIndex`): the row's
  * lead MR as the compact `DeliveryTrack` (the same dots Detail draws, in the same marks), its `!iid` link out and `deliveryLook`'s List word in its tone, then
  * the amber `not merged` chip the card draws, and `+N MR` for the others. A known ticket with no MR reads `no MR` and an unknown one `—`, both `--ink3`, so a
  * list GitLab has not finished reading never claims a ticket has nothing; a ticket whose project maps no GitLab project gets an empty cell (spec §7, "Which
  * tickets draw delivery at all"), and so does an off-board or `No parent` header row, which has no read issue to ask about. The link goes out in a new tab
- * with no referrer, and `rowOpens` already leaves a click on it to the link. The column's presence moves no other column's width: everything after Status is
- * sized from the END of the row (`nth-last-child`), and the scroll box carries `data-delivery` for the wider minimum.
+ * with no referrer, and `rowOpens` already leaves a click on it to the link. The column's presence moves no other column's width: everything after Delivery
+ * is sized from the END of the row (`nth-last-child`), and the scroll box carries `data-delivery` for the wider minimum.
  *
  * The scroll box and header are `.jira-issues-*`, modelled on the session table's `.jira-list-*`: the box scrolls sideways, the page never does.
  */
@@ -155,20 +158,20 @@ export function JiraIssueList({
         <table className="jira-issues-table">
           <thead>
             <tr>
-              <th scope="col">Session</th>
-              <th scope="col">Key</th>
-              <th scope="col">Summary</th>
               <th scope="col">Type</th>
               <th scope="col">Status</th>
+              <th scope="col">Key</th>
+              <th scope="col">Summary</th>
+              <th scope="col">Updated</th>
               {index !== null && (
                 <th scope="col" className="jira-issues-dlv-h">
                   Delivery
                 </th>
               )}
-              <th scope="col">Priority</th>
+              <th scope="col">Session</th>
               <th scope="col">Assignee</th>
               <th scope="col">Sprint</th>
-              <th scope="col">Updated</th>
+              <th scope="col">Priority</th>
               <th scope="col" aria-label="Run" />
             </tr>
           </thead>
@@ -208,8 +211,10 @@ function StubRow({
   read: OffBoardRead;
 }) {
   const { lane } = view;
+  // Updated, Delivery, Session, Assignee, Sprint, Priority and Run: everything after Summary is unknown on a stub row.
   const tail = (
     <>
+      <td />
       {hasDelivery && <td />}
       <td />
       <td />
@@ -222,16 +227,15 @@ function StubRow({
     return (
       <tr className="jira-issues-row jira-issues-lane" data-lane={lane.key} data-kind="none">
         <td />
-        <td className="jira-issues-key" data-depth={depth} />
-        <td className="jira-issues-summary">
+        <td />
+        <td className="jira-issues-key" />
+        <td className="jira-issues-summary" data-depth={depth}>
           <span className="jira-issues-flex">
             {chevron}
             <span className="jira-issues-label">No parent</span>
             {count}
           </span>
         </td>
-        <td />
-        <td />
         {tail}
       </tr>
     );
@@ -252,28 +256,6 @@ function StubRow({
   );
   return (
     <tr className="jira-issues-row jira-issues-lane" data-key={lane.key} data-lane={lane.key} data-kind="off">
-      <td />
-      <td className="jira-issues-key" data-depth={depth}>
-        {url === null ? (
-          lane.key
-        ) : (
-          <a href={url} target="_blank" rel="noreferrer" aria-label={`open ${lane.key} in Jira`}>
-            {lane.key}
-          </a>
-        )}
-      </td>
-      <td className="jira-issues-summary" title={summary}>
-        {failed === null ? (
-          line
-        ) : (
-          <span className="jira-issues-stack">
-            {line}
-            <span className="jira-modal-error" role="alert">
-              {failed}
-            </span>
-          </span>
-        )}
-      </td>
       <td>
         {stub?.type != null && (
           <span className="jira-issues-flex">
@@ -289,6 +271,27 @@ function StubRow({
           <span className="jira-issues-flex">
             <span className="jira-status-dot" data-tone={statusTone(stub.status.category)} aria-hidden="true" />
             <span className="jira-issues-cut">{stub.status.name}</span>
+          </span>
+        )}
+      </td>
+      <td className="jira-issues-key">
+        {url === null ? (
+          lane.key
+        ) : (
+          <a href={url} target="_blank" rel="noreferrer" aria-label={`open ${lane.key} in Jira`}>
+            {lane.key}
+          </a>
+        )}
+      </td>
+      <td className="jira-issues-summary" data-depth={depth} title={summary}>
+        {failed === null ? (
+          line
+        ) : (
+          <span className="jira-issues-stack">
+            {line}
+            <span className="jira-modal-error" role="alert">
+              {failed}
+            </span>
           </span>
         )}
       </td>
@@ -390,6 +393,35 @@ function IssueRow({
       onClick={onRowClick}
       onAuxClick={onRowAux}
     >
+      <td>
+        <span className="jira-issues-flex">
+          <span className="jira-card-type" data-tone={typeTone(issue.type)} aria-hidden="true">
+            <JiraTypeIcon type={issue.type} />
+          </span>
+          <span className="jira-issues-cut">{issue.type.name}</span>
+        </span>
+      </td>
+      <td>
+        <span className="jira-issues-flex">
+          <span className="jira-status-dot" data-tone={statusTone(issue.status.category)} aria-hidden="true" />
+          <span className="jira-issues-cut">{issue.status.name}</span>
+        </span>
+      </td>
+      <td className="jira-issues-key">
+        <a href={issue.url} target="_blank" rel="noreferrer" aria-label={`open ${issue.key} in Jira`}>
+          {issue.key}
+        </a>
+      </td>
+      <td className="jira-issues-summary" data-depth={depth} title={issue.summary}>
+        <span className="jira-issues-flex">
+          {head?.chevron}
+          {title}
+          {head?.chip}
+          {head?.count}
+        </span>
+      </td>
+      <td className="jira-issues-updated">{updated ?? ''}</td>
+      {index !== null && <DeliveryCell issue={issue} index={index} now={now} />}
       <td className="jira-issues-session">
         {cell === null ? (
           '—'
@@ -406,41 +438,6 @@ function IssueRow({
           </span>
         )}
       </td>
-      <td className="jira-issues-key" data-depth={depth}>
-        <a href={issue.url} target="_blank" rel="noreferrer" aria-label={`open ${issue.key} in Jira`}>
-          {issue.key}
-        </a>
-      </td>
-      <td className="jira-issues-summary" title={issue.summary}>
-        <span className="jira-issues-flex">
-          {head?.chevron}
-          {title}
-          {head?.chip}
-          {head?.count}
-        </span>
-      </td>
-      <td>
-        <span className="jira-issues-flex">
-          <span className="jira-card-type" data-tone={typeTone(issue.type)} aria-hidden="true">
-            <JiraTypeIcon type={issue.type} />
-          </span>
-          <span className="jira-issues-cut">{issue.type.name}</span>
-        </span>
-      </td>
-      <td>
-        <span className="jira-issues-flex">
-          <span className="jira-status-dot" data-tone={statusTone(issue.status.category)} aria-hidden="true" />
-          <span className="jira-issues-cut">{issue.status.name}</span>
-        </span>
-      </td>
-      {index !== null && <DeliveryCell issue={issue} index={index} now={now} />}
-      <td>
-        {/* The card's pill, with the grey `low` look and no glyph for an issue Jira left unprioritised: the cell is never blank, so the column reads as a column. */}
-        <span className="jira-card-prio jira-issues-prio" data-tone={prio ?? 'low'} title={`priority ${issue.priority ?? 'none'}`}>
-          {prio !== null && prio !== 'other' && <Glyph name={prio === 'high' ? 'up' : prio === 'med' ? 'equals' : 'down'} size={10} />}
-          {issue.priority ?? 'Not prioritised'}
-        </span>
-      </td>
       <td className={issue.assignee === null ? 'jira-issues-muted' : undefined}>
         <span className="jira-issues-flex">
           <span className={issue.assignee === null ? 'jira-card-av none' : 'jira-card-av'} aria-hidden="true">
@@ -450,7 +447,13 @@ function IssueRow({
         </span>
       </td>
       <td className={issue.sprint === null ? 'jira-issues-muted' : undefined}>{issue.sprint ?? '—'}</td>
-      <td className="jira-issues-updated">{updated ?? ''}</td>
+      <td>
+        {/* The card's pill, with the grey `low` look and no glyph for an issue Jira left unprioritised: the cell is never blank, so the column reads as a column. */}
+        <span className="jira-card-prio jira-issues-prio" data-tone={prio ?? 'low'} title={`priority ${issue.priority ?? 'none'}`}>
+          {prio !== null && prio !== 'other' && <Glyph name={prio === 'high' ? 'up' : prio === 'med' ? 'equals' : 'down'} size={10} />}
+          {issue.priority ?? 'Not prioritised'}
+        </span>
+      </td>
       <td className="jira-issues-act">
         <JiraRunMenu issue={issue} onPick={onRun} />
       </td>

@@ -274,7 +274,7 @@ describe('the List’s Delivery column', () => {
 
   it('puts Delivery after Status, between it and Priority', () => {
     drawList([issue('TIMIFY-123')], payload([mr()]));
-    expect(headers()).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Delivery', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']);
+    expect(headers()).toEqual(['Type', 'Status', 'Key', 'Summary', 'Updated', 'Delivery', 'Session', 'Assignee', 'Sprint', 'Priority', 'Run']);
   });
 
   it('draws the lead MR as a link out, its word, and `+N MR` for the others', () => {
@@ -329,7 +329,7 @@ describe('the List’s Delivery column', () => {
 
   it('draws no Delivery column while GitLab is unconfigured', () => {
     drawList([issue('TIMIFY-123')], payload([], {}, { state: 'unconfigured', armed: false }));
-    expect(headers()).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']);
+    expect(headers()).toEqual(['Type', 'Status', 'Key', 'Summary', 'Updated', 'Session', 'Assignee', 'Sprint', 'Priority', 'Run']);
     expect(document.querySelector('[data-delivery]')).toBeNull();
   });
 
