@@ -4,14 +4,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
+import { App } from '../../client/src/App';
 import JiraView from '../../client/src/components/jira/JiraView';
 import { JiraTicketFrame } from '../../client/src/components/jira/JiraTicketPage';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext, JiraProvider } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext, JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
-import { setJiraPage } from '../../client/src/hooks/useJiraPage';
-import { JIRA_TICKET_KEY_KEY, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { setJiraPage, useJiraPage } from '../../client/src/hooks/useJiraPage';
+import { getJiraTicket, setJiraTicketKey, syncJiraTicket } from '../../client/src/hooks/useJiraTicketKey';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
@@ -30,6 +31,24 @@ import {
   type ResolvedFixture
 } from '../helpers/ticket-body-cases';
 import type { JiraIssue, JiraStatusPayload } from '../../shared/types';
+
+/*
+  The address cases near the end mount the whole shell (`App`), because what they pin is `App`'s: the derived rule that drops the pair on every leave, the one
+  `popstate` listener, and the rail. Its other sections are stubbed, as `jira-sections.test.tsx` stubs them — the subject is the Jira section's address, and
+  the real views would bring fetches and clocks that assert nothing about it. `JiraView` and every Jira page stay real.
+*/
+jest.mock('../../client/src/components/board/BoardView', () => ({
+  __esModule: true,
+  default: () => require('react').createElement('div', null, 'board stub')
+}));
+jest.mock('../../client/src/components/runs/RunsView', () => ({
+  __esModule: true,
+  default: () => require('react').createElement('div', null, 'runs stub')
+}));
+jest.mock('../../client/src/components/settings/SettingsView', () => ({
+  __esModule: true,
+  default: () => require('react').createElement('div', null, 'settings stub')
+}));
 
 /*
   The Jira ticket page (Jira detail tabs spec §2; Task 8): the section's fifth page, one ticket read by key. Two halves. The first mounts the real section —
@@ -72,7 +91,9 @@ beforeEach(() => {
   localStorage.clear();
   setJiraDetailTab('ticket');
   setJiraView('board');
-  act(() => setJiraTicketKey(''));
+  // The key store and the address both outlive a case: a ticket one case opened would otherwise leave `?section=jira&ticket=…` and its key for the next.
+  window.history.replaceState(null, '', '/');
+  act(() => syncJiraTicket('', 'board'));
   statusAnswer = status();
   sessionsAnswer = { links: [], reachable: true, rowsAt: null };
   lists = { [BOARD_ID]: [ISSUE] };
@@ -98,18 +119,26 @@ beforeEach(() => {
     if (issue !== null) return details[decodeURIComponent(issue[1])]?.() ?? pending();
     if (url === '/api/agents/status') return ok(AGENTS_ON);
     if (url === '/api/jira/worktrees') return ok({ worktrees: [], unavailable: [] });
+    // The shell's own reads, for the `App` cases: no projects (Jira is not a source row, so nothing settles the section away) and a GitLab answer that
+    // never comes, as `NoGitlab` hands the section-only mounts.
+    if (url === '/api/projects') return ok([]);
+    if (url === '/api/gitlab') return pending();
     return ok({});
   }) as unknown as typeof fetch;
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   act(() => {
     setJiraTicketKey('');
     setJiraView('board');
   });
+  window.history.replaceState(null, '', '/');
 });
 
-const storedKey = (): unknown => JSON.parse(localStorage.getItem(JIRA_TICKET_KEY_KEY) ?? 'null');
+const SECTION_KEY = 'backlog-manager.section';
+const storedKey = (): unknown => getJiraTicket().key;
+const main = (): HTMLElement => document.querySelector('main') as HTMLElement;
 const page = (): unknown => JSON.parse(localStorage.getItem(JIRA_PAGE_KEY) ?? 'null');
 const issueReads = (key: string): number => requested.filter((u) => u === `/api/jira/issue/${key}`).length;
 /** The top bar's crumbs, one per element, joined as they read: `Jira / <board> / <parent> / <KEY>`. */
@@ -224,19 +253,19 @@ describe('the origin chip (§2.3)', () => {
     expect(screen.queryByRole('navigation', { name: 'Ticket path' })).toBeNull();
   });
 
-  it('T22: entered by the rail’s row (the page store alone), the chip is `← Board`', async () => {
-    mountSection('sessions');
-    await waitFor(() => expect(document.querySelector('tr.jira-list-row[data-key="PAY-12"]')).not.toBeNull());
-    act(() => {
-      setJiraTicketKey('PAY-12');
-      setJiraPage('ticket');
-    });
+  // A pasted link carries no `history.state`, so whatever page is stored, the chip names Board — the page that always has something to say.
+  it('T22: entered by a link with no state, over a stored Sessions page, the chip is `← Board`', async () => {
+    localStorage.setItem(SECTION_KEY, JSON.stringify('jira'));
+    setJiraPage('sessions');
+    window.history.replaceState(null, '', '/?section=jira&ticket=PAY-12');
+    render(<App />);
     await landed();
-    expect(screen.getByRole('button', { name: 'Board' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sessions' })).toBeNull();
+    expect(within(main()).getByRole('button', { name: 'Board' })).toBeInTheDocument();
+    expect(within(main()).queryByRole('button', { name: 'Sessions' })).toBeNull();
   });
 
-  it('T22: after a remount, an origin of Sessions is forgotten and the chip is `← Board`', async () => {
+  // The origin lives in the key store beside the key, not in `JiraView`'s memory, so a remount of the section with the key held keeps it.
+  it('T22: after a remount with the key held, an origin of Sessions is kept', async () => {
     const first = mountSection('sessions');
     await waitFor(() => expect(document.querySelector('tr.jira-list-row[data-key="PAY-12"]')).not.toBeNull());
     act(() => middle(document.querySelector('tr.jira-list-row[data-key="PAY-12"] td:last-child') as HTMLElement));
@@ -245,7 +274,8 @@ describe('the origin chip (§2.3)', () => {
     first.unmount();
     render(section(), { wrapper: NoGitlab });
     await landed();
-    expect(screen.getByRole('button', { name: 'Board' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sessions' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Board' })).toBeNull();
   });
 });
 
@@ -450,6 +480,229 @@ describe('the walk (§2.3)', () => {
     await waitFor(() => expect(crumbs()).toMatch(/PAY-16$/));
     expect(screen.queryByRole('button', { name: /^Back to/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Board' })).toBeInTheDocument();
+  });
+});
+
+/*
+  The ticket page's address (Jira ticket URL spec, "History" and "The address follows the screen"). The first two cases mount the section alone and pin the
+  key store's history writes — one push on the way in, replaces on every step of the walk. Every later case mounts `App`, because what it pins is the shell's:
+  the one derived rule that drops `section`/`ticket` whenever the ticket page is not on screen, whichever route left it, and the one `popstate` listener that
+  brings the page back — or takes the reader to the page the ticket was opened from — with the origin the entry's `history.state` carries. They are driven by
+  clicks and by the address, never by bare store writes: a store write and a section change outside one event can render apart, and the derived rule would see
+  the key without the page.
+*/
+describe('the address (Jira ticket URL spec)', () => {
+  beforeEach(() => {
+    sessionsAnswer = { links: [link({ sessionId: 's-1', state: 'working' })], reachable: true, rowsAt: null };
+  });
+
+  const sessionRow = (): HTMLElement | null => document.querySelector<HTMLElement>('tr.jira-list-row[data-key="PAY-12"] td:last-child');
+  const rail = (): HTMLElement => screen.getByRole('navigation', { name: 'Sections' });
+  const railRow = (name: string): HTMLElement =>
+    within(rail())
+      .getAllByRole('button')
+      .find((b) => b.classList.contains('rail-link') && b.textContent === name) as HTMLElement;
+  const jiraTree = (): HTMLElement => within(rail()).getByRole('group', { name: 'Jira pages' });
+  const ticketPath = (): HTMLElement | null => within(main()).queryByRole('navigation', { name: 'Ticket path' });
+  const PAY_12 = '?section=jira&ticket=PAY-12';
+
+  /** The shell, on the Jira section's `on` page, with that page's PAY-12 drawn. */
+  async function mountApp(on: 'board' | 'sessions'): Promise<void> {
+    localStorage.setItem(SECTION_KEY, JSON.stringify('jira'));
+    setJiraPage(on);
+    render(<App />);
+    if (on === 'sessions') await waitFor(() => expect(sessionRow()).not.toBeNull());
+    else await within(main()).findAllByText('Refund partial captures');
+    await flush();
+  }
+  async function openFromSessions(): Promise<void> {
+    act(() => {
+      fireEvent.click(sessionRow() as HTMLElement, { metaKey: true });
+    });
+    await landed();
+  }
+  /** The browser's Back or Forward, as it lands: the address and the entry's state are already the new entry's when the event fires. */
+  async function popTo(url: string, state: unknown): Promise<void> {
+    await act(async () => {
+      window.history.replaceState(state, '', url);
+      window.dispatchEvent(new PopStateEvent('popstate', { state }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await flush();
+  }
+
+  it('a Cmd-click from Sessions pushes one entry, the pair, with the origin in its state', async () => {
+    mountSection('sessions');
+    await waitFor(() => expect(sessionRow()).not.toBeNull());
+    const push = jest.spyOn(window.history, 'pushState');
+    const replace = jest.spyOn(window.history, 'replaceState');
+    act(() => {
+      fireEvent.click(sessionRow() as HTMLElement, { metaKey: true });
+    });
+    await landed();
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledWith({ jiraTicketOrigin: 'sessions' }, '', `/${PAY_12}`);
+    expect(replace).not.toHaveBeenCalled();
+    expect(window.location.search).toBe(PAY_12);
+    expect(window.history.state).toEqual({ jiraTicketOrigin: 'sessions' });
+  });
+
+  it('a Children row and then the Back chip only replace, and the address follows the drawn key', async () => {
+    mountSection('ticket', 'PAY-12');
+    await landed();
+    const push = jest.spyOn(window.history, 'pushState');
+    const replace = jest.spyOn(window.history, 'replaceState');
+    await openChildren();
+    await act(async () => {
+      fireEvent.click(treeRow('PAY-15'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(window.location.search).toBe('?section=jira&ticket=PAY-15');
+    const back = await screen.findByRole('button', { name: 'Back to PAY-12' });
+    await act(async () => {
+      fireEvent.click(back);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(window.location.search).toBe(PAY_12);
+    expect(push).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledTimes(2);
+    expect(window.history.state).toEqual({ jiraTicketOrigin: 'board' });
+  });
+
+  it('`← Sessions` leaves the address bare, on Sessions, with no key held', async () => {
+    await mountApp('sessions');
+    await openFromSessions();
+    expect(window.location.search).toBe(PAY_12);
+    fireEvent.click(within(main()).getByRole('button', { name: 'Sessions' }));
+    await waitFor(() => expect(page()).toBe('sessions'));
+    await flush();
+    expect(window.location.search).toBe('');
+    expect(window.history.state).toBeNull();
+    expect(storedKey()).toBe('');
+    expect(ticketPath()).toBeNull();
+  });
+
+  it('the rail’s Board row leaves the address bare and drops the key', async () => {
+    await mountApp('sessions');
+    await openFromSessions();
+    fireEvent.click(within(jiraTree()).getByRole('button', { name: 'Board' }));
+    await waitFor(() => expect(page()).toBe('board'));
+    await flush();
+    expect(window.location.search).toBe('');
+    expect(storedKey()).toBe('');
+    expect(ticketPath()).toBeNull();
+  });
+
+  it('the rail’s top-row `Jira` while on the page is not a leave: page and address stay', async () => {
+    await mountApp('sessions');
+    await openFromSessions();
+    fireEvent.click(railRow('Jira'));
+    await flush();
+    expect(page()).toBe('ticket');
+    expect(storedKey()).toBe('PAY-12');
+    expect(window.location.search).toBe(PAY_12);
+    expect(ticketPath()).not.toBeNull();
+  });
+
+  it('another section from the rail leaves the address bare and drops the key', async () => {
+    await mountApp('sessions');
+    await openFromSessions();
+    fireEvent.click(railRow('Runs'));
+    expect(await screen.findByText('runs stub')).toBeInTheDocument();
+    await flush();
+    expect(window.location.search).toBe('');
+    expect(storedKey()).toBe('');
+  });
+
+  it('`Forget PAY-12` goes back to Sessions with a bare address, and a Back onto that bare entry changes nothing (Review Focus 4)', async () => {
+    details['PAY-12'] = () => failed(502, 'Jira answered 502');
+    await mountApp('sessions');
+    act(() => {
+      fireEvent.click(sessionRow() as HTMLElement, { metaKey: true });
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Forget PAY-12' }));
+    await waitFor(() => expect(page()).toBe('sessions'));
+    await flush();
+    expect(window.location.search).toBe('');
+    expect(storedKey()).toBe('');
+    await popTo('/', null);
+    expect(page()).toBe('sessions');
+    expect(storedKey()).toBe('');
+    expect(ticketPath()).toBeNull();
+    expect(sessionRow()).not.toBeNull();
+  });
+
+  it('Back off a page opened from Sessions lands on Sessions, and the page store never reads `board` on the way', async () => {
+    await mountApp('sessions');
+    await openFromSessions();
+    const seen: string[] = [];
+    function Probe() {
+      const [p] = useJiraPage();
+      seen.push(p);
+      return null;
+    }
+    render(<Probe />);
+    seen.length = 0;
+    await popTo('/', null);
+    expect(page()).toBe('sessions');
+    expect(storedKey()).toBe('');
+    expect(ticketPath()).toBeNull();
+    expect(seen).toContain('sessions');
+    expect(seen).not.toContain('board');
+  });
+
+  it('Forward onto a ticket entry from the Board opens the page with the entry’s origin', async () => {
+    await mountApp('board');
+    await popTo(`/${PAY_12}`, { jiraTicketOrigin: 'sessions' });
+    await landed();
+    expect(page()).toBe('ticket');
+    expect(storedKey()).toBe('PAY-12');
+    expect(within(main()).getByRole('button', { name: 'Sessions' })).toBeInTheDocument();
+    expect(window.location.search).toBe(PAY_12);
+  });
+
+  it('open from Board, `← Board`, open from Sessions, then Back: Sessions, the last open’s origin (Review Focus 2)', async () => {
+    await mountApp('board');
+    act(() => {
+      fireEvent.click(card('Refund partial captures'), { metaKey: true });
+    });
+    await landed();
+    fireEvent.click(within(main()).getByRole('button', { name: 'Board' }));
+    await waitFor(() => expect(page()).toBe('board'));
+    await flush();
+    expect(window.location.search).toBe('');
+    fireEvent.click(within(jiraTree()).getByRole('button', { name: 'Sessions' }));
+    await waitFor(() => expect(sessionRow()).not.toBeNull());
+    await openFromSessions();
+    await popTo('/', null);
+    expect(page()).toBe('sessions');
+    expect(storedKey()).toBe('');
+    expect(ticketPath()).toBeNull();
+  });
+
+  it('open from Sessions, walk two children, then Back: Sessions — not the parent, not Board (Review Focus 3)', async () => {
+    await mountApp('sessions');
+    await openFromSessions();
+    await openChildren();
+    await act(async () => {
+      fireEvent.click(treeRow('PAY-15'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await screen.findByRole('button', { name: 'Back to PAY-12' });
+    await waitFor(() => expect(issueReads('PAY-15')).toBeGreaterThan(0));
+    await flush();
+    await openChildren();
+    await waitFor(() => treeRow('PAY-16'));
+    await act(async () => {
+      fireEvent.click(treeRow('PAY-16'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await screen.findByRole('button', { name: 'Back to PAY-15' });
+    expect(window.location.search).toBe('?section=jira&ticket=PAY-16');
+    await popTo('/', null);
+    expect(page()).toBe('sessions');
+    expect(storedKey()).toBe('');
+    expect(ticketPath()).toBeNull();
   });
 });
 

@@ -2,14 +2,13 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { VersionChip } from 'ui-kit';
 
 import { GlyphTile } from './ui/GlyphTile';
-import { Glyph, type GlyphName } from './ui/Glyphs';
+import type { GlyphName } from './ui/Glyphs';
 import { Pill } from './ui/Pill';
 
 import { useJiraContext } from '../hooks/JiraContext';
 import { setJiraListFilters } from '../hooks/useJiraListFilters';
 import { useJiraNeedsYou } from '../hooks/useJiraNeedsYou';
 import { useJiraPage } from '../hooks/useJiraPage';
-import { useJiraTicketKey } from '../hooks/useJiraTicketKey';
 import { useProjectsContext } from '../hooks/ProjectsContext';
 import { useFilesPage, useGithubPage } from '../hooks/useSourcePage';
 import { useNarrow } from '../hooks/useNarrow';
@@ -135,9 +134,6 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   // The Jira section's page — `useRunsMode`'s module store and its reason: this tree and the Board page's own `Set up` chip (threaded down from `App` as
   // `onOpenJiraPage`) are two mounted writers of one value, and a `usePersistedState` per caller would leave the other looking at a stale page.
   const [jiraPage, setJiraPage] = useJiraPage();
-  // The ticket page's row is drawn only while a key is held (spec §2.2): it is how a reader gets back to the page, so leaving never clears it.
-  const ticketKey = useJiraTicketKey();
-  const jiraTree: readonly JiraPage[] = ticketKey === '' ? JIRA_TREE_PAGES : [...JIRA_TREE_PAGES, 'ticket'];
   // Jira › Sessions' pending count (rail pending-counts spec; it supersedes the jira-sessions spec's C4, which kept the count off the Sessions entry): the
   // shell's one sessions answer, never a read of its own. It counts every linked ticket, so its click opens the Sessions page — the Board's deck shows the
   // picked board only — with the chip and All tickets set, in the same handler that moves the page and the section. The stores are module-level for this
@@ -221,7 +217,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   const pagesOf: Partial<Record<Section, readonly string[]>> = {
     files: FILES_PAGES,
     github: GITHUB_PAGES,
-    jira: jiraTree,
+    jira: JIRA_TREE_PAGES,
     runs: RUNS_MODES,
     settings: SETTINGS_SCOPES
   };
@@ -310,10 +306,9 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 section="jira"
                 current={section}
                 counts={pending.jira}
-                items={jiraTree}
+                items={JIRA_TREE_PAGES}
                 value={jiraPage}
-                labelFor={(p) => (p === 'ticket' ? ticketKey : RAIL_JIRA_LABEL[p])}
-                glyphFor={(p) => (p === 'ticket' ? 'document' : null)}
+                labelFor={(p) => RAIL_JIRA_LABEL[p]}
                 onPick={setJiraPage}
                 onChange={onChange}
                 closeMenu={() => setMenuOpen(false)}
@@ -394,7 +389,6 @@ function RailTree<T extends string>({
   items,
   value,
   labelFor,
-  glyphFor,
   onPick,
   onChange,
   closeMenu,
@@ -408,8 +402,6 @@ function RailTree<T extends string>({
   items: readonly T[];
   value: T;
   labelFor: (item: T) => string;
-  /** A glyph led into a row's label — today the Jira ticket page's row alone (spec §2.2); `null` or absent draws the word only. */
-  glyphFor?: (item: T) => GlyphName | null;
   onPick: (item: T) => void;
   onChange: (s: Section) => void;
   closeMenu: () => void;
@@ -418,7 +410,6 @@ function RailTree<T extends string>({
     <div className="rail-sub" role="group" aria-label={label}>
       {items.map((item) => {
         const on = value === item && current === section;
-        const glyph = glyphFor?.(item) ?? null;
         // Each entry is wrapped in `.rail-group`, the top row's positioning parent, so its pill can be a sibling of the row's button — the Jira Sessions
         // pill is a button itself, and a button in a button is invalid.
         return (
@@ -436,11 +427,6 @@ function RailTree<T extends string>({
                 closeMenu();
               }}
             >
-              {glyph !== null && (
-                <span className="rail-sub-glyph" aria-hidden="true">
-                  <Glyph name={glyph} size={14} />
-                </span>
-              )}
               {labelFor(item)}
             </button>
             <RailPill count={counts?.[item] ?? null} silent={false} />
@@ -575,8 +561,8 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
  * `Board` repeats the source trees' word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three columns of
  * cards — in the same sense Files › Board and GitHub › Board are.
  */
-// The tree's four fixed pages: `ticket` is a page the store can hold but a row the tree draws only while a key is held, labelled with that key and led by the
-// ticket glyph (spec §2.2) — `SideRail` appends it — so the rail never draws an empty `ticket` row, and `sectionTotal` never sums a page the tree does not show.
+// The tree's four fixed pages: `ticket` is a page the store can hold but never a row — the ticket's key lives in the address bar (jira-ticket-url spec), so the
+// rail draws no row for it, and `sectionTotal` never sums a page the tree does not show.
 const JIRA_TREE_PAGES: readonly JiraPage[] = JIRA_PAGES.filter((p) => p !== 'ticket');
 
 const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
@@ -584,7 +570,7 @@ const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   sessions: 'Sessions',
   mentions: 'Mentions',
   setup: 'Setup',
-  // Never drawn through this map as a word: the tree's row for the ticket page shows the held key (spec §2.2); the entry only keeps the record total.
+  // Never drawn through this map: the tree has no ticket row (the key is in the address bar); the entry only keeps the record total.
   ticket: 'Ticket'
 };
 

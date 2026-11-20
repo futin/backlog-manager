@@ -184,7 +184,12 @@ so the open section is the one white card in the rail and never a colour change 
 fill stays reserved for the open row, so a hovered row and a selected row read as two different things rather than one filled twice. A tile names its section;
 the one thing it shows of state is the ink tone of the open row (§6).
 
-The sub-nav tree is drawn only for the open section, as quiet 28 px rows, the open page a white row like the section's own. Runs gets the first one this board has, History, Watchdog and Ticks (§8.4) — the same choice `RUNS_MODE_KEY` (`client/src/lib/runs-mode.ts`) already persists and guards, whose segmented control is replaced by the tree at every width, not only above the phone breakpoint. Settings' Local, Shared and Dashboards (§8.6), Jira's Board, Sessions, Mentions and Setup (§8.9) — and, only while the ticket key store holds a key, a fifth row for the ticket page, labelled with that key in place of a page name and led by the `document` glyph (`.rail-sub-glyph`; Jira detail tabs spec §2.2), which leaving the page never removes — Files' Board and Archive and GitHub's Board, Archive and Settings (§8.3, §8.5, §8.6) follow it, one `RailTree` drawing all five, and each tree is its section's page switch — Settings' is the one with a second, in the page's own band (§8.6; spec §3 overrides the old "the rail is the only switch" rule for that page alone).
+The sub-nav tree is drawn only for the open section, as quiet 28 px rows, the open page a white row like the section's own. Runs gets the first one this board
+has, History, Watchdog and Ticks (§8.4) — the same choice `RUNS_MODE_KEY` (`client/src/lib/runs-mode.ts`) already persists and guards, whose segmented control
+is replaced by the tree at every width, not only above the phone breakpoint. Settings' Local, Shared and Dashboards (§8.6), Jira's Board, Sessions, Mentions and
+Setup (§8.9) — four fixed rows, none for the ticket page, whose key lives in the address bar (jira-ticket-url spec) — Files' Board and Archive and GitHub's
+Board, Archive and Settings (§8.3, §8.5, §8.6) follow Runs' tree, one `RailTree` drawing all five, and each tree is its section's page switch — Settings' is the
+one with a second, in the page's own band (§8.6; spec §3 overrides the old "the rail is the only switch" rule for that page alone).
 
 Since the source-sections change the rail lists five sections — Files, GitHub, Jira, Runs, Settings, in `SECTIONS` order — and draws three of them only when they have something to show: Files and GitHub while a registered project has that source, Jira while `GET /api/jira` says the site is configured (each also while a section the reader chose is being held for its answer; §8.9 for Jira). A machine without Jira credentials or without a GitHub project sees only the rows it can fill, and nothing in the rail moves to make room for an absent one. A load with no stored section, or one that stored the old root Board or Archive, paints the section's loading shape and no source row until the projects answer settles where it lands, so a files-only machine never flashes a GitHub row and board.
 
@@ -661,14 +666,17 @@ one column, the body under it on `--board`, scrolling under the head so its exit
 (`.jira-detail-acts`), `Open full page ↗`, `Open in Jira ↗` (a 28 px outlined link, `.jira-detail-out`, the issue's `url` in a new tab with no referrer)
 and `Run ▾`, then the shell's close. `Open full page ↗` closes the modal and opens the ticket page on this key. Escape still closes the whole dialog.
 
-**The ticket page** (`JiraTicketPage`; spec §2; the `ticket` page of §8.0's tree, drawn only while a key is held). The same body at the main area's width,
+**The ticket page** (`JiraTicketPage`; spec §2; the `ticket` page of §8.9's section, with no row in §8.0's tree: its address is `/?section=jira&ticket=<KEY>`,
+so it is a link that reloads and pastes, and the browser's Back leaves it). The same body at the main area's width,
 its tab panes capped at ~900 px (`.jira-page-body .jira-tabpanel`). The top bar (`.jira-page-top`) reads `Jira / <board name> / <parent key> <parent
 summary> / <KEY>` at 12 px `--ink3` with the key at 600 `--ink` (`.jira-page-crumbs` — the board crumb only while the ticket is on the picked board), and on
-the right (`.jira-page-acts`) `← <origin>` (a flat 28 px `Chip` naming the page that opened this one, `Board` after a reload or a rail-row entry),
+the right (`.jira-page-acts`) `← <origin>` (a flat 28 px `Chip` naming the page that opened this one, `Board` after a pasted link or a new tab, the page it was
+opened from after a reload),
 `Open in Jira ↗` and `Run ▾`. Before an issue exists — first open, a reload, every walk step, since the page has no card to draw from — the top bar is
 `Jira / <KEY>` and `← <origin>` alone (both exits need the issue), and the body is the walk's Back chip, `<KEY>` in mono and `loading…`, or the failure line
 with `Retry` and a flat `Forget <KEY>` (`.jira-page-failed`), which empties the key and goes back to the origin so a ticket that no longer reads does not
-leave a rail row that opens an error forever. A later failed re-read of a ticket already drawn keeps it and draws the line under the strip, as the modal does.
+stay in the address, where a reload would open the error again. A later failed re-read of a ticket already drawn keeps it and draws the line under the strip, as
+the modal does.
 
 **Heading** (`.jira-body-head`; spec §1.1). The key in mono (`.jira-body-key`) with the type and labels as tags (`.jira-body-tag`), the summary under them as
 the 22/600 title (`.jira-detail-title`). Below the issue a frame opened — once a Children row or the parent link has stepped (below) — the tags row leads
@@ -677,7 +685,9 @@ the walk (the modal's is `JiraView`'s, the page's its own; a row click pushes, a
 trail: the trail grows with depth, and the crumbs already name where the issue sits. The crumbs are the frame's, so the key shows once there and once here.
 
 **Summary strip** (`.jira-strip`, `JiraTicketStrip`; spec §1.2). One `--strip` band of label-over-value cells (`.jira-strip-cell`), wrapping on a narrow
-frame: `Status` (the status chip, which is the Move-to control, below), `Assignee` (a 22 px tinted initials disc before the name, or `unassigned`, with
+frame and, on a wide one, spreading across the band (each cell grows, `flex: 1 1 auto`, so a row's spare width is shared equally and the gaps widen together;
+label and value stay left-aligned in the cell): `Status` (the status chip, which is the Move-to control, below), `Assignee` (a 22 px tinted initials disc before
+the name, or `unassigned`, with
 `Assign to me` beside it), `Sprint` and `Parent` (each drawn only when known; Parent is the parent link), `Delivery` — one pill per target (`.jira-strip-pill`,
 `<target> · <word>` in `deliveryLook`'s tone, led by the repo basename when the targets span projects), worst tone first, at most three and then `+N` in the
 worst folded tone, `no MR` or `unknown` in grey, drawn only while the Delivery tab is; a pill click selects that tab and opens its row, `+N` the tab — and

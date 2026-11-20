@@ -9,6 +9,7 @@ import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../sh
 import { Chip } from '../ui/Chip';
 import { JiraRunMenu } from './JiraRunMenu';
 import { JiraTicketBody } from './JiraTicketBody';
+import type { TicketOrigin } from '../../lib/jira-page';
 
 /**
  * JiraTicketPage — the Jira section's fifth page, one ticket read by key at the main area's width (Jira detail tabs spec §2; DESIGN.md §8.9.2; mock
@@ -29,17 +30,18 @@ import { JiraTicketBody } from './JiraTicketBody';
  * ticket already shown (§2.1), as the modal does. With no copy at all (first open, a reload, every walk step) the PRE-ISSUE frame draws: crumbs
  * `Jira / <KEY>` and `← <origin>`, no `Open in Jira ↗` or `Run ▾` (both need the issue), the walk's Back chip and `<KEY>` in mono, then `loading…` — or the
  * failure line with `Retry` (reads again) and `Forget <KEY>` (empties the key store and goes back to the origin, so a ticket that no longer reads does not
- * leave a rail row that opens an error forever, §2.2).
+ * stay in the address, where a reload would open the error again, §2.2).
  *
  * **The walk is the page's own** (§2.3): a Children row or the parent link pushes the ticket on screen and writes the child's key; Back pops and writes the
  * popped key. Every step goes through the key store, so a reload lands on the ticket on screen — and the walk itself is component state, gone when the page
  * unmounts (the reader left it) or the section remounts, which is why a reload opens on the last child with no Back chip (Review Focus 3).
  *
- * **Origin** is `JiraView`'s, held in memory and handed in: the page that opened this one, `Board` after a reload or a rail-row entry (§2.3).
+ * **Origin** is the key store's (`useJiraTicketOrigin`), read by `JiraView` and handed in: the page that opened this one, recorded in the history entry's
+ * state when the ticket was opened, so it survives a reload and a remount; a pasted link has none and says `Board` (Jira ticket URL spec). `Forget` empties
+ * the key, which resets the store's origin, and then calls `onLeave` — whose closure still holds the origin this render drew, so it goes to the right page.
  */
 
 /** The pages a ticket page can be entered from, and the word its `←` chip names each by. */
-export type TicketOrigin = 'board' | 'sessions' | 'mentions';
 const ORIGIN_LABEL: Record<TicketOrigin, string> = { board: 'Board', sessions: 'Sessions', mentions: 'Mentions' };
 
 export function JiraTicketPage({

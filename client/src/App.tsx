@@ -12,10 +12,12 @@ import { firstDrawn, settleSection } from './lib/sources';
 import { SETTINGS_STORAGE_KEY } from './lib/settings';
 import { readDeepLink, withoutDeepLink } from './lib/deep-link';
 import type { JiraPage } from './lib/jira-page';
+import { originFromState, ticketAddress } from './lib/ticket-url';
 import { GitlabProvider } from './hooks/GitlabContext';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { JiraSessionsProvider } from './hooks/JiraSessionsContext';
-import { setJiraPage } from './hooks/useJiraPage';
+import { setJiraPage, useJiraPage } from './hooks/useJiraPage';
+import { forgetLegacyTicketKey, getJiraTicket, setJiraTicketKey, syncJiraTicket, useJiraTicketKey } from './hooks/useJiraTicketKey';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
 import { OrchestratorRunsProvider, useOrchestratorRunsContext } from './hooks/OrchestratorRunsContext';
@@ -142,12 +144,30 @@ function AppShell() {
     A deep link (`lib/deep-link.ts`, Lookout's Orchestrator tile) beats both, and is read once, here, for the same no-flash reason. Its Runs page is written
     inside the initializer rather than in an effect, because the lazy `RunsView` reads the stored page as it mounts and an effect could land after that. It
     is the same `setRunsMode` the rail's tree calls, so StrictMode's second run of the initializer writes the same value again.
+
+    The Jira ticket pair (`?section=jira&ticket=<KEY>`, Jira ticket URL spec) is applied here for the same reason: the lazy `JiraView` reads the page and the
+    key store as it mounts, so both must already say `ticket` and the key — a pasted link opens the ticket even with `board` stored. The key is SYNCED, not
+    set: the address already says it, and the setter's `pushState` would add a second entry for the one the reader is on. The origin comes from the entry's
+    own `history.state`, so a reload of a ticket opened from Sessions still goes back to Sessions; a pasted link has none and reads `board`.
+    `forgetLegacyTicketKey` drops the key an older build persisted, once per load — the address is the key's only home now, and a stale copy left in storage
+    would be a second answer nothing reads. Every write here is idempotent, so StrictMode's second run is harmless.
   */
   const [link] = useState(() => {
     const read = readDeepLink(window.location.search);
     if (read.runsMode !== null) setRunsMode(read.runsMode);
+    forgetLegacyTicketKey();
+    if (read.ticket !== null) {
+      syncJiraTicket(read.ticket, originFromState(window.history.state));
+      setJiraPage('ticket');
+    }
     return read;
   });
+  /*
+    Read AFTER the initializer above, so the first read sees the page a ticket link wrote. Read before it, the first render would hold the stored page
+    (`board`, say) beside the link's key, and the derived rule below would take that pair for a leave and clear the key the link just opened.
+  */
+  const [jiraPage] = useJiraPage();
+  const ticketKey = useJiraTicketKey();
   /*
     `pending` is the provisional landing, or `null` once there is none: the page a legacy `board`/`archive` meant, or `null` inside for a landing that
     named no page. It is written into BOTH page stores here, before either source page mounts, so whichever source the section settles on opens on it —
@@ -191,13 +211,22 @@ function AppShell() {
   useLayoutEffect(() => {
     if (link.settingsScope !== null) update({ settingsScope: link.settingsScope });
   }, []);
-  // Recorded as a click on the rail would record it, and taken out of the address bar so a reload inside the app reopens where the reader has gone since.
-  // Mount only: `link` never changes.
+  /*
+    Recorded as a click on the rail would record it, and taken out of the address bar so a reload inside the app reopens where the reader has gone since.
+    Mount only: `link` never changes.
+
+    Two exceptions to "taken out". A valid ticket pair STAYS — the ticket page is on screen, and the address is that page's (a reload or a copied link must
+    reopen it) — rewritten through `ticketAddress` so any other deep-link parameter beside it goes and the pair reads in one canonical order; the entry's
+    state is kept, since it carries the origin. And a `ticket=` that is not half of a valid pair (no `section=jira`, or not key-shaped) is stripped even when
+    no valid section is present, so the address never names a ticket that is not on screen. Every other address with no valid section is left alone, as
+    before — `?section=nope` and a lone `?runs=` are not this app's to rewrite, which is why the guard is not "any deep-link parameter present".
+  */
   useEffect(() => {
-    if (link.section === null) return;
-    writeSection(link.section);
     const { pathname, search, hash } = window.location;
-    window.history.replaceState(window.history.state, '', withoutDeepLink(pathname, search, hash));
+    if (link.section === null && !new URLSearchParams(search).has('ticket')) return;
+    if (link.section !== null) writeSection(link.section);
+    const next = link.ticket !== null ? ticketAddress(pathname, search, hash, link.ticket) : withoutDeepLink(pathname, search, hash);
+    window.history.replaceState(window.history.state, '', next);
   }, []);
 
   // The view on screen — the section, and for a source section its page. GitHub › Board and GitHub › Archive are one section, and a pick in the GitHub
@@ -293,6 +322,56 @@ function AppShell() {
     setJiraPage(p);
     change('jira');
   };
+
+  /*
+    The address follows the screen (Jira ticket URL spec), by ONE derived rule rather than a clear on every route out: whenever a key is held and the screen
+    is not (section `jira`, page `ticket`), the key goes, through the store's setter — whose key → none transition is the `replaceState` to the address
+    without `section`/`ticket`. So every leave — the rail's tree and count pills, another section, the strip chips, `← <origin>`, `Forget <KEY>`, the Jira
+    fall on `configured: false`, the source settle, `JiraView`'s `noTicket` write-back — drops the pair without any of them knowing the address exists, and a
+    route added later cannot forget to. The rail's top-row `Jira` while on the page re-selects the section and keeps the page, so it is no leave and nothing
+    here fires.
+
+    It skips a render whose `section` is behind `intent` (the settle's guard above, for the same reason): a key and page written by store setters can commit
+    in a render ahead of the `setSection` from the same handler — a store update is a sync re-render, a state update outside a React event may not be — and
+    that render would show this rule the key without the section and clear a ticket that is on its way in. The section change queued a render, and that one
+    runs this again with the values it should see.
+  */
+  useEffect(() => {
+    if (intent.current.section !== section) return;
+    if (ticketKey !== '' && !(section === 'jira' && jiraPage === 'ticket')) setJiraTicketKey('');
+  }, [section, jiraPage, ticketKey]);
+
+  /*
+    Browser Back and Forward (Jira ticket URL spec, "Back and Forward keep the origin"): ONE `popstate` listener, bound on mount. It writes no history — the
+    browser has already moved to the entry — so it uses `syncJiraTicket`, never the setter.
+
+    - An entry with the ticket pair opens the ticket page with the origin that entry's state carries (`board` when it has none), through `onOpenJiraPage`
+      — the same pair every other way in uses, so the section key is still recorded in one place.
+    - An entry without it, while a ticket is held, takes the reader to the page the ticket was opened from, and sets that page in the SAME handler that
+      clears the key. Cleared alone, `JiraView` would draw `ticket` with no key for a render, its `noTicket` effect would write `board`, and a reader who
+      came from Sessions would land on the Board. With no ticket held it does nothing: an in-app leave already rewrote the ticket's entry to the bare
+      address, so this Back press is the accepted one that changes nothing visible.
+
+    Bound once, so it reaches `onOpenJiraPage` — whose `change` closes over this render — through a ref that every render refreshes.
+  */
+  const openJiraPageRef = useRef(onOpenJiraPage);
+  openJiraPageRef.current = onOpenJiraPage;
+  useEffect(() => {
+    const onPop = (event: PopStateEvent): void => {
+      const { ticket } = readDeepLink(window.location.search);
+      if (ticket !== null) {
+        syncJiraTicket(ticket, originFromState(event.state));
+        openJiraPageRef.current('ticket');
+        return;
+      }
+      const held = getJiraTicket();
+      if (held.key === '') return;
+      syncJiraTicket('', 'board');
+      setJiraPage(held.origin);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   /* The Files section's pair, for the Sources card's `Open`: the Files board, page store first like its two siblings. */
   const onOpenFilesPage = (): void => {

@@ -9,8 +9,8 @@
  * a word this union never had, and the one outcome the Jira section must never have is rendering neither page.
  *
  * `ticket` is the page for one ticket read by key (`hooks/useJiraTicketKey.ts`). It is a member like the others, so a stored `ticket` survives a reload, but it
- * is only a page while a key is held: `JiraView` draws the Board for `ticket` with an empty key and writes `board` back, and the rail draws its row only while
- * a key is held (spec §2.1, §2.2).
+ * is only a page while a key is held — and the key lives in the address (`?section=jira&ticket=<KEY>`), not in storage — so `JiraView` draws the Board for
+ * `ticket` with an empty key and writes `board` back. The rail never draws a row for it (Jira ticket URL spec; spec §2.1, §2.2 of the detail tabs).
  */
 
 export type JiraPage = 'board' | 'sessions' | 'mentions' | 'setup' | 'ticket';
@@ -23,3 +23,11 @@ export const JIRA_PAGE_KEY = 'backlog-manager.jira-page';
 export function isJiraPage(v: unknown): v is JiraPage {
   return typeof v === 'string' && (JIRA_PAGES as readonly string[]).includes(v);
 }
+
+/**
+ * Which page a ticket was opened from, so the ticket page's back control and breadcrumb can name it. It rides in `history.state` beside the `ticket` address
+ * (`lib/ticket-url.ts`), because a reload keeps the state and a pasted link has none: absent or unrecognised reads `board`.
+ */
+export type TicketOrigin = 'board' | 'sessions' | 'mentions';
+
+export const TICKET_ORIGINS: readonly TicketOrigin[] = ['board', 'sessions', 'mentions'];
