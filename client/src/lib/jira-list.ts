@@ -1,5 +1,5 @@
 import { needsYou } from '../../../shared/jira-sessions';
-import { JIRA_BUILTIN_LABELS, type JiraIssue, type JiraLiveSession, type JiraSessionsPayload } from '../../../shared/types';
+import { JIRA_BUILTIN_LABELS, type JiraIssue, type JiraLiveSession, type JiraSessionsPayload, type JiraSkillGroup } from '../../../shared/types';
 import { repoBasename } from './jira';
 import { deckGroup, deckOrder, type DeckGroup } from './jira-deck';
 import { MONTHS, elapsedSince } from './item-age';
@@ -226,12 +226,14 @@ export function runKey(row: Pick<ListRow, 'link'>): string | null {
   return typeof link.action === 'string' ? link.action : `skill:${link.action.skill}`;
 }
 
-function runOptionLabel(key: string, skills: readonly { id: string; name: string }[]): string {
+function runOptionLabel(key: string, skills: readonly { id: string; name: string; group: JiraSkillGroup }[]): string {
   if (key === 'branch') return 'Found by branch';
   if (key === 'manual') return 'Linked by hand';
   if (key === 'execute' || key === 'context' || key === 'review' || key === 'reply') return JIRA_BUILTIN_LABELS[key];
   const id = key.slice('skill:'.length);
-  return skills.find((k) => k.id === id)?.name ?? id;
+  const skill = skills.find((k) => k.id === id);
+  if (skill === undefined) return id;
+  return skill.group === 'review' ? `Review the MR · ${skill.name}` : skill.name;
 }
 
 /** The ended group's order key: the end, or the state's own stamp for an `ended` link the store left without one. */
@@ -256,7 +258,7 @@ export function applyListFilters(
   rows: readonly ListRow[],
   want: ListFilters,
   search: string,
-  skills: readonly { id: string; name: string }[],
+  skills: readonly { id: string; name: string; group: JiraSkillGroup }[],
   now: number
 ): ListView {
   const repos = [...new Set(rows.map((r) => repoBasename(r.repo)))].sort((a, b) => a.localeCompare(b));

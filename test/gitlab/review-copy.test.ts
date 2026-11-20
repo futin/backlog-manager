@@ -1,4 +1,4 @@
-import { reviewButtonLabel, reviewRowText, reviewStepTitleSuffix, reviewStepWord } from '../../client/src/lib/review-copy';
+import { reviewBlockedTail, reviewButtonLabel, reviewRowText, reviewStepTitleSuffix, reviewStepWord } from '../../client/src/lib/review-copy';
 import type { GitlabReview } from '../../shared/types';
 
 /**
@@ -97,5 +97,12 @@ describe('reviewButtonLabel', () => {
     ['unknown', null]
   ])('%s', (state, label) => {
     expect(reviewButtonLabel(state)).toBe(label);
+  });
+});
+
+describe('reviewBlockedTail', () => {
+  it('names the button it waits for, review skills included', () => {
+    expect(reviewBlockedTail('Fix review')).toBe(' — Fix review waits until it ends or you stop it.');
+    expect(reviewBlockedTail('Review')).toBe(' — Review waits until it ends or you stop it.');
   });
 });

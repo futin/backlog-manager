@@ -507,7 +507,7 @@ function DispatchGroup() {
             options={[
               { value: 'execute', label: JIRA_BUILTIN_LABELS.execute },
               { value: 'context', label: JIRA_BUILTIN_LABELS.context },
-              ...jiraSkills.map((k) => ({ value: k.id, label: k.name }))
+              ...jiraSkills.filter((k) => k.group === 'run').map((k) => ({ value: k.id, label: k.name }))
             ]}
             onChange={(jiraDefaultAction) => update({ jiraDefaultAction })}
           />

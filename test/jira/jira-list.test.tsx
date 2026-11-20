@@ -12,7 +12,7 @@ import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { resetJiraListFilters, setJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
-import { sessionsEmptyTitle, stubIssue } from '../../client/src/lib/jira-list';
+import { applyListFilters, DEFAULT_LIST_FILTERS, sessionsEmptyTitle, stubIssue } from '../../client/src/lib/jira-list';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { daysAgoStamp } from '../helpers/dates';
 import type { JiraBoardStatus, JiraEndReason, JiraIssue, JiraLiveSession, JiraStatusPayload } from '../../shared/types';
@@ -720,5 +720,18 @@ describe('Run on: a Sessions row runs its sub-task\'s parent', () => {
     await userEvent.click(work);
     expect(await screen.findByRole('dialog', { name: 'run ZZ-1' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'run ZZ-9' })).toBeNull();
+  });
+});
+
+describe('applyListFilters run options name a review skill', () => {
+  it('labels a link on a review skill `Review the MR · <name>` and a run skill bare', () => {
+    const skills = [
+      { id: 's_rev', name: 'Check MR', group: 'review' as const },
+      { id: 's_run', name: 'Groom ticket', group: 'run' as const }
+    ];
+    const row = (id: string, skill: string) =>
+      ({ id, key: 'PAY-1', state: 'working', ended: false, issue: { summary: '' }, link: { action: { skill }, how: 'run' }, repo: '/r', branch: null }) as never;
+    const view = applyListFilters([row('a', 's_rev'), row('b', 's_run')], DEFAULT_LIST_FILTERS, '', skills, Date.now());
+    expect(view.runs.map((r) => r.label).sort()).toEqual(['Groom ticket', 'Review the MR · Check MR']);
   });
 });

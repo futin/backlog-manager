@@ -1,5 +1,5 @@
 import { QUIET_TITLE, type JiraSessionState } from '../../../shared/jira-sessions';
-import { JIRA_BUILTIN_LABELS, type DashboardRow, type JiraLink, type JiraSessionsPayload } from '../../../shared/types';
+import { JIRA_BUILTIN_LABELS, type DashboardRow, type JiraLink, type JiraSessionsPayload, type JiraSkillGroup } from '../../../shared/types';
 import { sessionUrl } from './agents';
 import { elapsedSince, formatCreated } from './item-age';
 import { formatZonedClock } from './time-zone';
@@ -248,9 +248,12 @@ export function stripTitle(state: JiraSessionState): string | undefined {
  * What a session's Run reads: the action's own name for a Run ▾ link, the session's name for a detected or hand-made one (`action` is null there). Shared by
  * Detail's live card (its `Run` row) and the deck card's crumb, so the two never name one session two ways.
  */
-export function runLabel(link: JiraLink, skills: readonly { id: string; name: string }[]): string {
+export function runLabel(link: JiraLink, skills: readonly { id: string; name: string; group: JiraSkillGroup }[]): string {
   const a = link.action;
   if (a === null) return link.name;
   if (a === 'execute' || a === 'context' || a === 'review' || a === 'reply') return JIRA_BUILTIN_LABELS[a];
-  return skills.find((k) => k.id === a.skill)?.name ?? a.skill;
+  const skill = skills.find((k) => k.id === a.skill);
+  // A review skill reads as what it does to an MR; a deleted one has no group to read, so it stays its bare id.
+  if (skill === undefined) return a.skill;
+  return skill.group === 'review' ? `Review the MR · ${skill.name}` : skill.name;
 }

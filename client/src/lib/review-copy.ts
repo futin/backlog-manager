@@ -108,9 +108,10 @@ export function reviewGateText(gate: { name: string; where: string | null }): st
 
 /**
  * The reason line's tail after the gate's sentence: what the blocked button is waiting for and the one thing the reader can do about it. Said on screen
- * because a disabled ink button drew exactly like an enabled one and the title alone needed a hover to find (2026-11-16, TIMIFY-27764).
+ * because a disabled ink button drew exactly like an enabled one and the title alone needed a hover to find (2026-11-16, TIMIFY-27764). `Review` is a review
+ * skill's button (spec §7): it waits on the same live-session gate as the bot review's two.
  */
-export function reviewBlockedTail(label: 'Fix review' | 'Request review'): string {
+export function reviewBlockedTail(label: 'Fix review' | 'Request review' | 'Review'): string {
   return ` — ${label} waits until it ends or you stop it.`;
 }
 

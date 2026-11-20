@@ -803,6 +803,13 @@ describe('SettingsView', () => {
       ]);
     });
 
+    it('lists run skills only: a review skill is a button on an MR, never a default', () => {
+      const review: JiraSkill = { id: 's_feedbeef', name: 'Check MR', prompt: '/check {mr.url}', group: 'review' };
+      renderWithJira(jiraData({ skills: [SKILL, review] }));
+      const select = screen.getByLabelText('Jira default action') as HTMLSelectElement;
+      expect([...select.options].map((o) => o.value)).toEqual(['execute', 'context', 's_0123abcd']);
+    });
+
     it('offers Per action and the four modes, starts on Per action, and persists a pick', async () => {
       renderWithJira(jiraData());
       const select = screen.getByLabelText('Jira default permission') as HTMLSelectElement;
