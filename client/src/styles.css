@@ -1742,6 +1742,8 @@ button.rail-count { cursor: pointer }
 .jira-sess-face { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px }
 .jira-sess-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px 14px; margin: 0 }
 .jira-sess-facts > div { min-width: 0 }
+/* The Run fact takes two cells (JiraSessionCard.tsx): `Review the MR · <skill name>` is the longest value the card draws and the one it must not cut. */
+.jira-sess-fact-wide { grid-column: span 2 }
 .jira-sess-facts dt { font-size: 11px; font-weight: 400; color: var(--ink3) }
 .jira-sess-facts dd { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* One face everywhere (§8.1): the id and the branch are set apart by ink, not by a monospace. */
@@ -2835,6 +2837,11 @@ button.rail-count { cursor: pointer }
 .launch-tiles { align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
 /* Under the fold three tiles leave a 35 px text box (`End to …`); one column gives each its width. */
 @media (max-width: 700px) { .launch-tiles { grid-template-columns: minmax(0, 1fr) } }
+/* A review sheet's lone tile spans two of the three columns: its sub-line names the MR and its source branch (`on !16033 · <branch>`), which a third of the
+   row cut to `on !16033 · pay-151-ref…` (2026-11-20 ui-verify). At phone width the grid is one column, so the span is dropped — `span 2` there would add an
+   implicit second column and push the sheet sideways. */
+.launch-tile-wide { grid-column: span 2 }
+@media (max-width: 700px) { .launch-tile-wide { grid-column: auto } }
 .launch-tile {
   display: flex; align-items: center; gap: 10px; min-height: 64px; min-width: 0; padding: 8px 10px; text-align: left;
   border: 1.5px solid var(--hairline2); border-radius: 12px; background: var(--strip); color: var(--ink); cursor: pointer; font: inherit

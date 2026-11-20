@@ -56,11 +56,11 @@ import { OpenChip, SessionOpen } from './SessionOpen';
  *   not drawn. A `review` session gets none either (Jira detail tabs spec §5.1), whatever its row carries.
  */
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children, wide = false, title }: { label: string; children: ReactNode; wide?: boolean; title?: string }) {
   return (
-    <div>
+    <div className={wide ? 'jira-sess-fact-wide' : undefined}>
       <dt>{label}</dt>
-      <dd>{children}</dd>
+      <dd title={title}>{children}</dd>
     </div>
   );
 }
@@ -111,7 +111,11 @@ export function JiraSessionCard({
       <LiveStrip tone={state} label={STATE_LABEL[state]} mark={pollAge(link.stateSince, now)} title={stripTitle(state)} />
       <div className="jira-sess-face">
         <dl className="jira-sess-facts">
-          <Row label="Run">{runLabel(link, data?.skills ?? [])}</Row>
+          {/* Two cells wide and titled: a review skill's label is `Review the MR · <name>`, and one 110 px cell ellipsised it to `Review the MR · Cla…`,
+              the prefix eating the only part that says which reviewer runs (2026-11-20 ui-verify). */}
+          <Row label="Run" wide title={runLabel(link, data?.skills ?? [])}>
+            {runLabel(link, data?.skills ?? [])}
+          </Row>
           {where !== null && <Row label="Where">{where}</Row>}
           {model !== '' && <Row label="Model">{model}</Row>}
           {pct !== undefined && (

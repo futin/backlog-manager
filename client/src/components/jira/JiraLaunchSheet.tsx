@@ -446,7 +446,7 @@ export function JiraLaunchSheet({
                 <button
                   key={t.key}
                   type="button"
-                  className="launch-tile"
+                  className={review === undefined ? 'launch-tile' : 'launch-tile launch-tile-wide'}
                   aria-pressed={t.on}
                   aria-label={t.title}
                   aria-describedby={`${tileIds}-${t.key}`}
@@ -465,7 +465,10 @@ export function JiraLaunchSheet({
               ))}
             </div>
           </div>
-          {skillAction !== null && (
+          {/* Not on a review sheet: its one tile IS the action, and a review skill's sheet carries a `{ skill }` action too — the select drew there
+              (2026-11-20 ui-verify) as `skill s_…` (no run skill matched it) and offered the run skills, any of which the server then refused with
+              the MR attached (`<name> is a run skill and takes no MR`). */}
+          {skillAction !== null && review === undefined && (
             <label className="sheet-field">
               <span className="set-name">Skill</span>
               <Select

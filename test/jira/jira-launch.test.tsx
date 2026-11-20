@@ -1746,6 +1746,8 @@ describe('JiraLaunchSheet — review skill mode', () => {
     expect(tiles[0]).toHaveAccessibleName('Deep review');
     expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
     expect(tiles[0]).toHaveTextContent('on !42 · timify-1-x');
+    // The tile is the action: no `Skill` select, which would offer run skills on a sheet locked to an MR (2026-11-20 ui-verify).
+    expect(within(dialog()).queryByRole('combobox', { name: 'Skill' })).not.toBeInTheDocument();
   });
 
   it('locks the branch to Continue on the source branch: no picker, no MR switch', async () => {
