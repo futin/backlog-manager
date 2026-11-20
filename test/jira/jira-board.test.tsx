@@ -11,7 +11,7 @@ import { JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext
 import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
-import { getJiraTicket, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { getJiraTicket, setJiraTicketKey, syncJiraTicket } from '../../client/src/hooks/useJiraTicketKey';
 import { browserPlatform, fullPageTitle } from '../../client/src/lib/open-intent';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
@@ -199,6 +199,9 @@ beforeEach(() => {
   localStorage.clear();
   // The Detail's tab is a module store that outlives a mount (and the storage clear above): every case opens on Ticket, as a first open does.
   setJiraDetailTab('ticket');
+  // The key store and the address outlive a case too: a ticket page one case opened would leave `?section=jira&ticket=…` and its key for the next.
+  window.history.replaceState(null, '', '/');
+  act(() => syncJiraTicket('', 'board'));
   statusAnswer = status();
   lists = { [ALPHA.id]: ALPHA_ISSUES, [BETA.id]: BETA_ISSUES };
   requested = [];

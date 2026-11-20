@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { setJiraPage, useJiraPage } from '../../hooks/useJiraPage';
-import { setJiraTicketKey, useJiraTicketKey } from '../../hooks/useJiraTicketKey';
+import { setJiraTicketKey, useJiraTicketKey, useJiraTicketOrigin } from '../../hooks/useJiraTicketKey';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage, TicketOrigin } from '../../lib/jira-page';
 import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
@@ -69,10 +69,14 @@ import { JiraTicketPage } from './JiraTicketPage';
  *
  * **The ticket page** (Jira detail tabs spec §2) is the fifth page, `JiraTicketPage`, drawn while the page is `ticket` and the key store holds a key. `ticket`
  * with an empty key is not a page: this draws the Board for it and writes `board` back in one effect, so the rail never highlights a row it does not draw.
- * `openPage` is every way in but the rail's row — the modal's `Open full page ↗` and a Cmd-, Ctrl- or middle-click on a card, row or deck title: it writes
- * the key store FIRST (the store's setter, as the two-writer rule asks), remembers the page it was called from as the ORIGIN, and only then moves the page,
- * which closes the modal through the page-change reset below. The origin is memory, not a store (§2.3): it falls back to `board` whenever the page is
- * left, so a rail-row entry and a reload both say `← Board`. The page shares the launch sheet and `nudge` with the board pages and opens no modal.
+ * `openPage` is every in-app way in — the modal's `Open full page ↗` and a Cmd-, Ctrl- or middle-click on a card, row or deck title: it computes the ORIGIN
+ * (the page it was called from) first, hands it to the key store's setter with the key (the store's setter, as the two-writer rule asks — its none → key
+ * push records the origin in the new entry's `history.state`), and only then moves the page, which closes the modal through the page-change reset below.
+ * The origin is the key store's, beside the key (Jira ticket URL spec), not this component's memory: `App`'s popstate listener has to read it to send a
+ * Back press to the page the ticket came from, and a reload re-reads it from the entry's state, so a ticket opened from Sessions says `← Sessions` after a
+ * reload and a remount too. A pasted link carries no state and says `← Board`. The address (`?section=jira&ticket=<KEY>`) is `App`'s to load and to keep
+ * in step with the screen; nothing here touches it except through the store. The page shares the launch sheet and `nudge` with the board pages and opens
+ * no modal.
  */
 type OpenSlot = { issue: JiraIssue; childrenOf: JiraChildrenIndex | null };
 
@@ -86,13 +90,12 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   useEffect(() => {
     if (noTicket) setJiraPage('board');
   }, [noTicket]);
-  const [origin, setOrigin] = useState<TicketOrigin>('board');
-  useEffect(() => {
-    if (page !== 'ticket') setOrigin('board');
-  }, [page]);
+  // The page the ticket was opened from, held by the key store beside the key (and in the entry's `history.state`), so `App`'s popstate can read it.
+  const origin = useJiraTicketOrigin();
+  // The origin is computed BEFORE the key store write, because that write is the push that records it in the new entry's state.
   const openPage = (key: string): void => {
-    setJiraTicketKey(key);
-    setOrigin(page === 'sessions' || page === 'mentions' ? page : 'board');
+    const from: TicketOrigin = page === 'sessions' || page === 'mentions' ? page : 'board';
+    setJiraTicketKey(key, from);
     onOpenJiraPage('ticket');
   };
   const openPageOn = (issue: JiraIssue): void => openPage(issue.key);
