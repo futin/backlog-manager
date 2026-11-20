@@ -2300,6 +2300,10 @@ button.rail-count { cursor: pointer }
 .jira-skill-order-hint { font-weight: 400; letter-spacing: 0 }
 .jira-skill-edit-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px }
 .jira-skill-edit-actions { display: flex; gap: 8px }
+/* The editor stands in for a row, so it is drawn as a panel that names the skill it edits and how to leave, not as a bare form among rows (2026-11-20). */
+.jira-skill-edit { background: var(--strip); border: 1px solid var(--hairline2); border-radius: 12px; padding: 12px; margin: 6px 0 }
+.jira-skill-edit-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100% }
+.jira-skill-edit-title { font-size: 13px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere }
 /* At phone width a skill row's controls (↑ ↓, `Make default`, ×) take ~200 px and crushed the name to an ellipsis of two letters (2026-11-17 ui-verify),
    so the name takes the first line beside its 28 px tile (+ the row's 10 px gap) and the controls wrap under it, pushed right by the first one. */
 @media (max-width: 700px) {

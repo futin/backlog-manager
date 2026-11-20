@@ -1677,6 +1677,21 @@ describe('the Skills card, Run and Review apart', () => {
       expect(skillNames().slice(2)).toEqual(['Plan the ticket', 'Review as a run', 'Investigate a bug', 'Research a spike']);
     });
 
+    it('names the skill being edited, says Esc cancels, focuses the name field, and Cancel closes it', async () => {
+      statusAnswer = status({ skills: MIXED });
+      await renderSetup();
+      await userEvent.click(within(labelIn('Investigate a bug')).getByRole('button', { name: 'Edit Investigate a bug' }));
+      expect(within(skillsCard()).getByText('Editing Investigate a bug')).toBeInTheDocument();
+      expect(within(skillsCard()).getByText('Esc cancels')).toBeInTheDocument();
+      expect(editName()).toHaveFocus();
+      // The head names the STORED skill: typing does not rewrite it.
+      await userEvent.type(editName(), ' more');
+      expect(within(skillsCard()).getByText('Editing Investigate a bug')).toBeInTheDocument();
+      await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Cancel' }));
+      expect(within(skillsCard()).queryByRole('textbox', { name: 'Edited skill name' })).toBeNull();
+      expect(within(skillsCard()).queryByText('Esc cancels')).toBeNull();
+    });
+
     it('a refusal shows in the alert row and keeps the editor open with what was typed', async () => {
       statusAnswer = status({ skills: MIXED });
       skillsAnswer = () => answer({ error: 'name must be at most 60 characters' }, 400);
