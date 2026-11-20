@@ -171,10 +171,12 @@ export class JiraController {
    * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target` (and, for `action=review`, `mrProject&mrIid&half`; for a skill, `mrProject&mrIid&mrUrl&mrSource&mrTarget`) — exactly what Copy prompt copies and what Start sends but for the status and
    * assignee lines (spec §5, §7): the launch sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind
    * the preview, the copy and the spawn. The refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid
-   * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
+   * issue key`), `action` (400), `repo` present (400 `repo is required`), for a skill a `half` (400 `half is the review bot's only`) and then the MR's shape
+   * (400 `mr must be { project, iid, url, source, target }`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
    * `dispatch-jira` answers; `mode` is required, so a caller that sends none is refused rather than guessed at), configured (503 — after the three parameters,
    * as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read out of a file we cannot read would be a guess), the skill exists (400
-   * `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8 mapping), the repo mapped for the ISSUE'S project (400) — for `reply`,
+   * `unknown skill <id>`, before Jira is asked; then the group/MR pairing, which needs the skill — `<name> is a review skill and needs an MR` / `<name> is a
+   * run skill and takes no MR`), the issue read (`unwrapJira`'s §8 mapping), the repo mapped for the ISSUE'S project (400) — for `reply`,
    * mapped to ANY project (400 `<repo> is not mapped to any Jira project`, `anyProjectRepoOrThrow`), whose branch fields R2 narrowed to mode `none` before
    * the branch choice was parsed — the choice against
    * the repo's refs (409, `resolveWorkspace` — a new branch that exists, a continued one the mapped checkout holds), the cap (400 `prompt too long`). The refs

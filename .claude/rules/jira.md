@@ -192,8 +192,9 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   review skill's are those plus `{mr.url}`, `{mr.iid}`, `{mr.source}`, `{mr.target}`, `{mr.project}` (`{ kind: 'skill', skill, mr }` — `{mr.*}` fill only while
   `mr` is non-null, so a run skill's `{mr.url}` stays literal), the run ones filled from the `continue` workspace. Both routes take the skill wire with the
   five-field `mr` `{ project, iid, url, source, target }` (`parseReviewSkillMr`: `url` http(s) of at most 2 000, `source`/`target` through `branchNameProblem`;
-  400 `mr must be { project, iid, url, source, target }`), and refuse before any lookup a review skill with no MR (400 `<name> is a review skill and needs an
-  MR`), a run skill with one (400 `<name> is a run skill and takes no MR`) and a `half` beside a skill (400 `half is the review bot's only`); `jira/` composes
+  400 `mr must be { project, iid, url, source, target }`), and refuse before any lookup a `half` beside a skill (400 `half is the review bot's only`), then the
+  MR's shape; the group/MR pairing needs the skill, so it comes after the config read, in `resolveJiraActionOrThrow`: a review skill with no MR (400 `<name>
+  is a review skill and needs an MR`), a run skill with one (400 `<name> is a run skill and takes no MR`); `jira/` composes
   the preview from the sent values and never reads the poller. Dispatch's `reviewSkillOrThrow` runs `reviewOrThrow`'s cache checks WITHOUT its state checks —
   the MR open and the ticket's (or its parent's), a candidate repo, `continue` on the source branch, and `openMr` the route's existing 400 `openMr is only for
   execute with a branch` — plus 409 `!<iid> changed since the sheet opened — reopen the sheet` when the cache's `webUrl`, source or target differs from the sent

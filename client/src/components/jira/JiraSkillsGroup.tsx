@@ -335,8 +335,10 @@ export function JiraSkillsGroup() {
           aria-label={`Edit ${skill.name}`}
           disabled={busy}
           onClick={() => {
+            // A refusal left by the previous editor would otherwise read as this one's.
             setAsking(null);
             setEditing(key);
+            setError(null);
           }}
         >
           Edit
