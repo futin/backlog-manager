@@ -23,3 +23,11 @@ export const JIRA_PAGE_KEY = 'backlog-manager.jira-page';
 export function isJiraPage(v: unknown): v is JiraPage {
   return typeof v === 'string' && (JIRA_PAGES as readonly string[]).includes(v);
 }
+
+/**
+ * Which page a ticket was opened from, so the ticket page's back control and breadcrumb can name it. It rides in `history.state` beside the `ticket` address
+ * (`lib/ticket-url.ts`), because a reload keeps the state and a pasted link has none: absent or unrecognised reads `board`.
+ */
+export type TicketOrigin = 'board' | 'sessions' | 'mentions';
+
+export const TICKET_ORIGINS: readonly TicketOrigin[] = ['board', 'sessions', 'mentions'];

@@ -9,6 +9,7 @@ import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../sh
 import { Chip } from '../ui/Chip';
 import { JiraRunMenu } from './JiraRunMenu';
 import { JiraTicketBody } from './JiraTicketBody';
+import type { TicketOrigin } from '../../lib/jira-page';
 
 /**
  * JiraTicketPage — the Jira section's fifth page, one ticket read by key at the main area's width (Jira detail tabs spec §2; DESIGN.md §8.9.2; mock
@@ -39,7 +40,6 @@ import { JiraTicketBody } from './JiraTicketBody';
  */
 
 /** The pages a ticket page can be entered from, and the word its `←` chip names each by. */
-export type TicketOrigin = 'board' | 'sessions' | 'mentions';
 const ORIGIN_LABEL: Record<TicketOrigin, string> = { board: 'Board', sessions: 'Sessions', mentions: 'Mentions' };
 
 export function JiraTicketPage({

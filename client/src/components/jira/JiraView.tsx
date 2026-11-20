@@ -5,7 +5,7 @@ import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { setJiraPage, useJiraPage } from '../../hooks/useJiraPage';
 import { setJiraTicketKey, useJiraTicketKey } from '../../hooks/useJiraTicketKey';
 import type { JiraChildrenIndex } from '../../lib/jira';
-import type { JiraPage } from '../../lib/jira-page';
+import type { JiraPage, TicketOrigin } from '../../lib/jira-page';
 import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
 
 /** What a review launch adds to the sheet's state: the half, the MR (its source branch is the sheet's locked branch) and the candidate repos. */
@@ -16,7 +16,7 @@ import { JiraLaunchSheet } from './JiraLaunchSheet';
 import { JiraMentionsView } from './JiraMentionsView';
 import { JiraSessionsView } from './JiraSessionsView';
 import { JiraSetupView } from './JiraSetupView';
-import { JiraTicketPage, type TicketOrigin } from './JiraTicketPage';
+import { JiraTicketPage } from './JiraTicketPage';
 
 /**
  * JiraView — the Jira section (Jira phase 2, spec §6.1; DESIGN.md §8.9, and §8.0 for the tree that switches its pages). Lazy in `App`, like every section,
