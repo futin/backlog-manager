@@ -982,6 +982,18 @@ export interface JiraSkill {
 }
 
 /**
+ * The one open MR a review skill runs against, as the launch sheet sends it and the server composes from it (spec §3, §6): the five values a `{mr.*}`
+ * placeholder fills from. Dispatch re-checks `url`, `source` and `target` against the GitLab cache and composes from the cache's copy.
+ */
+export interface ReviewSkillMr {
+  project: string;
+  iid: number;
+  url: string;
+  source: string;
+  target: string;
+}
+
+/**
  * What Run ▾ starts: one of the three built-ins (`review` is never a menu row), or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
  * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 400 `unknown skill <id>` for an id `jira.json` lacks).
  */

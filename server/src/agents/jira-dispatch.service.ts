@@ -133,7 +133,7 @@ export class JiraDispatchService {
       throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
     }
     // A review's compose action is built below from the CACHED MR, never from the request's spelling; `resolveJiraActionOrThrow` refuses a bare review.
-    const action: JiraComposeAction | null = req.action === 'review' ? null : resolveJiraActionOrThrow(req.action, config.skills);
+    const action: JiraComposeAction | null = req.action === 'review' ? null : resolveJiraActionOrThrow(req.action, config.skills, null);
     // A project key holds no `-` (`JIRA_PROJECT_KEY_RE`), so the first one ends it.
     const project = req.key.slice(0, req.key.indexOf('-'));
     const kind = req.action === 'reply' ? 'reply' : 'run';

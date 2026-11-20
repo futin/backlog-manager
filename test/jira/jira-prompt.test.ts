@@ -7,6 +7,7 @@ import {
   composeJiraPrompt,
   parseReviewHalf,
   parseReviewMr,
+  parseReviewSkillMr,
   resolveJiraActionOrThrow,
   workspaceBlock
 } from '../../server/src/jira/prompt.util';
@@ -112,7 +113,7 @@ describe('composeJiraPrompt', () => {
 
   describe('a skill template', () => {
     const skillOf = (template: string, d: JiraIssueDetail = detail(), repo = '/work/pay') =>
-      ok(composeJiraPrompt(d, { kind: 'skill', skill: skill(template) }, repo, null));
+      ok(composeJiraPrompt(d, { kind: 'skill', mr: null, skill: skill(template) }, repo, null));
 
     it('is the filled template and nothing else when it names {key}', () => {
       expect(skillOf('/check-ac {key}')).toBe('/check-ac PAY-131');
@@ -148,15 +149,15 @@ describe('composeJiraPrompt', () => {
     });
 
     it('is { ok: false, error: "prompt too long" } for a skill whose placeholders fill past the cap', () => {
-      const result = composeJiraPrompt(detail(), { kind: 'skill', skill: skill('{url}'.repeat(200)) }, '/r', null);
+      const result = composeJiraPrompt(detail(), { kind: 'skill', mr: null, skill: skill('{url}'.repeat(200)) }, '/r', null);
       expect(result).toEqual({ ok: false, error: 'prompt too long' });
     });
 
     it('is ok at exactly the cap and not at one over, for a skill', () => {
       // `{key} ` fills to `PAY-131 `, eight characters, and the key is named so nothing is appended.
-      const at = composeJiraPrompt(detail(), { kind: 'skill', skill: skill(`{key} ${'t'.repeat(3992)}`) }, '/r', null);
+      const at = composeJiraPrompt(detail(), { kind: 'skill', mr: null, skill: skill(`{key} ${'t'.repeat(3992)}`) }, '/r', null);
       expect(at.ok && at.prompt.length).toBe(4000);
-      expect(composeJiraPrompt(detail(), { kind: 'skill', skill: skill(`{key} ${'t'.repeat(3993)}`) }, '/r', null)).toEqual({
+      expect(composeJiraPrompt(detail(), { kind: 'skill', mr: null, skill: skill(`{key} ${'t'.repeat(3993)}`) }, '/r', null)).toEqual({
         ok: false,
         error: 'prompt too long'
       });
@@ -236,20 +237,20 @@ describe('resolveJiraActionOrThrow', () => {
   const skill: JiraSkill = { id: 's_0123abcd', name: 'Review', prompt: 'Review {key}', group: 'run' };
 
   it('maps the two built-ins to their kinds and a skill id to the skill itself', () => {
-    expect(resolveJiraActionOrThrow('execute', [])).toEqual({ kind: 'execute' });
-    expect(resolveJiraActionOrThrow('context', [skill])).toEqual({ kind: 'context' });
-    expect(resolveJiraActionOrThrow({ skill: skill.id }, [skill])).toEqual({ kind: 'skill', skill });
-    expect(() => resolveJiraActionOrThrow('review', [skill])).toThrow(expect.objectContaining({ status: 400 }));
+    expect(resolveJiraActionOrThrow('execute', [], null)).toEqual({ kind: 'execute' });
+    expect(resolveJiraActionOrThrow('context', [skill], null)).toEqual({ kind: 'context' });
+    expect(resolveJiraActionOrThrow({ skill: skill.id }, [skill], null)).toEqual({ kind: 'skill', skill, mr: null });
+    expect(() => resolveJiraActionOrThrow('review', [skill], null)).toThrow(expect.objectContaining({ status: 400 }));
   });
 
   it('maps reply to its kind: the mention draft is composed like the other built-ins, from the key alone', () => {
-    expect(resolveJiraActionOrThrow('reply', [])).toEqual({ kind: 'reply' });
+    expect(resolveJiraActionOrThrow('reply', [], null)).toEqual({ kind: 'reply' });
   });
 
   it('throws the 400 `unknown skill <id>` for an id the list does not hold', () => {
     expect.assertions(2);
     try {
-      resolveJiraActionOrThrow({ skill: 's_ffffffff' }, [skill]);
+      resolveJiraActionOrThrow({ skill: 's_ffffffff' }, [skill], null);
     } catch (e) {
       expect((e as { getStatus(): number }).getStatus()).toBe(400);
       expect((e as { getResponse(): unknown }).getResponse()).toEqual({ error: 'unknown skill s_ffffffff' });
@@ -289,7 +290,7 @@ describe('the workspace block', () => {
   // are well-formed in practice, so this is defence in depth: a key that is not one is refused in the routes' own words rather than printed into a command.
   it('refuses a detail whose key is not a Jira key, for a built-in and a skill alike, and composes it as before without a workspace', () => {
     const bad = detail({ key: 'PAY-1; rm -rf ~' });
-    const skill = { kind: 'skill' as const, skill: { id: 's_0a1b2c3d', name: 'Groom', prompt: '/jira-groom {key}', group: 'run' as const } };
+    const skill = { kind: 'skill' as const, mr: null, skill: { id: 's_0a1b2c3d', name: 'Groom', prompt: '/jira-groom {key}', group: 'run' as const } };
     expect(composeJiraPrompt(bad, { kind: 'execute' }, '/r', newWs())).toEqual({ ok: false, error: 'invalid issue key' });
     expect(composeJiraPrompt(bad, skill, '/r', contWs())).toEqual({ ok: false, error: 'invalid issue key' });
     expect(composeJiraPrompt(bad, { kind: 'context' }, '/r', null).ok).toBe(true);
@@ -364,7 +365,7 @@ describe('the workspace block', () => {
 
   describe('a skill template', () => {
     const tmpl = 'B={branch} BASE={base} W={worktree} K={key}';
-    const sk = (ws: JiraWorkspace | null) => ok(composeJiraPrompt(tim(), { kind: 'skill', skill: skill(tmpl) }, '/r', ws));
+    const sk = (ws: JiraWorkspace | null) => ok(composeJiraPrompt(tim(), { kind: 'skill', mr: null, skill: skill(tmpl) }, '/r', ws));
 
     it('fills the three placeholders under new, after the block', () => {
       const prompt = sk(newWs());
@@ -382,7 +383,7 @@ describe('the workspace block', () => {
 
     it('counts the block against the cap: a template that fits today at exactly the max stays ok under none and is "prompt too long" with a workspace', () => {
       const fill = `{key} ${'t'.repeat(JIRA_PROMPT_MAX - 'TIMIFY-123 '.length)}`;
-      const compose = (ws: JiraWorkspace | null) => composeJiraPrompt(tim(), { kind: 'skill', skill: skill(fill) }, '/r', ws);
+      const compose = (ws: JiraWorkspace | null) => composeJiraPrompt(tim(), { kind: 'skill', mr: null, skill: skill(fill) }, '/r', ws);
       const none = compose(null);
       expect(none.ok && none.prompt.length).toBe(JIRA_PROMPT_MAX);
       expect(compose(newWs())).toEqual({ ok: false, error: 'prompt too long' });
@@ -513,7 +514,7 @@ describe('the workspace block', () => {
     });
 
     it('is execute\'s alone: the context and skill prompts are the same with review on as with it off', () => {
-      const skillAction = { kind: 'skill' as const, skill: skill('B={branch} BASE={base} K={key}') };
+      const skillAction = { kind: 'skill' as const, mr: null, skill: skill('B={branch} BASE={base} K={key}') };
       for (const ws of [newWs(), contWs({ openMr: true, target: 'release/9' })]) {
         for (const action of [{ kind: 'context' as const }, skillAction]) {
           expect(ok(composeJiraPrompt(tim(), action, '/r', { ...ws, review: true }))).toBe(ok(composeJiraPrompt(tim(), action, '/r', ws)));
@@ -586,7 +587,7 @@ describe('the review built-in', () => {
   it('resolveJiraActionOrThrow still refuses a bare review', () => {
     let caught = null as { getStatus(): number; getResponse(): unknown } | null;
     try {
-      resolveJiraActionOrThrow('review', []);
+      resolveJiraActionOrThrow('review', [], null);
     } catch (error) {
       caught = error as typeof caught;
     }
@@ -710,4 +711,78 @@ describe('parseReviewMr', () => {
 describe('parseReviewHalf', () => {
   it.each(['request', 'fix'])('accepts %s', (half) => expect(parseReviewHalf(half)).toBe(half));
   it.each(['Fix', '', undefined, 'both', 1])('rejects %p', (half) => expect(parseReviewHalf(half)).toBeNull());
+});
+
+describe('review skills: the MR shape, the group/MR 400s and the {mr.*} compose', () => {
+  const five = { project: 'grp/app', iid: 42, url: 'https://gl/grp/app/-/merge_requests/42', source: 'timify-1-x', target: 'develop' };
+  const runSkill: JiraSkill = { id: 's_0a0a0a0a', name: 'Groom', prompt: '/jira-groom {key}', group: 'run' };
+  const revSkill: JiraSkill = { id: 's_0b0b0b0b', name: 'Code review', prompt: '/code-review {mr.url}', group: 'review' };
+  const httpStatusAndBody = (fn: () => unknown): { status: number; body: unknown } => {
+    try {
+      fn();
+    } catch (e) {
+      return { status: (e as { getStatus(): number }).getStatus(), body: (e as { getResponse(): unknown }).getResponse() };
+    }
+    throw new Error('did not throw');
+  };
+
+  it('parseReviewSkillMr accepts the five and returns them', () => {
+    expect(parseReviewSkillMr(five, 'body')).toEqual(five);
+    expect(parseReviewSkillMr({ ...five, iid: '42' }, 'query')).toEqual(five);
+  });
+
+  it('parseReviewSkillMr refuses a url that is not http(s), is over 2 000 characters or is not a string', () => {
+    expect(parseReviewSkillMr({ ...five, url: 'ftp://x' }, 'body')).toBeNull();
+    expect(parseReviewSkillMr({ ...five, url: `https://${'a'.repeat(1993)}` }, 'body')).toBeNull(); // 2 001 characters
+    expect(parseReviewSkillMr({ ...five, url: `https://${'a'.repeat(1992)}` }, 'body')).not.toBeNull(); // 2 000: the cap is inclusive
+    expect(parseReviewSkillMr({ ...five, url: 42 }, 'body')).toBeNull();
+    expect(parseReviewSkillMr({ ...five, url: 'http://gitlab.local/a/-/merge_requests/3' }, 'body')).not.toBeNull();
+  });
+
+  it('parseReviewSkillMr refuses a source or target branchNameProblem rejects, or one that is missing', () => {
+    expect(parseReviewSkillMr({ ...five, source: 'a..b' }, 'body')).toBeNull();
+    expect(parseReviewSkillMr({ ...five, target: undefined }, 'body')).toBeNull();
+    expect(parseReviewSkillMr({ ...five, source: 7 }, 'body')).toBeNull();
+  });
+
+  it('parseReviewSkillMr takes the iid as a JSON number on the body and a digit string on the query, never the other way', () => {
+    expect(parseReviewSkillMr({ ...five, iid: '7' }, 'body')).toBeNull();
+    expect(parseReviewSkillMr({ ...five, iid: '7' }, 'query')?.iid).toBe(7);
+    expect(parseReviewSkillMr({ ...five, iid: 7 }, 'query')).toBeNull();
+    expect(parseReviewSkillMr({ ...five, iid: 0 }, 'body')).toBeNull();
+  });
+
+  it('resolveJiraActionOrThrow refuses a review skill without an MR and a run skill with one, and still says unknown skill first', () => {
+    expect(httpStatusAndBody(() => resolveJiraActionOrThrow({ skill: revSkill.id }, [revSkill], null))).toEqual({
+      status: 400,
+      body: { error: 'Code review is a review skill and needs an MR' }
+    });
+    expect(httpStatusAndBody(() => resolveJiraActionOrThrow({ skill: runSkill.id }, [runSkill], five))).toEqual({
+      status: 400,
+      body: { error: 'Groom is a run skill and takes no MR' }
+    });
+    expect(httpStatusAndBody(() => resolveJiraActionOrThrow({ skill: 's_ffffffff' }, [revSkill], five)).body).toEqual({ error: 'unknown skill s_ffffffff' });
+    expect(resolveJiraActionOrThrow({ skill: revSkill.id }, [revSkill], five)).toEqual({ kind: 'skill', skill: revSkill, mr: five });
+  });
+
+  it('composes a review skill with every {mr.*} filled, {branch} from the workspace and {base} empty, and appends the key line when {key} is absent', () => {
+    const ws: JiraWorkspace = { mode: 'continue', branch: 'timify-1-y', base: '', worktree: '/r/.worktrees/timify-1-y' } as JiraWorkspace;
+    const skill: JiraSkill = {
+      id: 's_0c0c0c0c',
+      name: 'R',
+      prompt: '/code-review high {mr.url} {mr.iid} {mr.source}->{mr.target} {mr.project} {branch} {base}|',
+      group: 'review'
+    };
+    const r = composeJiraPrompt(detail(), { kind: 'skill', skill, mr: five }, '/r', ws);
+    expect(r.ok).toBe(true);
+    const text = (r as { prompt: string }).prompt;
+    expect(text.endsWith('/code-review high https://gl/grp/app/-/merge_requests/42 42 timify-1-x->develop grp/app timify-1-y |\n\nJira ticket: PAY-131')).toBe(true);
+  });
+
+  it('leaves {mr.url} literal in a run skill composed with no MR, and appends no key line when {key} is named, in both groups', () => {
+    const run: JiraSkill = { id: 's_0d0d0d0d', name: 'R', prompt: 'see {mr.url} {key}', group: 'run' };
+    expect(ok(composeJiraPrompt(detail(), { kind: 'skill', skill: run, mr: null }, '/r', null))).toBe('see {mr.url} PAY-131');
+    const rev: JiraSkill = { id: 's_0e0e0e0e', name: 'R', prompt: '{key} {mr.iid}', group: 'review' };
+    expect(ok(composeJiraPrompt(detail(), { kind: 'skill', skill: rev, mr: five }, '/r', null))).toBe('PAY-131 42');
+  });
 });

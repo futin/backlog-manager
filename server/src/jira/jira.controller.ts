@@ -228,7 +228,7 @@ export class JiraController {
       throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
     }
     const composeAction: JiraComposeAction =
-      review !== null ? { kind: 'review', half: review.half, mr: review.mr } : resolveJiraActionOrThrow(action, config.skills);
+      review !== null ? { kind: 'review', half: review.half, mr: review.mr } : resolveJiraActionOrThrow(action, config.skills, null);
     const detail = unwrapJira(await this.poller.issueDetail(key));
     // A reply's repo may be mapped to ANY project (most mentioned tickets live in unmapped ones) — the dispatch's rule through the same helper. No open-mention
     // gate here: the preview only reads, and the dispatch is what refuses a key with nothing to answer.

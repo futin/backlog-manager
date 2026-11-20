@@ -36,19 +36,19 @@
  */
 import { HttpException } from '@nestjs/common';
 import { COMMIT_RULE } from '../../../shared/agent';
-import { shellQuote } from '../../../shared/jira-branch';
+import { branchNameProblem, shellQuote } from '../../../shared/jira-branch';
 // The one allowed jira/ -> gitlab/ edge: a pure shape check, no Nest, no poller (it would drag the GitLab module in).
 import { isGitlabProjectPath } from '../gitlab/remote.util';
 import { normaliseRepoPath } from './config.util';
 import { JIRA_PROMPT_MAX, isJiraKey } from '../../../shared/types';
-import type { JiraAction, JiraIssueDetail, JiraSkill, JiraWorkspace, ReviewHalf } from '../../../shared/types';
+import type { JiraAction, JiraIssueDetail, JiraSkill, JiraWorkspace, ReviewHalf, ReviewSkillMr } from '../../../shared/types';
 
 /** Declared in `shared/types.ts` since the launch sheet's edited prompt counts against it too; re-exported so this module stays its server-side home. */
 export { JIRA_PROMPT_MAX };
 
 export type JiraComposeAction =
   | { kind: 'execute' | 'context' | 'reply' }
-  | { kind: 'skill'; skill: JiraSkill }
+  | { kind: 'skill'; skill: JiraSkill; mr: ReviewSkillMr | null }
   | { kind: 'review'; half: ReviewHalf; mr: { project: string; iid: number } };
 
 export type JiraComposeResult = { ok: true; prompt: string } | { ok: false; error: 'prompt too long' | 'invalid issue key' };
@@ -215,13 +215,38 @@ export function parseReviewMr(project: unknown, iid: unknown): { project: string
   return n > 0 ? { project, iid: n } : null;
 }
 
+/** Longest `mr.url` a review skill's wire may carry; the value lands in a prompt capped at `JIRA_PROMPT_MAX`, so a longer one could never compose anyway. */
+const REVIEW_SKILL_URL_MAX = 2000;
+
+/**
+ * The five values of a review skill's MR from a request, or `null` for any failure — the caller's one answer is the 400 `mr must be { project, iid, url, source,
+ * target }`. `project` and `iid` go through `parseReviewMr` (so a body's `iid` must be a JSON number and a query's a digit string: `iidFrom` says which spelling
+ * this wire uses, and the other is refused); `url` is an http(s) string (a self-hosted GitLab may be plain http); `source` and `target` each pass
+ * `branchNameProblem`, because they are printed into the prompt and compared with the cache. No lookup happens here: the preview may not read the GitLab poller.
+ */
+export function parseReviewSkillMr(
+  raw: { project: unknown; iid: unknown; url: unknown; source: unknown; target: unknown },
+  iidFrom: 'query' | 'body'
+): ReviewSkillMr | null {
+  if (iidFrom === 'body' ? typeof raw.iid !== 'number' : typeof raw.iid !== 'string') return null;
+  const mr = parseReviewMr(raw.project, raw.iid);
+  if (mr === null) return null;
+  const { url, source, target } = raw;
+  if (typeof url !== 'string' || url.length > REVIEW_SKILL_URL_MAX || !/^https?:\/\//.test(url)) return null;
+  if (typeof source !== 'string' || branchNameProblem(source) !== null) return null;
+  if (typeof target !== 'string' || branchNameProblem(target) !== null) return null;
+  return { project: mr.project, iid: mr.iid, url, source, target };
+}
+
 /** `request` or `fix`, exactly; anything else (case included) is `null`. */
 export function parseReviewHalf(raw: unknown): ReviewHalf | null {
   return raw === 'request' || raw === 'fix' ? raw : null;
 }
 
-/** The placeholders a template may use — exactly these six; any other brace text, `{summary}` and `{description}` included, stays literal. */
+/** The placeholders a run skill may use — exactly these six; any other brace text, `{summary}` and `{description}` included, stays literal. */
 const PLACEHOLDER_RE = /\{(key|url|repo|branch|base|worktree)\}/g;
+/** A review skill's: the six plus the five `{mr.*}`. A separate regex, used only when an MR is set, so a run skill's `{mr.url}` stays literal (spec §3). */
+const REVIEW_PLACEHOLDER_RE = /\{(key|url|repo|branch|base|worktree|mr\.url|mr\.iid|mr\.source|mr\.target|mr\.project)\}/g;
 /** Whether the template names the ticket itself; one that does not gets the key on a line of its own (header). */
 const NAMES_KEY_RE = /\{key\}/;
 
@@ -230,9 +255,16 @@ const NAMES_KEY_RE = /\{key\}/;
  * `{branch}`, `{base}` and `{worktree}` are the workspace's (`{base}` empty for `continue`, and all three empty under `none`); `{worktree}` is the EXPECTED
  * path.
  */
-function skillPrompt(template: string, detail: JiraIssueDetail, repo: string, ws: JiraWorkspace | null): string {
+function skillPrompt(template: string, detail: JiraIssueDetail, repo: string, ws: JiraWorkspace | null, mr: ReviewSkillMr | null): string {
   const values: Record<string, string> = { key: detail.key, url: detail.url, repo, branch: ws?.branch ?? '', base: ws?.base ?? '', worktree: ws?.worktree ?? '' };
-  const filled = template.replace(PLACEHOLDER_RE, (_, name: string) => values[name]);
+  if (mr !== null) {
+    values['mr.url'] = mr.url;
+    values['mr.iid'] = String(mr.iid);
+    values['mr.source'] = mr.source;
+    values['mr.target'] = mr.target;
+    values['mr.project'] = mr.project;
+  }
+  const filled = template.replace(mr === null ? PLACEHOLDER_RE : REVIEW_PLACEHOLDER_RE, (_, name: string) => values[name]);
   return NAMES_KEY_RE.test(template) ? filled : `${filled}\n\nJira ticket: ${detail.key}`;
 }
 
@@ -246,7 +278,7 @@ export function composeJiraPrompt(detail: JiraIssueDetail, action: JiraComposeAc
   const head = workspace === null ? '' : `${workspaceBlock(detail.key, repo, workspace)}\n\n`;
   const body =
     action.kind === 'skill'
-      ? skillPrompt(action.skill.prompt, detail, repo, workspace)
+      ? skillPrompt(action.skill.prompt, detail, repo, workspace, action.mr)
       : action.kind === 'execute'
         ? executeText(detail.key, workspace)
         : action.kind === 'review'
@@ -264,14 +296,18 @@ export function composeJiraPrompt(detail: JiraIssueDetail, action: JiraComposeAc
  * not the address of the thing being changed. Shared by `GET /api/jira/prompt` and `POST /api/agents/dispatch-jira`, so a preview and a Start refuse the same
  * id in the same words; it throws (rather than returning a result) because both callers' only answer to it is that status and that sentence.
  */
-export function resolveJiraActionOrThrow(action: JiraAction, skills: JiraSkill[]): JiraComposeAction {
+export function resolveJiraActionOrThrow(action: JiraAction, skills: JiraSkill[], mr: ReviewSkillMr | null): JiraComposeAction {
   // review is built by the callers with its MR and half (spec 6), never composed from a bare action: a review reaching here is a malformed request.
   if (action === 'review') throw new HttpException({ error: 'review needs mr and half' }, 400);
   // execute, context and reply are composed from the key alone; reply's narrow wire shape (ruling R2) and its two gates are the callers', not this mapping's.
   if (typeof action === 'string') return { kind: action };
   const skill = skills.find((candidate) => candidate.id === action.skill);
   if (skill === undefined) throw new HttpException({ error: `unknown skill ${action.skill}` }, 400);
-  return { kind: 'skill', skill };
+  // The group decides whether an MR belongs (spec §6): a review skill is composed against one MR and a run skill against none, and both refusals are the
+  // person's mistake in the request, so both are 400s named after the skill.
+  if (skill.group === 'review' && mr === null) throw new HttpException({ error: `${skill.name} is a review skill and needs an MR` }, 400);
+  if (skill.group === 'run' && mr !== null) throw new HttpException({ error: `${skill.name} is a run skill and takes no MR` }, 400);
+  return { kind: 'skill', skill, mr };
 }
 
 /**
