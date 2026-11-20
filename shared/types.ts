@@ -970,11 +970,15 @@ export interface JiraBoard {
   interval: SyncInterval;
 }
 
+/** Which menu a skill belongs to: a `run` skill starts from a ticket's Run ▾, a `review` skill runs against one open MR from its Review ▾. */
+export type JiraSkillGroup = 'run' | 'review';
+
 /** A prompt template the Start sheet offers beside `execute` and `context`. `prompt` is the template itself, not a rendered prompt. */
 export interface JiraSkill {
   id: string;
   name: string;
   prompt: string;
+  group: JiraSkillGroup;
 }
 
 /**

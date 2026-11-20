@@ -51,7 +51,7 @@ function detail(key: string, over: Partial<JiraIssue> = {}): JiraIssueDetail {
   return { ...issue(key, over), description: '', children: [], transitions: [], boards: [], session: null };
 }
 
-const SKILL = { id: 'sk-review', name: 'Review', prompt: '/review-it' };
+const SKILL = { id: 'sk-review', name: 'Review', prompt: '/review-it', group: 'run' as const };
 
 function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
   return {

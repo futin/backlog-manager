@@ -154,7 +154,7 @@ beforeEach(() => {
     return answer(body);
   };
   skillsAnswer = (body) => {
-    const skill: JiraSkill = { id: body.id ?? 's_00000001', name: body.name, prompt: body.prompt };
+    const skill: JiraSkill = { id: body.id ?? 's_00000001', name: body.name, prompt: body.prompt, group: 'run' };
     statusAnswer = { ...statusAnswer, skills: [...statusAnswer.skills.filter((k) => k.id !== skill.id), skill] };
     return answer(skill);
   };
@@ -1173,9 +1173,9 @@ describe('accessPhrase', () => {
 
 /* ── Skills (Jira phase 5; spec §6.4; DESIGN.md §8.9.3) ──────────────────────────────────────────────────────────────────────────────────────── */
 
-const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
-const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}' };
-const REVIEW: JiraSkill = { id: 's_0123abcf', name: 'Review MR', prompt: '/review {key}' };
+const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' };
+const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}', group: 'run' };
+const REVIEW: JiraSkill = { id: 's_0123abcf', name: 'Review MR', prompt: '/review {key}', group: 'run' };
 
 const skillsCard = (): HTMLElement => screen.getByRole('heading', { name: 'Skills' }).closest('section') as HTMLElement;
 const skillNames = (): string[] => Array.from(skillsCard().querySelectorAll('.jira-setup-skill .jira-run-label')).map((n) => n.textContent ?? '');

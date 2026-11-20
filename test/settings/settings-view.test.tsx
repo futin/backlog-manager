@@ -734,7 +734,7 @@ describe('SettingsView', () => {
   // Jira phase 5 (spec §2): `Jira default action` is the row Run ▾ lists first, marked `default` — never the last launch. Drawn only while the status says
   // configured, like every Jira surface; the options are the two built-ins by label and then the machine's skills.
   describe('the Jira default action row', () => {
-    const SKILL: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+    const SKILL: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' };
 
     function jiraData(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
       return {

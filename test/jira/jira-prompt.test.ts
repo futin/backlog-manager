@@ -46,7 +46,7 @@ const detail = (over: Partial<JiraIssueDetail> = {}): JiraIssueDetail => ({
   ...over
 });
 
-const skill = (prompt: string): JiraSkill => ({ id: 's_0123abcd', name: 'Mine', prompt });
+const skill = (prompt: string): JiraSkill => ({ id: 's_0123abcd', name: 'Mine', prompt, group: 'run' });
 const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
 const ok = (result: ReturnType<typeof composeJiraPrompt>): string => {
   if (!result.ok) throw new Error(`expected ok, got ${result.error}`);
@@ -233,7 +233,7 @@ describe('the shared helpers', () => {
 });
 
 describe('resolveJiraActionOrThrow', () => {
-  const skill: JiraSkill = { id: 's_0123abcd', name: 'Review', prompt: 'Review {key}' };
+  const skill: JiraSkill = { id: 's_0123abcd', name: 'Review', prompt: 'Review {key}', group: 'run' };
 
   it('maps the two built-ins to their kinds and a skill id to the skill itself', () => {
     expect(resolveJiraActionOrThrow('execute', [])).toEqual({ kind: 'execute' });
@@ -289,7 +289,7 @@ describe('the workspace block', () => {
   // are well-formed in practice, so this is defence in depth: a key that is not one is refused in the routes' own words rather than printed into a command.
   it('refuses a detail whose key is not a Jira key, for a built-in and a skill alike, and composes it as before without a workspace', () => {
     const bad = detail({ key: 'PAY-1; rm -rf ~' });
-    const skill = { kind: 'skill' as const, skill: { id: 's_0a1b2c3d', name: 'Groom', prompt: '/jira-groom {key}' } };
+    const skill = { kind: 'skill' as const, skill: { id: 's_0a1b2c3d', name: 'Groom', prompt: '/jira-groom {key}', group: 'run' as const } };
     expect(composeJiraPrompt(bad, { kind: 'execute' }, '/r', newWs())).toEqual({ ok: false, error: 'invalid issue key' });
     expect(composeJiraPrompt(bad, skill, '/r', contWs())).toEqual({ ok: false, error: 'invalid issue key' });
     expect(composeJiraPrompt(bad, { kind: 'context' }, '/r', null).ok).toBe(true);

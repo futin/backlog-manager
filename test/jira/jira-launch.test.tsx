@@ -38,7 +38,7 @@ import type {
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
-const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' as const };
 
 const CARD: JiraIssue = {
   key: 'PAY-131',

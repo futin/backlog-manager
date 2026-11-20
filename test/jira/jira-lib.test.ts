@@ -725,7 +725,7 @@ describe('isJiraStatusPayload', () => {
     expect(isJiraStatusPayload(noLive)).toBe(false);
     expect(isJiraStatusPayload({ ...payload(), live: null })).toBe(false);
     expect(isJiraStatusPayload({ ...payload(), live: [] })).toBe(false);
-    expect(isJiraStatusPayload(payload({ skills: [{ id: 's_0123abcd', name: 'Groom', prompt: '/g' }] }))).toBe(true);
+    expect(isJiraStatusPayload(payload({ skills: [{ id: 's_0123abcd', name: 'Groom', prompt: '/g', group: 'run' }] }))).toBe(true);
   });
 
   it('rejects what is not an object', () => {
@@ -1315,7 +1315,7 @@ describe('laneBoard', () => {
 });
 
 describe('resolveJiraAction and jiraSettingOf', () => {
-  const skills: JiraSkill[] = [{ id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' }];
+  const skills: JiraSkill[] = [{ id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' }];
 
   it('reads the two built-ins as themselves and a present skill id as { skill }', () => {
     expect(resolveJiraAction('execute', skills)).toBe('execute');
