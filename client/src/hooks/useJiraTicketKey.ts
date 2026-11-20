@@ -6,8 +6,8 @@ import { ticketAddress, ticketState } from '../lib/ticket-url';
 
 /**
  * useJiraTicketKey — the ticket the `ticket` page shows (Jira detail tabs spec §2.1, §2.2; Jira ticket URL spec), shared by the page, the modal's
- * `Open full page ↗` and the rail's row. A module store for the reason the persisted stores are: the modal writes it in the same handler that moves the page,
- * and the rail draws a row from it, so three mounted readers and writers must agree without a remount.
+ * `Open full page ↗` and `App`'s address and popstate effects. A module store for the reason the persisted stores are: the modal writes it in the same handler
+ * that moves the page, and `App` reads it to keep the address in step, so several mounted readers and writers must agree without a remount.
  *
  * **The address bar is the source of truth, and nothing here is persisted.** The key lives in `?section=jira&ticket=<KEY>`, so a reload, a pasted link and
  * the browser's Back all land on the same ticket without a second copy in localStorage that could disagree with the URL. The module value is only the mirror

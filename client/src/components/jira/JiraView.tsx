@@ -85,7 +85,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   const { reload: reloadSessions } = useJiraSessionsContext();
   const [page] = useJiraPage();
   const ticketKey = useJiraTicketKey();
-  // `ticket` with no key draws the Board (below) and is written back to `board` once, so the store and the rail agree with what is on screen.
+  // `ticket` with no key draws the Board (below) and is written back to `board` once, so the stored page agrees with what is on screen.
   const noTicket = page === 'ticket' && ticketKey === '';
   useEffect(() => {
     if (noTicket) setJiraPage('board');

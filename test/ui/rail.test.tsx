@@ -667,7 +667,7 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(view.result.current[0]).toBe('list');
   });
 
-  it('draws no row for the `ticket` page while it is the stored one — the tree shows four pages until Task 8 draws the held key', () => {
+  it('draws no row for the `ticket` page while it is the stored one — the tree shows its four fixed pages, and the rail never draws a ticket row', () => {
     const page = renderHook(() => useJiraPage());
     act(() => page.result.current[1]('ticket'));
     try {
