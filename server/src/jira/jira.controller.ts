@@ -15,7 +15,8 @@ import type {
   JiraStatusPayload,
   JiraWorkspace,
   JiraWorktreesPayload,
-  ReviewHalf
+  ReviewHalf,
+  ReviewSkillMr
 } from '../../../shared/types';
 import { renderTicketBlock } from './block';
 import { REPLY_SHAPE_ERROR, parseBranchChoice, replyChoiceIsNarrow, resolveWorkspace } from './branch-choice.util';
@@ -23,7 +24,7 @@ import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from 
 import { jiraEnv, repoRoots } from './env.util';
 import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
-import { anyProjectRepoOrThrow, composeJiraPrompt, parseReviewHalf, parseReviewMr, resolveJiraActionOrThrow } from './prompt.util';
+import { anyProjectRepoOrThrow, composeJiraPrompt, parseReviewHalf, parseReviewMr, parseReviewSkillMr, resolveJiraActionOrThrow } from './prompt.util';
 import type { JiraComposeAction } from './prompt.util';
 import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
@@ -167,7 +168,7 @@ export class JiraController {
   }
 
   /**
-   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target` (and, for `action=review`, `mrProject&mrIid&half`) — exactly what Copy prompt copies and what Start sends but for the status and
+   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target` (and, for `action=review`, `mrProject&mrIid&half`; for a skill, `mrProject&mrIid&mrUrl&mrSource&mrTarget`) — exactly what Copy prompt copies and what Start sends but for the status and
    * assignee lines (spec §5, §7): the launch sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind
    * the preview, the copy and the spawn. The refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid
    * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
@@ -200,6 +201,9 @@ export class JiraController {
     @Query('mrProject') mrProject: unknown,
     @Query('mrIid') mrIid: unknown,
     @Query('half') half: unknown,
+    @Query('mrUrl') mrUrl: unknown,
+    @Query('mrSource') mrSource: unknown,
+    @Query('mrTarget') mrTarget: unknown,
     @Res({ passthrough: true }) res: Response
   ): Promise<string> {
     if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
@@ -215,6 +219,17 @@ export class JiraController {
       if (parsedHalf === null) throw new HttpException({ error: 'half must be request or fix' }, 400);
       review = { mr, half: parsedHalf };
     }
+    // A skill action may carry an MR (spec 6): any of the five mr* keys present means "an MR was sent" and all five are then parsed, so a half-sent MR is the
+    // shape 400 rather than silently a run. Order, each wrong in a way no later check excuses: `half` (the bot's only), then the MR's shape, and only later —
+    // in resolveJiraActionOrThrow, after config — the group/MR pairing, which needs the skill. The preview only SHAPES the MR; jira/ never reads the GitLab cache.
+    let skillMr: ReviewSkillMr | null = null;
+    if (typeof action === 'object') {
+      if (half !== undefined) throw new HttpException({ error: "half is the review bot's only" }, 400);
+      if ([mrProject, mrIid, mrUrl, mrSource, mrTarget].some((value) => value !== undefined)) {
+        skillMr = parseReviewSkillMr({ project: mrProject, iid: mrIid, url: mrUrl, source: mrSource, target: mrTarget }, 'query');
+        if (skillMr === null) throw new HttpException({ error: 'mr must be { project, iid, url, source, target }' }, 400);
+      }
+    }
     // A reply's branch fields are R2's (the dispatch refuses the rest of its wider shape): mode none and nothing else, in R2's sentence, so the preview never
     // shows a workspace block that no reply dispatch would spawn.
     if (action === 'reply' && !replyChoiceIsNarrow({ mode, branch, base, openMr, review: reviewFlag, target })) {
@@ -228,7 +243,7 @@ export class JiraController {
       throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
     }
     const composeAction: JiraComposeAction =
-      review !== null ? { kind: 'review', half: review.half, mr: review.mr } : resolveJiraActionOrThrow(action, config.skills, null);
+      review !== null ? { kind: 'review', half: review.half, mr: review.mr } : resolveJiraActionOrThrow(action, config.skills, skillMr);
     const detail = unwrapJira(await this.poller.issueDetail(key));
     // A reply's repo may be mapped to ANY project (most mentioned tickets live in unmapped ones) — the dispatch's rule through the same helper. No open-mention
     // gate here: the preview only reads, and the dispatch is what refuses a key with nothing to answer.
