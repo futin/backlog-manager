@@ -38,7 +38,7 @@ import type {
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
-const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' as const };
 
 const CARD: JiraIssue = {
   key: 'PAY-131',
@@ -211,7 +211,9 @@ let onClose: jest.Mock;
 let onStarted: jest.Mock;
 let onWrote: jest.Mock;
 
-type ReviewProp = { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
+type ReviewProp =
+  | { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] }
+  | { skill: string; mr: GitlabMr; repos: string[] };
 
 type SessionLink = JiraSessionsPayload['links'][number];
 
@@ -1669,5 +1671,141 @@ describe('JiraView — the review button opens the launch sheet', () => {
     expect(tiles[0]).toHaveAccessibleName('Fix review');
     expect(tiles[0]).toHaveTextContent('mr-review-loop on !15958');
     expect(within(sheet).getByText('PAY-131-x')).toBeInTheDocument();
+  });
+
+  // Jira review skills spec §4/§6: a skill picked from the MR's `Review menu` opens the SAME sheet in its skill variant, on the row's MR.
+  it('a review skill picked from `More reviewers` opens the sheet’s skill variant on that MR, over the dialog', async () => {
+    localStorage.clear();
+    setJiraPage('board');
+    const RSKILL = { id: 's_feedbeef', name: 'Deep review', prompt: '/deep {key} {mr.url}', group: 'review' as const };
+    const board = jiraStatus({ boards: [BOARD], skills: [SKILL, RSKILL] });
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/jira/issue/')) return Promise.resolve(res(200, detail({ boards: [BOARD.id] })));
+      if (url.includes('/issues')) return Promise.resolve(res(200, { issues: [CARD], polledAt: daysAgoStamp(0) }));
+      if (url.startsWith('/api/jira/')) return base(input, init);
+      if (url.startsWith('/api/agents/')) return base(input, init);
+      return Promise.resolve(res(200, board));
+    }) as unknown as typeof fetch;
+    render(
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: jest.fn() }}>
+          <JiraSessionsContext.Provider value={{ data: { links: [], reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>
+            <GitlabContext.Provider value={{ data: GITLAB, error: null, refresh: () => Promise.resolve(GITLAB) }}>
+              <JiraView onOpenJiraPage={jest.fn()} />
+            </GitlabContext.Provider>
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
+    const modal = await screen.findByRole('dialog', { name: 'Refund partial captures' });
+    await userEvent.click(within(modal).getByRole('tab', { name: /^Delivery/ }));
+    await userEvent.click(await within(modal).findByRole('button', { name: 'More reviewers' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Review menu' })).getByRole('button', { name: 'Deep review' }));
+
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    const tiles = within(within(sheet).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Deep review');
+    expect(tiles[0]).toHaveTextContent('on !15958 · PAY-131-x');
+  });
+});
+
+// A review SKILL on one MR (Jira review skills spec §6): the bot's locked sheet with the skill's name on its tile and the MR's five values on the wire.
+describe('JiraLaunchSheet — review skill mode', () => {
+  const RSKILL = { id: 's_feedbeef', name: 'Deep review', prompt: '/deep {key} {mr.url}', group: 'review' as const };
+  const MR: GitlabMr = {
+    project: 'dev/pay',
+    iid: 42,
+    title: 'x',
+    webUrl: 'https://gitlab.example/dev/pay/-/merge_requests/42',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'timify-1-x',
+    targetBranch: 'develop',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    mergedAt: null,
+    pipeline: null,
+    keys: ['PAY-131'],
+    review: null
+  };
+  const REVIEW: ReviewProp = { skill: RSKILL.id, mr: MR, repos: ['/Users/ada/pay'] };
+  const skillReady = async (): Promise<void> => {
+    mount({ initialAction: { skill: RSKILL.id }, review: REVIEW, status: { skills: [SKILL, RSKILL] } });
+    await waitFor(() => expect(promptBox().value).not.toBe(''));
+  };
+
+  it('draws one pressed inert tile titled with the skill and on !iid · source', () => {
+    mount({ initialAction: { skill: RSKILL.id }, review: REVIEW, status: { skills: [SKILL, RSKILL] } });
+    const tiles = within(within(dialog()).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Deep review');
+    expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(tiles[0]).toHaveTextContent('on !42 · timify-1-x');
+    // The tile is the action: no `Skill` select, which would offer run skills on a sheet locked to an MR (2026-11-20 ui-verify).
+    expect(within(dialog()).queryByRole('combobox', { name: 'Skill' })).not.toBeInTheDocument();
+  });
+
+  it('locks the branch to Continue on the source branch: no picker, no MR switch', async () => {
+    await skillReady();
+    expect(within(dialog()).getByText('Continue')).toBeInTheDocument();
+    expect(within(dialog()).getByText('timify-1-x')).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Branch mode' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('switch', { name: 'Open MR when done' })).not.toBeInTheDocument();
+  });
+
+  it('previews with the five mr names and no half', async () => {
+    await skillReady();
+    const read = promptReads().find((u) => u.searchParams.get('action') === `skill:${RSKILL.id}`);
+    expect(read).toBeDefined();
+    expect(read?.searchParams.get('mrProject')).toBe('dev/pay');
+    expect(read?.searchParams.get('mrIid')).toBe('42');
+    expect(read?.searchParams.get('mrUrl')).toBe(MR.webUrl);
+    expect(read?.searchParams.get('mrSource')).toBe('timify-1-x');
+    expect(read?.searchParams.get('mrTarget')).toBe('develop');
+    expect(read?.searchParams.has('half')).toBe(false);
+    expect(read?.searchParams.get('branch')).toBe('timify-1-x');
+  });
+
+  it('Start posts the skill action with the five-field mr and no half', async () => {
+    await skillReady();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ action: { skill: RSKILL.id }, mode: 'continue', branch: 'timify-1-x', openMr: false });
+    expect(dispatchBody().mr).toEqual({ project: 'dev/pay', iid: 42, url: MR.webUrl, source: 'timify-1-x', target: 'develop' });
+    expect(dispatchBody()).not.toHaveProperty('half');
+  });
+
+  it('seeds Desktop when available', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'dashboard' });
+    mount({ initialAction: { skill: RSKILL.id }, review: REVIEW, status: { skills: [RSKILL] } });
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true'));
+  });
+});
+
+describe('JiraLaunchSheet — run skills only on a non-review sheet', () => {
+  const RSKILL = { id: 's_feedbeef', name: 'Deep review', prompt: '/deep {key}', group: 'review' as const };
+
+  it('counts and offers run skills only', async () => {
+    await ready({ initialAction: { skill: SKILL.id }, status: { skills: [SKILL, RSKILL] } });
+    expect(tile('A skill')).toHaveAccessibleDescription(SKILL.name);
+    const options = within(within(dialog()).getByRole('combobox', { name: 'Skill' })).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual([SKILL.name]);
+  });
+
+  it('counts run skills in the tile sub-line', async () => {
+    await ready({ status: { skills: [SKILL, RSKILL] } });
+    expect(tile('A skill')).toHaveAccessibleDescription('1 on this machine');
+  });
+
+  it('disables A skill when only review skills exist', async () => {
+    await ready({ status: { skills: [RSKILL] } });
+    expect(tile('A skill')).toBeDisabled();
+    expect(tile('A skill')).toHaveAttribute('title', 'no skills on this machine');
   });
 });

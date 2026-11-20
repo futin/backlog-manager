@@ -15,6 +15,7 @@ import {
   type JiraRepoDefaults,
   type JiraRepoDefaultsWriteResult,
   type JiraSkill,
+  type JiraSkillGroup,
   type SyncInterval
 } from '../../../shared/types';
 
@@ -223,7 +224,14 @@ export function readSkill(value: unknown, file: string, where: string): JiraSkil
   if (!isJiraId('s', value.id)) return drop(file, where, 'its id is not an s_ id');
   if (!nonEmptyString(value.name)) return drop(file, where, 'its name is empty');
   if (!nonEmptyString(value.prompt)) return drop(file, where, 'its prompt is empty');
-  return { id: value.id, name: value.name, prompt: value.prompt };
+  // An absent group is a run skill: every file written before groups existed keeps working with no migration, and nothing is rewritten on read. A PRESENT
+  // group that is not one of the two words is a damaged entry and dropped like any other bad field, rather than guessed at.
+  if (value.group !== undefined && !isSkillGroup(value.group)) return drop(file, where, 'its group is not run or review');
+  return { id: value.id, name: value.name, prompt: value.prompt, group: value.group === undefined ? 'run' : value.group };
+}
+
+function isSkillGroup(value: unknown): value is JiraSkillGroup {
+  return value === 'run' || value === 'review';
 }
 
 function readList<T>(raw: unknown, file: string, kind: string, read: (value: unknown, file: string, where: string) => T | null): T[] {
@@ -335,6 +343,8 @@ export interface JiraSkillWrite {
   id?: string;
   name: string;
   prompt: string;
+  /** Absent on the wire: a create stores `run`, an update keeps whatever is stored. */
+  group?: JiraSkillGroup;
 }
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -393,8 +403,10 @@ export function parseSkillWrite(body: unknown): Parsed<JiraSkillWrite> {
   if (!trimmedLengthWithin(body.prompt, JIRA_SKILL_PROMPT_MAX_CHARS)) {
     return { ok: false, error: `prompt must be 1–${JIRA_SKILL_PROMPT_MAX_CHARS} characters` };
   }
+  if (body.group !== undefined && !isSkillGroup(body.group)) return { ok: false, error: 'group must be run or review' };
   const value: JiraSkillWrite = { name: body.name.trim(), prompt: body.prompt.trim() };
   if (id !== undefined) value.id = id;
+  if (body.group !== undefined) value.group = body.group;
   return { ok: true, value };
 }
 
@@ -628,11 +640,20 @@ export function writeSkill(input: JiraSkillWrite, file: string = jiraConfigFile(
     index = skills.findIndex((entry) => isRecord(entry) && entry.id === input.id);
     if (index < 0 || readSkill(skills[index], file, `skill "${input.id}"`) === null) throw new JiraUnknownIdError(input.id, 'skill');
   }
-  const skill: JiraSkill = { id: input.id !== undefined ? input.id : mintUnique('s', idsIn(current)), name: input.name.trim(), prompt: input.prompt.trim() };
-  if (index >= 0) skills[index] = { ...(skills[index] as Record<string, unknown>), ...skill };
-  else skills.push(skill);
+  const id = input.id !== undefined ? input.id : mintUnique('s', idsIn(current));
+  const fields = { id, name: input.name.trim(), prompt: input.prompt.trim() };
+  if (index < 0) {
+    // A create always writes its group out, `run` included, so the file never depends on the reader's default for a skill this writer made.
+    const skill: JiraSkill = { ...fields, group: input.group ?? 'run' };
+    skills.push(skill);
+    writeJsonAtomic(file, { ...current, skills });
+    return skill;
+  }
+  // An update spreads `group` only when the write carries one: injecting a default here would flip a stored review skill to run on every rename.
+  const merged = { ...(skills[index] as Record<string, unknown>), ...fields, ...(input.group !== undefined ? { group: input.group } : {}) };
+  skills[index] = merged;
   writeJsonAtomic(file, { ...current, skills });
-  return skill;
+  return { ...fields, group: merged.group === 'review' ? 'review' : 'run' };
 }
 
 /**

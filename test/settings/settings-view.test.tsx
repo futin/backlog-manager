@@ -734,7 +734,7 @@ describe('SettingsView', () => {
   // Jira phase 5 (spec §2): `Jira default action` is the row Run ▾ lists first, marked `default` — never the last launch. Drawn only while the status says
   // configured, like every Jira surface; the options are the two built-ins by label and then the machine's skills.
   describe('the Jira default action row', () => {
-    const SKILL: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+    const SKILL: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' };
 
     function jiraData(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
       return {
@@ -801,6 +801,13 @@ describe('SettingsView', () => {
         'Jira default permission',
         'Dashboard link'
       ]);
+    });
+
+    it('lists run skills only: a review skill is a button on an MR, never a default', () => {
+      const review: JiraSkill = { id: 's_feedbeef', name: 'Check MR', prompt: '/check {mr.url}', group: 'review' };
+      renderWithJira(jiraData({ skills: [SKILL, review] }));
+      const select = screen.getByLabelText('Jira default action') as HTMLSelectElement;
+      expect([...select.options].map((o) => o.value)).toEqual(['execute', 'context', 's_0123abcd']);
     });
 
     it('offers Per action and the four modes, starts on Per action, and persists a pick', async () => {

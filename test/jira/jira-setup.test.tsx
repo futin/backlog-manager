@@ -14,7 +14,7 @@ import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '
 import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
 import { SETTINGS_STORAGE_KEY } from '../../client/src/lib/settings';
 import { GitlabContext, type GitlabContextValue } from '../../client/src/hooks/GitlabContext';
-import type { GitlabPayload, GitlabStatus, JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../../shared/types';
+import type { GitlabPayload, GitlabStatus, JiraBoardStatus, JiraIssue, JiraSkill, JiraSkillGroup, JiraStatusPayload } from '../../shared/types';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { readStyles, ruleBlocks } from '../helpers/css-rule';
 
@@ -118,7 +118,7 @@ let boardIssuesAnswer: (id: string) => Promise<Response>;
 let reposAnswer: (body: { project: string; paths: string[] }) => Promise<Response>;
 /* `POST /api/jira/skills` and `/skills/delete`. The defaults do what the server does — store or drop one skill in the status the next `GET /api/jira`
    answers — so a case can watch the card follow its own save. A case that wants a refusal replaces them. */
-let skillsAnswer: (body: { id?: string; name: string; prompt: string }) => Promise<Response>;
+let skillsAnswer: (body: { id?: string; name: string; prompt: string; group?: JiraSkillGroup }) => Promise<Response>;
 let skillsDeleteAnswer: (body: { id: string }) => Promise<Response>;
 /* `POST /api/jira/skills/order`. The default does what the server does — puts the stored skills in the order `ids` names — so a case can watch the card
    follow its own move. A case that wants a refusal replaces it. */
@@ -154,8 +154,11 @@ beforeEach(() => {
     return answer(body);
   };
   skillsAnswer = (body) => {
-    const skill: JiraSkill = { id: body.id ?? 's_00000001', name: body.name, prompt: body.prompt };
-    statusAnswer = { ...statusAnswer, skills: [...statusAnswer.skills.filter((k) => k.id !== skill.id), skill] };
+    // As the server does: a create without `group` stores run, an update without it keeps the stored one, and an update keeps the skill's place.
+    const stored = statusAnswer.skills.find((k) => k.id === body.id);
+    const skill: JiraSkill = { id: body.id ?? 's_00000001', name: body.name, prompt: body.prompt, group: body.group ?? stored?.group ?? 'run' };
+    const skills = stored ? statusAnswer.skills.map((k) => (k.id === skill.id ? skill : k)) : [...statusAnswer.skills, skill];
+    statusAnswer = { ...statusAnswer, skills };
     return answer(skill);
   };
   skillsDeleteAnswer = (body) => {
@@ -1173,22 +1176,23 @@ describe('accessPhrase', () => {
 
 /* ── Skills (Jira phase 5; spec §6.4; DESIGN.md §8.9.3) ──────────────────────────────────────────────────────────────────────────────────────── */
 
-const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
-const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}' };
-const REVIEW: JiraSkill = { id: 's_0123abcf', name: 'Review MR', prompt: '/review {key}' };
+const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' };
+const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}', group: 'run' };
+const REVIEW: JiraSkill = { id: 's_0123abcf', name: 'Review MR', prompt: '/review {key}', group: 'run' };
 
 const skillsCard = (): HTMLElement => screen.getByRole('heading', { name: 'Skills' }).closest('section') as HTMLElement;
 const skillNames = (): string[] => Array.from(skillsCard().querySelectorAll('.jira-setup-skill .jira-run-label')).map((n) => n.textContent ?? '');
 /** The skill row whose label reads `name` — by the label span, since a built-in's sub-line repeats its label. */
 const labelIn = (name: string): HTMLElement =>
   Array.from(skillsCard().querySelectorAll('.jira-setup-skill')).find((r) => r.querySelector('.jira-run-label')?.textContent === name) as HTMLElement;
-const skillPosts = (): { id?: string; name: string; prompt: string }[] => posts('/api/jira/skills').map((p) => JSON.parse(String(p.init?.body)));
+const skillPosts = (): { id?: string; name: string; prompt: string; group?: JiraSkillGroup }[] =>
+  posts('/api/jira/skills').map((p) => JSON.parse(String(p.init?.body)));
 const skillName = (): HTMLInputElement => within(skillsCard()).getByRole('textbox', { name: 'Skill name' }) as HTMLInputElement;
 const skillPrompt = (): HTMLTextAreaElement => within(skillsCard()).getByRole('textbox', { name: 'Skill prompt template' }) as HTMLTextAreaElement;
 const addSkillChip = (): HTMLElement => within(skillsCard()).getByRole('button', { name: 'Add' });
 
 describe('the Skills card', () => {
-  it('draws the built-ins under `Built in`, then `Skills on this machine · N` with a row per skill: its command sub-line and a ×', async () => {
+  it('draws the built-ins under `Built in`, then `Your run skills · N` with a row per skill: its command sub-line and a ×', async () => {
     statusAnswer = status({ skills: [GROOM, SUMMARISE] });
     await renderSetup();
 
@@ -1196,7 +1200,7 @@ describe('the Skills card', () => {
     expect(within(skillsCard()).getByText('Built in')).toBeInTheDocument();
     // The context row's sub-line differs from its label (ui-verify D12), as in the Run menu.
     expect(within(labelIn('Open with the ticket loaded') as HTMLElement).getByText('A session, you drive')).toBeInTheDocument();
-    expect(within(skillsCard()).getByText('Skills on this machine · 2')).toBeInTheDocument();
+    expect(within(skillsCard()).getByText('Your run skills · 2')).toBeInTheDocument();
     // A built-in is code, not a stored row: no ×.
     for (const name of ['Work it end to end', 'Open with the ticket loaded']) {
       const row = labelIn(name) as HTMLElement;
@@ -1208,9 +1212,10 @@ describe('the Skills card', () => {
     expect(within(groom).getByRole('button', { name: 'Remove Groom ticket' })).toBeInTheDocument();
   });
 
-  it('draws no `Skills on this machine` head at zero skills', async () => {
+  it('draws no `Your run skills` head at zero skills, and nothing extra in its place', async () => {
     await renderSetup();
-    expect(within(skillsCard()).queryByText(/^Skills on this machine/)).toBeNull();
+    expect(within(skillsCard()).queryByText(/^Your run skills/)).toBeNull();
+    expect(within(skillsCard()).queryByText(/^No .* skills yet\.$/)).toBeNull();
   });
 
   it('marks `default` on the row the setting resolves to and `Make default` on the others; a pick writes the setting', async () => {
@@ -1266,7 +1271,7 @@ describe('the Skills card', () => {
     expect(addSkillChip()).toBeDisabled();
   });
 
-  it('Add POSTs { name, prompt } trimmed, reloads the status, clears both fields and draws the new row', async () => {
+  it('Add POSTs { name, prompt, group: run } trimmed, reloads the status, clears both fields and draws the new row', async () => {
     await renderSetup();
     const before = statusReads();
     // `{{` types a literal `{` — a bare `{key}` is user-event's own key descriptor, not text.
@@ -1274,7 +1279,7 @@ describe('the Skills card', () => {
     await userEvent.type(skillPrompt(), ' /test-plan {{key} — {{summary}\n');
     await userEvent.click(addSkillChip());
 
-    await waitFor(() => expect(skillPosts()).toEqual([{ name: 'Draft test plan', prompt: '/test-plan {key} — {summary}' }]));
+    await waitFor(() => expect(skillPosts()).toEqual([{ name: 'Draft test plan', prompt: '/test-plan {key} — {summary}', group: 'run' }]));
     expect(posts('/api/jira/skills')[0].init?.headers).toEqual({ 'content-type': 'application/json' });
     await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
     await within(skillsCard()).findByText('Draft test plan');
@@ -1374,9 +1379,15 @@ describe('the Skills card', () => {
       for (const name of ['Work it end to end', 'Open with the ticket loaded']) {
         expect(within(labelIn(name)).queryAllByRole('button', { name: /^Move / })).toHaveLength(0);
       }
-      // The arrows sit before the default slot, so `Make default` and × keep their places.
+      // The arrows and `Edit` sit before the default slot, so `Make default` and × keep their places.
       const order = Array.from(labelIn('Groom ticket').querySelectorAll('button')).map((b) => b.getAttribute('aria-label'));
-      expect(order).toEqual(['Move Groom ticket up', 'Move Groom ticket down', 'Make Groom ticket the default action', 'Remove Groom ticket']);
+      expect(order).toEqual([
+        'Move Groom ticket up',
+        'Move Groom ticket down',
+        'Edit Groom ticket',
+        'Make Groom ticket the default action',
+        'Remove Groom ticket'
+      ]);
     });
 
     it('↓ on the first skill POSTs the whole order with the two swapped, reloads, and draws what the server stored', async () => {
@@ -1476,6 +1487,244 @@ describe('the Skills card', () => {
       expect(moveButton('Move Summarise changes down')).toBeDisabled();
       expect(moveButton('Move Groom ticket down')).toBeEnabled();
       expect(moveButton('Move Review MR up')).toBeEnabled();
+    });
+  });
+});
+
+/* ── Skills, Run and Review apart (2026-11-20 review-skills spec §2; mock Review-Skills.dc.html) ─────────────────────────────────────────────────────── */
+
+/* Interleaved on purpose and unequal (three run, two review): a per-group order must permute only its own slice of the WHOLE list the server stores. */
+const SK_A: JiraSkill = { id: 's_000000a1', name: 'Plan the ticket', prompt: '/plan {key}', group: 'run' };
+const SK_R1: JiraSkill = { id: 's_000000b1', name: 'Claude code review', prompt: '/code-review high {mr.url}', group: 'review' };
+const SK_B: JiraSkill = { id: 's_000000a2', name: 'Investigate a bug', prompt: '/investigate {key}', group: 'run' };
+const SK_R2: JiraSkill = { id: 's_000000b2', name: 'MR review loop', prompt: '/mr-review-loop {mr.url}', group: 'review' };
+const SK_C: JiraSkill = { id: 's_000000a3', name: 'Research a spike', prompt: '/research {key}', group: 'run' };
+const MIXED = [SK_A, SK_R1, SK_B, SK_R2, SK_C];
+
+describe('the Skills card, Run and Review apart', () => {
+  const groupSwitch = (): HTMLElement => within(skillsCard()).getByRole('group', { name: 'Skill group' });
+  const segment = (label: RegExp): HTMLElement => within(groupSwitch()).getByRole('button', { name: label });
+  const showReview = (): Promise<void> => userEvent.click(segment(/^Review/));
+  /** The card's text with each `Chevron` read as the `▾` it draws, so the explainers compare against the spec's copy verbatim. */
+  const card = (): string => {
+    const copy = skillsCard().cloneNode(true) as HTMLElement;
+    copy.querySelectorAll('svg.chev').forEach((mark) => mark.replaceWith('▾'));
+    return copy.textContent ?? '';
+  };
+  const orderPosts = (): { ids: string[] }[] => posts('/api/jira/skills/order').map((p) => JSON.parse(String(p.init?.body)));
+  const editName = (): HTMLInputElement => within(skillsCard()).getByRole('textbox', { name: 'Edited skill name' }) as HTMLInputElement;
+  const editPrompt = (): HTMLTextAreaElement => within(skillsCard()).getByRole('textbox', { name: 'Edited skill prompt template' }) as HTMLTextAreaElement;
+  const editGroup = (): HTMLElement => within(skillsCard()).getByRole('group', { name: 'Group' });
+  const REVIEW_SUB = 'Review: shows on an open MR, works on its source branch';
+
+  it("says what both menus start in the scope line, and the switch counts each group with Run pressed and Run's explainer under it", async () => {
+    statusAnswer = status({ skills: MIXED });
+    await renderSetup();
+    expect(card()).toContain("this machine · the prompts a card's Run menu and an MR's Review menu can start a session with");
+    expect(segment(/^Run/)).toHaveTextContent('Run 3');
+    expect(segment(/^Review/)).toHaveTextContent('Review 2');
+    expect(segment(/^Run/)).toHaveAttribute('aria-pressed', 'true');
+    expect(segment(/^Review/)).toHaveAttribute('aria-pressed', 'false');
+    expect(card()).toContain("Run skills show in a ticket's Run ▾.");
+    expect(card()).not.toContain("Review skills show in an MR's Review ▾");
+
+    await showReview();
+    expect(segment(/^Review/)).toHaveAttribute('aria-pressed', 'true');
+    expect(card()).toContain("Review skills show in an MR's Review ▾ and start on that MR's source branch, never a new one.");
+    expect(card()).not.toContain("Run skills show in a ticket's Run ▾.");
+  });
+
+  it('Run draws the two built-ins, `Your run skills · 3` with the order hint, and A, B, C with ↑ off on A and ↓ off on C', async () => {
+    statusAnswer = status({ skills: MIXED });
+    await renderSetup();
+    expect(skillNames()).toEqual(['Work it end to end', 'Open with the ticket loaded', 'Plan the ticket', 'Investigate a bug', 'Research a spike']);
+    expect(within(skillsCard()).getByText('Built in')).toBeInTheDocument();
+    expect(within(skillsCard()).getByText('Your run skills · 3')).toBeInTheDocument();
+    expect(within(skillsCard()).getByText('↑↓ to reorder · order = menu order')).toBeInTheDocument();
+    const move = (label: string): HTMLElement => within(skillsCard()).getByRole('button', { name: label });
+    expect(move('Move Plan the ticket up')).toBeDisabled();
+    expect(move('Move Plan the ticket down')).toBeEnabled();
+    expect(move('Move Investigate a bug up')).toBeEnabled();
+    expect(move('Move Investigate a bug down')).toBeEnabled();
+    expect(move('Move Research a spike up')).toBeEnabled();
+    expect(move('Move Research a spike down')).toBeDisabled();
+    expect(within(labelIn('Plan the ticket')).getByText('Make default')).toBeInTheDocument();
+  });
+
+  it('Review draws the bot built-in without `Make default`, `Your review skills · 2`, R1 and R2 with no `Make default`, and the Fills-in hint', async () => {
+    statusAnswer = status({ skills: MIXED });
+    await renderSetup();
+    await showReview();
+    expect(skillNames()).toEqual(['Review bot', 'Claude code review', 'MR review loop']);
+    expect(within(labelIn('Review bot')).getByText('request a review, or fix what it found')).toBeInTheDocument();
+    for (const name of ['Review bot', 'Claude code review', 'MR review loop']) {
+      expect(within(labelIn(name)).queryByText('Make default')).toBeNull();
+      expect(within(labelIn(name)).queryByText('default')).toBeNull();
+    }
+    expect(within(labelIn('Review bot')).queryByRole('button', { name: /^(Remove|Edit|Move) / })).toBeNull();
+    expect(within(skillsCard()).getByText('Built in')).toBeInTheDocument();
+    expect(within(skillsCard()).getByText('Your review skills · 2')).toBeInTheDocument();
+    expect(within(skillsCard()).getByText('↑↓ to reorder · order = menu order')).toBeInTheDocument();
+    expect(within(skillsCard()).getByRole('button', { name: 'Move Claude code review up' })).toBeDisabled();
+    expect(within(skillsCard()).getByRole('button', { name: 'Move MR review loop down' })).toBeDisabled();
+    expect(card()).toContain(
+      'Fills in: {key}, {mr.url}, {mr.iid}, {mr.source}, {mr.target}, {mr.project} · a template without {key} gets the ticket key on a line after it'
+    );
+    // Run's two placeholder rows are Run's alone.
+    expect(card()).not.toContain('placeholders:');
+    expect(card()).not.toContain('jira.mjs worktree');
+  });
+
+  it('↓ on R1 posts the WHOLE list with only the review slice permuted', async () => {
+    statusAnswer = status({ skills: MIXED });
+    await renderSetup();
+    await showReview();
+    await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Move Claude code review down' }));
+    await waitFor(() => expect(orderPosts()).toEqual([{ ids: ['s_000000a1', 's_000000b2', 's_000000a2', 's_000000b1', 's_000000a3'] }]));
+    await waitFor(() => expect(skillNames()).toEqual(['Review bot', 'MR review loop', 'Claude code review']));
+  });
+
+  it('an empty Review group says `No review skills yet.` under the bot row, with no head and no order hint', async () => {
+    statusAnswer = status({ skills: [SK_A, SK_B] });
+    await renderSetup();
+    await showReview();
+    expect(within(skillsCard()).getByText('No review skills yet.')).toBeInTheDocument();
+    expect(within(skillsCard()).queryByText(/^Your review skills/)).toBeNull();
+    expect(within(skillsCard()).queryByText('↑↓ to reorder · order = menu order')).toBeNull();
+    expect(segment(/^Review/)).toHaveTextContent('Review 0');
+    // The bot's built-in row still draws above the empty line.
+    expect(skillNames()).toEqual(['Review bot']);
+  });
+
+  it('a group with one skill draws its head but no order hint', async () => {
+    statusAnswer = status({ skills: [SK_A, SK_R1] });
+    await renderSetup();
+    expect(within(skillsCard()).getByText('Your run skills · 1')).toBeInTheDocument();
+    expect(within(skillsCard()).queryByText('↑↓ to reorder · order = menu order')).toBeNull();
+    await showReview();
+    expect(within(skillsCard()).getByText('Your review skills · 1')).toBeInTheDocument();
+    expect(within(skillsCard()).queryByText('↑↓ to reorder · order = menu order')).toBeNull();
+  });
+
+  it("the add row on Review takes the review placeholders and posts `group: 'review'`", async () => {
+    await renderSetup();
+    expect(skillName()).toHaveAttribute('placeholder', 'Groom ticket');
+    expect(skillPrompt()).toHaveAttribute('placeholder', '/jira-groom {key}');
+    await showReview();
+    expect(skillName()).toHaveAttribute('placeholder', 'Claude code review');
+    expect(skillPrompt()).toHaveAttribute('placeholder', '/code-review high {mr.url}');
+    await userEvent.type(skillName(), 'Claude code review');
+    await userEvent.type(skillPrompt(), '/code-review high {{mr.url}');
+    await userEvent.click(addSkillChip());
+    await waitFor(() => expect(skillPosts()).toEqual([{ name: 'Claude code review', prompt: '/code-review high {mr.url}', group: 'review' }]));
+    await waitFor(() => expect(skillNames()).toEqual(['Review bot', 'Claude code review']));
+  });
+
+  it('the remove confirm names the menu that stops offering the skill, per group', async () => {
+    statusAnswer = status({ skills: MIXED });
+    await renderSetup();
+    await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Remove Plan the ticket' }));
+    expect(within(skillsCard()).getByRole('group', { name: 'Remove Plan the ticket' })).toHaveTextContent(
+      "Remove Plan the ticket? A card's Run menu stops offering it."
+    );
+    await showReview();
+    await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Remove Claude code review' }));
+    expect(within(skillsCard()).getByRole('group', { name: 'Remove Claude code review' })).toHaveTextContent(
+      "Remove Claude code review? An MR's Review menu stops offering it."
+    );
+  });
+
+  describe('inline Edit', () => {
+    it('swaps the row for its name and prompt pre-filled, Group with Review pressed and its sub-line, and Save / Cancel', async () => {
+      statusAnswer = status({ skills: MIXED });
+      await renderSetup();
+      await showReview();
+      await userEvent.click(within(labelIn('Claude code review')).getByRole('button', { name: 'Edit Claude code review' }));
+      expect(labelIn('Claude code review')).toBeUndefined();
+      expect(editName().value).toBe('Claude code review');
+      expect(editPrompt().value).toBe('/code-review high {mr.url}');
+      expect(within(editGroup()).getByRole('button', { name: 'Review' })).toHaveAttribute('aria-pressed', 'true');
+      expect(within(editGroup()).getByRole('button', { name: 'Run' })).toHaveAttribute('aria-pressed', 'false');
+      expect(card()).toContain('Group');
+      expect(card()).toContain(REVIEW_SUB);
+      expect(within(skillsCard()).getByRole('button', { name: 'Save' })).toBeEnabled();
+      expect(within(skillsCard()).getByRole('button', { name: 'Cancel' })).toBeEnabled();
+      // The add row is still there, under the group.
+      expect(skillName().value).toBe('');
+    });
+
+    it('switching Group to Run hides the sub-line; Save posts { id, name, prompt, group: run }, closes, and the skill leaves the shown segment', async () => {
+      statusAnswer = status({ skills: MIXED });
+      await renderSetup();
+      await showReview();
+      await userEvent.click(within(labelIn('Claude code review')).getByRole('button', { name: 'Edit Claude code review' }));
+      await userEvent.click(within(editGroup()).getByRole('button', { name: 'Run' }));
+      expect(card()).not.toContain(REVIEW_SUB);
+      await userEvent.clear(editName());
+      await userEvent.type(editName(), ' Review as a run ');
+      await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Save' }));
+
+      await waitFor(() =>
+        expect(skillPosts()).toEqual([{ id: 's_000000b1', name: 'Review as a run', prompt: '/code-review high {mr.url}', group: 'run' }])
+      );
+      // The shown segment does not follow the skill.
+      await waitFor(() => expect(skillNames()).toEqual(['Review bot', 'MR review loop']));
+      expect(segment(/^Review/)).toHaveAttribute('aria-pressed', 'true');
+      expect(within(skillsCard()).queryByRole('textbox', { name: 'Edited skill name' })).toBeNull();
+      expect(segment(/^Run/)).toHaveTextContent('Run 4');
+      // id and list position kept: it sits where R1 sat, between A and B.
+      await userEvent.click(segment(/^Run/));
+      expect(skillNames().slice(2)).toEqual(['Plan the ticket', 'Review as a run', 'Investigate a bug', 'Research a spike']);
+    });
+
+    it('a refusal shows in the alert row and keeps the editor open with what was typed', async () => {
+      statusAnswer = status({ skills: MIXED });
+      skillsAnswer = () => answer({ error: 'name must be at most 60 characters' }, 400);
+      await renderSetup();
+      await userEvent.click(within(labelIn('Plan the ticket')).getByRole('button', { name: 'Edit Plan the ticket' }));
+      expect(within(editGroup()).getByRole('button', { name: 'Run' })).toHaveAttribute('aria-pressed', 'true');
+      expect(card()).not.toContain(REVIEW_SUB);
+      await userEvent.type(editName(), ' again');
+      await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Save' }));
+      const alert = await within(skillsCard()).findByRole('alert');
+      expect(alert).toHaveTextContent('name must be at most 60 characters');
+      expect(editName().value).toBe('Plan the ticket again');
+    });
+
+    it('Cancel puts the row back and posts nothing', async () => {
+      statusAnswer = status({ skills: MIXED });
+      await renderSetup();
+      await userEvent.click(within(labelIn('Plan the ticket')).getByRole('button', { name: 'Edit Plan the ticket' }));
+      await userEvent.type(editName(), ' x');
+      await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Cancel' }));
+      expect(within(skillsCard()).queryByRole('textbox', { name: 'Edited skill name' })).toBeNull();
+      expect(labelIn('Plan the ticket')).toBeDefined();
+      expect(skillPosts()).toHaveLength(0);
+    });
+
+    it("one editor at a time: Edit on R2 closes R1's, and × on another row closes an open one", async () => {
+      statusAnswer = status({ skills: MIXED });
+      await renderSetup();
+      await showReview();
+      await userEvent.click(within(labelIn('Claude code review')).getByRole('button', { name: 'Edit Claude code review' }));
+      await userEvent.click(within(labelIn('MR review loop')).getByRole('button', { name: 'Edit MR review loop' }));
+      expect(within(skillsCard()).getAllByRole('textbox', { name: 'Edited skill name' })).toHaveLength(1);
+      expect(editName().value).toBe('MR review loop');
+      expect(labelIn('Claude code review')).toBeDefined();
+
+      await userEvent.click(within(labelIn('Claude code review')).getByRole('button', { name: 'Remove Claude code review' }));
+      expect(within(skillsCard()).queryByRole('textbox', { name: 'Edited skill name' })).toBeNull();
+      expect(labelIn('MR review loop')).toBeDefined();
+    });
+
+    it('Escape closes the editor and nothing else', async () => {
+      statusAnswer = status({ skills: MIXED });
+      await renderSetup();
+      await userEvent.click(within(labelIn('Plan the ticket')).getByRole('button', { name: 'Edit Plan the ticket' }));
+      await userEvent.keyboard('{Escape}');
+      expect(within(skillsCard()).queryByRole('textbox', { name: 'Edited skill name' })).toBeNull();
+      expect(labelIn('Plan the ticket')).toBeDefined();
+      expect(skillPosts()).toHaveLength(0);
     });
   });
 });

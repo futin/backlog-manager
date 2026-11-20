@@ -51,7 +51,7 @@ function detail(key: string, over: Partial<JiraIssue> = {}): JiraIssueDetail {
   return { ...issue(key, over), description: '', children: [], transitions: [], boards: [], session: null };
 }
 
-const SKILL = { id: 'sk-review', name: 'Review', prompt: '/review-it' };
+const SKILL = { id: 'sk-review', name: 'Review', prompt: '/review-it', group: 'run' as const };
 
 function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
   return {
@@ -316,5 +316,24 @@ describe('Run on — resets and reads', () => {
     await userEvent.click(rowNamed(menu, JIRA_BUILTIN_LABELS.execute));
     expect(onPick.mock.calls[0][0].key).toBe('P-9');
     expect(onPick.mock.calls[0][0].summary).toBe('Summary of P-9');
+  });
+});
+
+describe('Run ▾ — run skills only', () => {
+  const RSKILL = { id: 'sk-deep', name: 'Deep review', prompt: '/deep {key}', group: 'review' as const };
+
+  it('lists run skills only and counts them', async () => {
+    mount([S_1], { status: { skills: [SKILL, RSKILL] } });
+    const menu = await openMenu('S-1');
+    expect(within(menu).getByRole('button', { name: SKILL.name })).toBeInTheDocument();
+    expect(within(menu).queryByRole('button', { name: RSKILL.name })).toBeNull();
+    expect(menu).toHaveTextContent('Skills on this machine · 1');
+  });
+
+  it('a machine with only review skills draws no skills head', async () => {
+    mount([S_1], { status: { skills: [RSKILL] } });
+    const menu = await openMenu('S-1');
+    expect(menu).not.toHaveTextContent('Skills on this machine');
+    expect(within(menu).queryByRole('button', { name: RSKILL.name })).toBeNull();
   });
 });

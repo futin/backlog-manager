@@ -1112,6 +1112,172 @@ describe('review', () => {
       expect(sent.spawns[0].prompt).toBe('Fix the review on !42 my way.');
     });
   });
+
+  /**
+   * A review SKILL on an MR (spec §6): the bot's cache checks minus its state checks — the MR open and the ticket's (or its parent's), the repo a candidate,
+   * `continue` on the source branch — plus a re-check of the three values the sheet previewed against the cache, then the bot's strict key gate and branch
+   * hold. The MR names both sub-tasks, so PAY-2 and PAY-3 are two keys on one branch; `!43` sits beside it on another branch so a lookup that is not by iid
+   * would show.
+   */
+  describe('a review skill', () => {
+    const REVIEWER = { id: 's_feedbeef', name: 'Deep review', prompt: 'Review {mr.url} ({mr.source} into {mr.target}) for {key}.', group: 'review' };
+    const URL_42 = `https://gitlab.test/${PROJECT}/-/merge_requests/${IID}`;
+    const TARGET = 'develop';
+    const sentMr = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      project: PROJECT,
+      iid: IID,
+      url: URL_42,
+      source: SOURCE,
+      target: TARGET,
+      ...over,
+    });
+    // The bot's body with the skill's action and MR, and no half.
+    const skillBody = (over: Record<string, unknown> = {}): Record<string, unknown> =>
+      body({ action: { skill: REVIEWER.id }, half: undefined, mr: sentMr(), ...over });
+
+    beforeEach(() => {
+      writeConfig({ repos: { PAY: [MAIN, CLONE] }, skills: [SKILL, REVIEWER] });
+      seed(mr({ keys: ['PAY-2', 'PAY-3'] }));
+      seed(mr({ iid: 43, webUrl: `https://gitlab.test/${PROJECT}/-/merge_requests/43`, sourceBranch: 'pay-9-other', keys: ['PAY-2'] }));
+    });
+
+    describe('Start', () => {
+      it("spawns on the source branch with the cached MR's values — the preview for the same request, byte for byte — and links the branch", async () => {
+        const res = await post(skillBody()).expect(200);
+        expect(res.body).toMatchObject({ sessionId: 'sess-1', assigned: false, transitioned: null });
+        expect(sent.spawns).toHaveLength(1);
+        expect(sent.spawns[0].prompt).toContain(`Review ${URL_42} (${SOURCE} into ${TARGET}) for PAY-2.`);
+        const query = new URLSearchParams({
+          key: 'PAY-2',
+          action: `skill:${REVIEWER.id}`,
+          repo: MAIN,
+          mode: 'continue',
+          branch: SOURCE,
+          mrProject: PROJECT,
+          mrIid: String(IID),
+          mrUrl: URL_42,
+          mrSource: SOURCE,
+          mrTarget: TARGET
+        });
+        const preview = (await request(app.getHttpServer()).get(`/api/jira/prompt?${query.toString()}`).expect(200)).text;
+        expect(sent.spawns[0].prompt).toBe(preview);
+        const link = live.links().find((l) => l.key === 'PAY-2');
+        expect(link).toMatchObject({ how: 'run', action: { skill: REVIEWER.id }, branch: SOURCE, repo: MAIN, sessionId: 'sess-1' });
+        expect(reposForCalls).toEqual([['PAY', PROJECT]]);
+      });
+
+      // A review skill is a reviewer of the person's choosing on any open MR: no review state, no `nothing to review`, no half.
+      it.each([
+        ['no review state read yet', null],
+        ['a clean review', { open: 0 }]
+      ])('starts on an MR with %s', async (_label, state) => {
+        seed(mr({ keys: ['PAY-2', 'PAY-3'], review: state === null ? null : review(state) }));
+        await post(skillBody()).expect(200);
+        expect(sent.spawns).toHaveLength(1);
+      });
+    });
+
+    describe('the sheet against the cache — 409 when any of the three values moved', () => {
+      const changed = { error: `!${IID} changed since the sheet opened — reopen the sheet` };
+      it.each([
+        ['url', { webUrl: `https://gitlab.test/${PROJECT}/-/merge_requests/${IID}/moved` }],
+        // A stale sheet sends the OLD source as both `mr.source` and the branch it continues: the re-check speaks first, not the choice's 400.
+        ['source', { sourceBranch: 'pay-1-renamed' }],
+        ['target', { targetBranch: 'main' }]
+      ])('409 when the cached %s differs, nothing spawned', async (_label, cacheOver) => {
+        seed(mr({ keys: ['PAY-2', 'PAY-3'], ...cacheOver }));
+        expect((await post(skillBody()).expect(409)).body).toEqual(changed);
+        untouched();
+      });
+    });
+
+    describe('the cached MR, the ticket, the candidate and the choice — the bot review\'s 400s', () => {
+      it.each([
+        ['an MR the cache does not hold', () => mrs.delete(`${PROJECT}\u0000${IID}`), `!${IID} is not an open merge request of PAY-2`],
+        ['a merged MR', () => seed(mr({ keys: ['PAY-2', 'PAY-3'], state: 'merged' })), `!${IID} is not an open merge request of PAY-2`],
+        ["an MR whose keys carry neither the key nor its parent", () => seed(mr({ keys: ['PAY-9'] })), `!${IID} is not an open merge request of PAY-2`]
+      ])('400 for %s', async (_label, arrange, error) => {
+        arrange();
+        expect((await post(skillBody({ assign: true, transitionId: '31' })).expect(400)).body).toEqual({ error });
+        untouched();
+      });
+
+      it("a sub-task whose parent's key is the MR's only key passes", async () => {
+        seed(mr({ keys: ['PAY-1'] }));
+        await post(skillBody()).expect(200);
+      });
+
+      it.each([
+        [
+          'a repo that is mapped but not a candidate',
+          (): Record<string, unknown> => ({ repo: CLONE }),
+          (): string => `${CLONE} is not a review candidate for !${IID}`,
+        ],
+        ['a new branch', (): Record<string, unknown> => ({ mode: 'new', branch: 'pay-2-fix', base: 'develop' }), (): string => `a review continues ${SOURCE}`],
+        ['continue on another branch', (): Record<string, unknown> => ({ branch: 'pay-1-other' }), (): string => `a review continues ${SOURCE}`],
+        // The controller's branch-choice parse refuses openMr for any action but execute, before the service's own re-read could: the bot's sentence too.
+        ['openMr', (): Record<string, unknown> => ({ openMr: true }), (): string => 'openMr is only for execute with a branch']
+      ])('400 for %s', async (_label, over, error) => {
+        expect((await post(skillBody(over())).expect(400)).body).toEqual({ error: error() });
+        untouched();
+      });
+    });
+
+    describe('the wire — shape and the group/MR pairing, before any lookup', () => {
+      const shape = 'mr must be { project, iid, url, source, target }';
+      it.each([
+        ['a string iid', { mr: sentMr({ iid: '42' }) }, shape],
+        ['no url', { mr: sentMr({ url: undefined }) }, shape],
+        ['a url that is not http(s)', { mr: sentMr({ url: 'ftp://gitlab.test/x' }) }, shape],
+        ['a url over 2 000 characters', { mr: sentMr({ url: `https://gitlab.test/${'x'.repeat(2000)}` }) }, shape],
+        ['a source branch Table A refuses', { mr: sentMr({ source: 'pay 1' }) }, shape],
+        ['no target', { mr: sentMr({ target: undefined }) }, shape],
+        ['an mr that is not an object', { mr: 'grp/pay!42' }, shape],
+        ['a half with a skill', { half: 'fix' }, "half is the review bot's only"],
+        ['a half with a skill AND a malformed mr — the half sentence first', { half: 'fix', mr: sentMr({ iid: '42' }) }, "half is the review bot's only"],
+        ['a review skill with no mr', { mr: undefined }, `${REVIEWER.name} is a review skill and needs an MR`],
+        ['a run skill with an mr', { action: { skill: SKILL.id } }, `${SKILL.name} is a run skill and takes no MR`]
+      ])('400 for %s', async (_label, over, error) => {
+        expect((await post(skillBody(over)).expect(400)).body).toEqual({ error });
+        untouched();
+        expect(reposForCalls).toEqual([]);
+      });
+    });
+
+    describe('the strict key gate and the branch hold — as for the bot review', () => {
+      it('a QUIET live Run on the key refuses a review skill in the strict words, though a run skill would start beside it', async () => {
+        live.reserve('PAY-2', MAIN);
+        live.confirm('PAY-2', 'sess-old', RUN_META);
+        live.markQuiet('PAY-2', 'sess-old', new Date().toISOString());
+        live.setRows([{ id: 'sess-old', status: 'idle' }], Date.now());
+        expect((await post(skillBody()).expect(409)).body).toEqual({ error: 'PAY-2 already has a session' });
+        expect(sent.spawns).toEqual([]);
+        await post(skillBody({ action: { skill: SKILL.id }, mr: undefined, mode: 'none', branch: undefined })).expect(200);
+        expect(sent.spawns).toHaveLength(1);
+      });
+
+      it('a review skill on PAY-2 and another on PAY-3, one MR branch, raced: one spawns, the other 409s on the branch hold', async () => {
+        // The bot review's race, driven the same way: the first dispatch is parked inside its spawn — key reserved, branch held, no link — and the second,
+        // on a DIFFERENT key, runs every gate in that window, so the only thing that can refuse it is the branch hold.
+        let open!: () => void;
+        sent = stubDashboard({ projectPaths: [MAIN, CLONE], firstSpawnGate: new Promise<void>((resolve) => (open = resolve)) });
+        const first = post(skillBody()).then((res) => res);
+        try {
+          for (let waited = 0; sent.spawns.length === 0; waited += 5) {
+            if (waited > 5_000) throw new Error('the first dispatch never reached its spawn');
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+          expect(live.liveLinks()).toEqual([]);
+          expect((await post(skillBody({ key: 'PAY-3' })).expect(409)).body).toEqual({ error: `a session is live on ${SOURCE}` });
+          expect(live.get('PAY-3')).toBeNull();
+        } finally {
+          open();
+        }
+        expect((await first).status).toBe(200);
+        expect(sent.spawns).toHaveLength(1);
+      }, 5_000);
+    });
+  });
 });
 
 /**

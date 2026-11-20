@@ -449,6 +449,7 @@ describe('configured, the credentials are rejected', () => {
  */
 describe('GET /api/jira/prompt', () => {
   const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} in {repo}, then stop.' };
+  const REVIEW_SKILL = { id: 's_1123abcd', name: 'MR critic', group: 'review', prompt: 'Review {mr.url} ({mr.source} into {mr.target}) for {key}.' };
   const REPO = '/work/pay';
   const q = (params: Record<string, string>) => `/prompt?${new URLSearchParams(params).toString()}`;
   const ok = { key: 'PAY-131', action: 'execute', repo: REPO, mode: 'new', branch: 'pay-131-export', base: 'develop' };
@@ -474,7 +475,7 @@ describe('GET /api/jira/prompt', () => {
 
   beforeAll(async () => {
     prepare('prompt');
-    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL, REVIEW_SKILL] }));
     await build(false);
   });
   afterAll(() => app.close());
@@ -514,7 +515,7 @@ describe('GET /api/jira/prompt', () => {
 
   it('409 when jira.json cannot be read, ahead of an unknown skill and of any Jira call', async () => {
     const file = process.env.BM_JIRA_FILE!;
-    const good = JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] });
+    const good = JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL, REVIEW_SKILL] });
     writeFileSync(file, '{ not json');
     const calls = fake.calls.length;
     try {
@@ -576,6 +577,36 @@ describe('GET /api/jira/prompt', () => {
     });
   });
 
+  describe('action=skill:<review id>', () => {
+    const MR = { mrProject: 'grp/proj', mrIid: '15958', mrUrl: 'https://gitlab.example.com/grp/proj/-/merge_requests/15958', mrSource: 'pay-131-export', mrTarget: 'develop' };
+    const skill = { ...NONE, action: `skill:${REVIEW_SKILL.id}` };
+    const SHAPE = { error: 'mr must be { project, iid, url, source, target }' };
+
+    it('200 composing against the MR it was sent', async () => {
+      const res = await get(q({ ...skill, ...MR })).expect(200);
+      expect(res.text).toBe(`Review ${MR.mrUrl} (pay-131-export into develop) for PAY-131.`);
+    });
+
+    it.each([['mrUrl'], ['mrIid'], ['mrProject'], ['mrSource'], ['mrTarget']])('400 the shape sentence when %s is missing', async (name) => {
+      const { [name]: _drop, ...rest } = MR as Record<string, string>;
+      expect((await get(q({ ...skill, ...rest })).expect(400)).body).toEqual(SHAPE);
+    });
+
+    it('400 the shape sentence for a source that is not a branch name or a url that is not http(s)', async () => {
+      expect((await get(q({ ...skill, ...MR, mrSource: 'a..b' })).expect(400)).body).toEqual(SHAPE);
+      expect((await get(q({ ...skill, ...MR, mrUrl: 'ftp://x/y' })).expect(400)).body).toEqual(SHAPE);
+    });
+
+    it('400 a review skill needs an MR when none is sent, and a run skill takes none when one is', async () => {
+      expect((await get(q(skill)).expect(400)).body).toEqual({ error: 'MR critic is a review skill and needs an MR' });
+      expect((await get(q({ ...NONE, action: `skill:${SKILL.id}`, ...MR })).expect(400)).body).toEqual({ error: 'Review it is a run skill and takes no MR' });
+    });
+
+    it("400 half is the review bot's only, even with a good MR", async () => {
+      expect((await get(q({ ...skill, ...MR, half: 'request' })).expect(400)).body).toEqual({ error: "half is the review bot's only" });
+    });
+  });
+
   it('the context built-in answers its own text', async () => {
     const res = await get(q({ ...NONE, action: 'context' })).expect(200);
     expect(res.text.startsWith('Read Jira ticket PAY-131 first')).toBe(true);
@@ -602,7 +633,7 @@ describe('GET /api/jira/prompt', () => {
       await get(q({ ...ok, repo: stored })).expect(200);
       expect((await get(q({ ...ok, repo: '~/other' })).expect(400)).body).toEqual({ error: '~/other is not mapped to PAY' });
     } finally {
-      writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+      writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL, REVIEW_SKILL] }));
     }
   });
 
@@ -690,7 +721,7 @@ describe('GET /api/jira/prompt', () => {
       const res = await get(q({ key: 'PAY-600', action: `skill:${SKILL.id}`, repo: REPO, mode: 'none' })).expect(400);
       expect(res.body).toEqual({ error: 'prompt too long' });
     } finally {
-      writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+      writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL, REVIEW_SKILL] }));
     }
   });
 });

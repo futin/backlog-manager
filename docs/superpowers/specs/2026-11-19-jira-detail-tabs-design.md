@@ -284,8 +284,8 @@ The ReviewRow moves from "the lead only" to **each expanded target whose represe
 Its sentence, its play-button split and the sheet it opens are today's: `setLaunch({ issue, action: 'review', review: { half, mr: {project, iid,
 sourceBranch}, repos } })` with that row's MR. `reviewGate` and the 409 paths are unchanged.
 
-**Reserved slot.** The button is today's review play-button split (`ReviewRow`'s), in the place `Main.dc.html` draws `Review ▾`. The review-skills spec turns it into a
-menu; this spec draws no menu and no skills.
+**Reserved slot.** The button is today's review play-button split (`ReviewRow`'s), in the place `Main.dc.html` draws `Review ▾`. The review-skills spec
+([2026-11-20-jira-review-skills-design.md](2026-11-20-jira-review-skills-design.md)) turns it into a menu; this spec draws no menu and no skills.
 
 ### 4.5 The next step
 

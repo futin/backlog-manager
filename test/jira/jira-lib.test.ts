@@ -70,6 +70,7 @@ import {
   replyRepos,
   jiraSettingOf,
   jiraWritesStand,
+  isReviewSkill,
   resolveJiraAction,
   runChipState,
   runBlockTitle,
@@ -725,7 +726,7 @@ describe('isJiraStatusPayload', () => {
     expect(isJiraStatusPayload(noLive)).toBe(false);
     expect(isJiraStatusPayload({ ...payload(), live: null })).toBe(false);
     expect(isJiraStatusPayload({ ...payload(), live: [] })).toBe(false);
-    expect(isJiraStatusPayload(payload({ skills: [{ id: 's_0123abcd', name: 'Groom', prompt: '/g' }] }))).toBe(true);
+    expect(isJiraStatusPayload(payload({ skills: [{ id: 's_0123abcd', name: 'Groom', prompt: '/g', group: 'run' }] }))).toBe(true);
   });
 
   it('rejects what is not an object', () => {
@@ -1315,12 +1316,22 @@ describe('laneBoard', () => {
 });
 
 describe('resolveJiraAction and jiraSettingOf', () => {
-  const skills: JiraSkill[] = [{ id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' }];
+  const skills: JiraSkill[] = [{ id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' }];
 
   it('reads the two built-ins as themselves and a present skill id as { skill }', () => {
     expect(resolveJiraAction('execute', skills)).toBe('execute');
     expect(resolveJiraAction('context', skills)).toBe('context');
     expect(resolveJiraAction('s_0123abcd', skills)).toEqual({ skill: 's_0123abcd' });
+  });
+
+  it('a stored id that names a review skill resolves to execute, and isReviewSkill reads the group off the list', () => {
+    const list: JiraSkill[] = [...skills, { id: 's_feedbeef', name: 'Check MR', prompt: '/check {mr.url}', group: 'review' }];
+    expect(resolveJiraAction('s_feedbeef', list)).toBe('execute');
+    expect(resolveJiraAction('s_0123abcd', list)).toEqual({ skill: 's_0123abcd' });
+    expect(isReviewSkill({ skill: 's_feedbeef' }, list)).toBe(true);
+    expect(isReviewSkill({ skill: 's_0123abcd' }, list)).toBe(false);
+    expect(isReviewSkill({ skill: 's_gone' }, list)).toBe(false);
+    expect(isReviewSkill('execute', list)).toBe(false);
   });
 
   it('falls back to execute for an id no skill holds, an empty list and anything that is not an id', () => {
@@ -1576,6 +1587,19 @@ describe('the branch choice wire', () => {
       json: () => Promise.resolve(body),
       text: () => Promise.resolve('p')
     })) as jest.Mock;
+
+  it('fetchJiraPrompt sends a review skill\'s five MR fields and no half', async () => {
+    const f = answer(200, null);
+    const skillMr = { project: 'g/p', iid: 7, url: 'https://gl/g/p/-/merge_requests/7', source: 'pay-1-x', target: 'develop' };
+    await fetchJiraPrompt('PAY-1', { skill: 's_0a1b2c3d' }, '/r', { mode: 'none' }, { skillMr });
+    const q = new URL(f.mock.calls[0][0], 'http://x').searchParams;
+    expect(q.get('mrProject')).toBe('g/p');
+    expect(q.get('mrIid')).toBe('7');
+    expect(q.get('mrUrl')).toBe(skillMr.url);
+    expect(q.get('mrSource')).toBe('pay-1-x');
+    expect(q.get('mrTarget')).toBe('develop');
+    expect(q.has('half')).toBe(false);
+  });
 
   it('fetchJiraPrompt adds mode, and branch/base/openMr/target only for the modes that carry them', async () => {
     let f = answer(200, null);

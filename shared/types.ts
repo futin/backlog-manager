@@ -970,11 +970,27 @@ export interface JiraBoard {
   interval: SyncInterval;
 }
 
+/** Which menu a skill belongs to: a `run` skill starts from a ticket's Run ▾, a `review` skill runs against one open MR from its Review ▾. */
+export type JiraSkillGroup = 'run' | 'review';
+
 /** A prompt template the Start sheet offers beside `execute` and `context`. `prompt` is the template itself, not a rendered prompt. */
 export interface JiraSkill {
   id: string;
   name: string;
   prompt: string;
+  group: JiraSkillGroup;
+}
+
+/**
+ * The one open MR a review skill runs against, as the launch sheet sends it and the server composes from it (spec §3, §6): the five values a `{mr.*}`
+ * placeholder fills from. Dispatch re-checks `url`, `source` and `target` against the GitLab cache and composes from the cache's copy.
+ */
+export interface ReviewSkillMr {
+  project: string;
+  iid: number;
+  url: string;
+  source: string;
+  target: string;
 }
 
 /**
@@ -1699,8 +1715,12 @@ export interface JiraDispatchRequest {
   key: string;
   repo: string;
   action: JiraAction;
-  /** With `action: 'review'` only: the MR the button drew and the half the sheet previewed (spec 6). The server checks both against its own cache. */
-  mr?: { project: string; iid: number };
+  /**
+   * With `action: 'review'`: the MR the button drew and the half the sheet previewed (spec 6), `{ project, iid }`. With a review skill's `{ skill }`: the five
+   * values the sheet previewed (`ReviewSkillMr`), and no `half`. The server checks either against its own cache — a skill's `url`, `source` and `target` must
+   * still equal the cached MR's, or the sheet is stale.
+   */
+  mr?: { project: string; iid: number } | ReviewSkillMr;
   half?: ReviewHalf;
   assign: boolean;
   transitionId: string | null;

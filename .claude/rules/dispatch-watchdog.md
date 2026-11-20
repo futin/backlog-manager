@@ -67,6 +67,10 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   For `review` it also influences `mr` (`{ project, iid }`: the path through `isGitlabProjectPath`, the iid a positive integer) and `half` (`request` or `fix`),
   both shape-validated by the controller and then checked against the GitLab poller's cache by `JiraDispatchService` (`findMr`, `reposFor`) — the prompt names
   the CACHED MR's project and iid, carries no finding text, and a `half` that is not the one the cached review derives is a 409, never a different prompt.
+  A review SKILL's `{ skill }` carries no `half` but a five-field `mr` (`{ project, iid, url, source, target }`, shaped by the controller), which dispatch
+  re-checks against the cache — a differing `webUrl`, source or target is a 409, never a different prompt — and composes from the cache's values, under the same
+  strict gate and branch hold as the bot's review; `openMr` on it is the route's existing 400 (`openMr is only for execute with a branch`), the bot's half
+  checks do not apply.
   A SKILL's prompt is its template — the person's own text from
   `jira.json` — with `{key}`, `{url}` and `{repo}` filled in ONE pass by a replacement function, plus a `Jira ticket: <KEY>` line when the template names no
   `{key}`, and nothing of the ticket's own: the skill reads the ticket itself, so no stranger's text is in it. A BUILT-IN's prompt carries none of the ticket

@@ -2325,15 +2325,21 @@ the Detail dialog's session card `Stop` (in place of the button). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
-The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, ten composers since the Runs and GitHub restyle: the tracker
+The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, eleven composers since Jira review skills: the tracker
 strip's (`TrackerPopover` in `components/TrackerChip.tsx`), the band's Filters and Sort, the Jira chip's (`JiraPopover` in `components/JiraChip.tsx`), the
 Jira board's picker, the board sheet's roots search, which hangs over that sheet and so is the topmost entry while it is open, and `Run ▾`'s panel
-(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal) the Jira Detail's Move-to panel (`jira/JiraDetail.tsx`, the Status chip's) and `SessionOpen`'s `Session actions` menu (`jira/SessionOpen.tsx`, drawn on the deck card and in Detail's session card) and `PrActions`' `Merge menu` (`github/PrActions.tsx`, the split Merge's chevron beside every pull request in Inbox, Matrix and Cards). It joins for the same reason
+(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal) the Jira Detail's Move-to panel (`jira/JiraDetail.tsx`, the Status chip's) and `SessionOpen`'s `Session actions` menu (`jira/SessionOpen.tsx`, drawn on the deck card and in Detail's session card) and `PrActions`' `Merge menu` (`github/PrActions.tsx`, the split Merge's chevron beside every pull request in Inbox, Matrix and Cards) and the Delivery row's `Review menu` (`jira/ReviewMenu.tsx`, the split's `More reviewers` chevron or the ghost `Review ▾` on every open MR). It joins for the same reason
 and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands
 it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
 on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's
 `useDismiss` bundles the two into one hook with its own `keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not
 copied. Still ten dialogs counted.
+
+The third entry that is not a dialog is the Skills card's inline editor (`SkillEditor`, `components/jira/JiraSkillsGroup.tsx`, Jira review skills spec §2).
+`Edit` swaps a row, in place, for its fields pre-filled with a Group toggle and `Save` / `Cancel`, and the editor calls `useDialogEscape(onCancel)` for exactly
+as long as it is mounted — so Escape cancels the edit and nothing under it (the issue modal), and the editor binds no listener of its own. `Cancel` and Escape
+are the same function: both close the editor and clear the card's alert row, because a refusal shown there belonged to the edit that is gone and would otherwise
+speak about nothing on screen. It is a component of its own so that its draft, like its place on the stack, lives and dies with it.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the
@@ -4364,6 +4370,40 @@ Two reviews on one branch would answer the same findings twice and commit over e
 the branch of any `how`, and any live dashboard row on it. The links and the rows can be 15 to 60 s old; the spec accepts that, because the cost of a second
 session slipping through that window is a redundant comment, and a gate that read GitLab or the dashboard per click would put a request on a button.
 
+A review SKILL is held by the same branch gate and the same cache, but not by the bot's state checks or its half — see
+[a review skill is the person's reviewer](#a-review-skill-is-the-persons-reviewer-held-by-the-bots-gates).
+
+## A review skill is the person's reviewer, held by the bot's gates
+
+Jira review skills ([spec](../superpowers/specs/2026-11-20-jira-review-skills-design.md)). The bot review is the repository's reviewer; a review skill is the
+person's own — a saved prompt such as `/code-review high {mr.url}` run against one open MR. Everything that protects the bot's review from a second session
+applies to it unchanged, and everything that exists only because the bot has findings does not.
+
+**What it shares.** The branch hold and the strict one-session gate. A review skill commits to the MR's source branch like the bot's `fix` half does, so a
+second session there — a bot review, another skill, a run — would answer the same MR twice and commit over it; the skill therefore takes the same `branchHolds`
+entry and is refused by the same `branchBusy`, and it is held by the same `reviewGate` on the client. Its branch is `continue` on the MR's source branch and
+never anything else, so it cannot cut a branch or open a worktree, and `openMr` on it is the route's existing 400, not a new refusal.
+
+**What it does not.** The state checks (`no review state yet`, `nothing to review`, `moved on`) and a half. They answer "what should the BOT do next on this
+MR"; a review skill is a reviewer of the person's choosing and is allowed on any open MR, including one the bot has called clean. A `half` beside a skill is a
+400, so the bot's derivation can never be steered through the skill's wire.
+
+**The client sends the MR's five values, and dispatch re-proves them.** `jira/` may not read the GitLab poller (`GitlabModule` imports `JiraModule`, so the
+reverse edge is a cycle), so the preview composes from the `project`, `iid`, `url`, `source` and `target` the client drew its row from. Dispatch reads the
+cache, and a `webUrl`, source or target that differs from what was previewed is a 409 telling the person to reopen the sheet — the bot's `moved on` pattern —
+because the prompt they read is then not the prompt this Start would spawn. It composes from the cache's values, which equal the sent ones once the comparison
+passed, so the preview is the spawn byte for byte. The comparison runs before the candidate and branch checks: a renamed source branch arrives with the old name
+in the choice too, and is a stale sheet, not a wrong branch.
+
+**A skill session is not the ticket's live review.** `liveReviewLink` stays `action === 'review'`. The bot's `fix` half turns into `Open session` while the
+bot's session is live because that session is already working the bot's findings; a skill's session is not, so it holds the gate (the reason line names it)
+without changing what the left half says.
+
+**The group is a field, not a second list.** A skill is `{ id, name, prompt, group }` in the one list: an id space, one order the card slices per group, and a
+group change that keeps the skill's id and position. An existing file needs no migration because an absent `group` reads `run`. The cost is that one id could be
+offered in the wrong menu, which is why every START surface filters by group and why `resolveJiraAction` reads a review id as unknown — a stored
+`jiraDefaultAction` that became a review skill falls back to `execute` rather than opening a menu it does not belong to.
+
 ## A reply-draft session reads only, and only a person's click posts
 
 Jira mentions ([spec](../superpowers/specs/2026-11-16-jira-mentions-design.md)). A reply is a comment under the person's name on a ticket other people
@@ -4403,6 +4443,13 @@ its own next row, because a ticket delivered to `develop` and `demo` has two MRs
 one's findings behind the first's. The button and its sentences never name the bot (spec §4.7): which bot reviews is the repository's, so the row opens
 `Review · ` and the `request` prompt tells the session to post the trigger the mr-review-loop skill's trigger step names, rather than a mention this server
 would have to keep in step with every repository and every version of the skill.
+
+Since Jira review skills the button is also a menu, and the choice of reviewer is per MR for the same reason the button is: which reviewer an MR wants is a fact
+about that MR. With a review skill on this machine the split gains a chevron and every other open MR's next row gains a ghost `Review ▾`, because picking a
+reviewer must not wait on the bot's state — a row whose bot review is `clean` or still `reviewing` has no bot half to offer, and a person who wants their own
+reviewer on it should not have to wait for one. The ghost's menu holds the skills alone, never the bot, because a bot dispatch without a half is refused. The
+menu is the Delivery row's, never `Run ▾`'s: each list offers only its own group, so a review skill cannot be started without an MR and a run skill cannot be
+handed one. See [a review skill is the person's reviewer](#a-review-skill-is-the-persons-reviewer-held-by-the-bots-gates).
 
 ## The claim protocol: lowest live comment id wins
 

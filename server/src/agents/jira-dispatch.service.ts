@@ -10,8 +10,10 @@ import type {
   JiraDispatchRequest,
   JiraDispatchResult,
   JiraIssueDetail,
+  JiraSkill,
   JiraWorkspace,
-  PermissionMode
+  PermissionMode,
+  ReviewSkillMr
 } from '../../../shared/types';
 import { GitlabPollerService } from '../gitlab/poller.service';
 import { resolveWorkspace } from '../jira/branch-choice.util';
@@ -48,7 +50,10 @@ interface BranchHold {
   token: object;
 }
 
-/** What a review carries from the cache checks into the launch: the cached MR (its keys are checked once the detail is read) and the branch it holds. */
+/**
+ * What a review — the bot's or a review skill's — carries from the cache checks into the launch: the cached MR (its keys are checked once the detail is
+ * read) and the branch it holds.
+ */
 interface ReviewLaunch {
   mr: GitlabMr;
   hold: BranchHold | null;
@@ -73,16 +78,21 @@ interface ReviewLaunch {
  *  3a. a REVIEW only (spec §5.5, §6), from the GitLab poller's cache and nothing else: the MR is cached and open (400), the repo is one of its candidates
  *     (`reposFor`, 400), the choice continues the MR's source branch (400), then the state 409s — no review state yet, nothing to review, too many threads,
  *     or a half that no longer matches what the sheet previewed. Before 3b so a review that names the wrong branch reads as the review's sentence, never as
- *     `resolveWorkspace`'s 409 about that wrong branch.
+ *     `resolveWorkspace`'s 409 about that wrong branch. A REVIEW SKILL (spec §6) runs the same cache checks but none of the state ones — no review state, no
+ *     half — and adds one right after the MR is found open: the `url`, `source` and `target` the sheet previewed must still be the cached MR's (409 `!<iid>
+ *     changed since the sheet opened — reopen the sheet`), before the candidate and the choice, so a renamed source branch reads as a stale sheet and not as
+ *     a wrong branch. Its compose action then carries the CACHE's five values.
  *  3b. the branch choice against the repo's refs (spec §5.3), for every mode but `none`: a new branch whose name is already listed, or a continued one the
  *     mapped checkout holds, is a 409 — and so is the whole read, because it runs BEFORE the reservation: a refusal here has reserved nothing, assigned
  *     nothing, transitioned nothing and spawned nothing, and leaves the live map exactly as it found it. Refs the server cannot read (`available: false`) make
  *     no refusal; `jira.mjs worktree` re-checks both on the host. The resolved workspace is what the composition carries, so the spawned prompt names the
  *     same worktree the preview did.
  *  4. `live.reserve` — the per-ticket Run gate, synchronous, so of two Starts that both cleared step 3 exactly one passes it. A Run passes beside live Runs
- *     on the key that are all quiet (`yieldToQuiet`, spec 2026-11-17-jira-quiet-run-gate-design.md); a review keeps the strict one-session check. A refusal
+ *     on the key that are all quiet (`yieldToQuiet`, spec 2026-11-17-jira-quiet-run-gate-design.md); a review — the bot's or a skill's — keeps the strict
+ *     one-session check. A refusal
  *     here reserved nothing and so releases nothing: releasing would drop the OTHER request's starting entry.
- *  4b. a REVIEW only: the live-session branch gate (spec §5.2), synchronous too, then the branch hold. A refusal releases the key this request just took and
+ *  4b. a REVIEW (bot or skill) only: the live-session branch gate (spec §5.2), synchronous too, then the branch hold. A refusal releases the key this
+ *     request just took and
  *     touches no branch hold — the one it lost to is another dispatch's.
  *  5. after the reservation, still before any write: `no identity` (503) when an assign is asked and the poller has no `me`; a fresh detail read (§8's mapping);
  *     the transition offered by that read (400 `transition not offered` — the sheet's list can be minutes old); for a review, the MR's keys carry the key or
@@ -132,8 +142,11 @@ export class JiraDispatchService {
     if (config.unreadable !== null) {
       throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
     }
-    // A review's compose action is built below from the CACHED MR, never from the request's spelling; `resolveJiraActionOrThrow` refuses a bare review.
-    const action: JiraComposeAction | null = req.action === 'review' ? null : resolveJiraActionOrThrow(req.action, config.skills);
+    // A review's compose action is built below from the CACHED MR, never from the request's spelling; `resolveJiraActionOrThrow` refuses a bare review. A
+    // skill gets the MR the controller shaped (`ReviewSkillMr`, the only kind it rebuilds for a skill), so the group/MR pairing refuses here in the preview's
+    // words; a review skill's composition is then rebuilt from the cache in step 3a.
+    const sentSkillMr: ReviewSkillMr | null = typeof req.action === 'object' && req.mr !== undefined && 'url' in req.mr ? req.mr : null;
+    const action: JiraComposeAction | null = req.action === 'review' ? null : resolveJiraActionOrThrow(req.action, config.skills, sentSkillMr);
     // A project key holds no `-` (`JIRA_PROJECT_KEY_RE`), so the first one ends it.
     const project = req.key.slice(0, req.key.indexOf('-'));
     const kind = req.action === 'reply' ? 'reply' : 'run';
@@ -165,7 +178,13 @@ export class JiraDispatchService {
       throw new HttpException({ error: "the desktop app is not available on this machine's dashboard — launch on Dashboard instead" }, 409);
     }
 
-    const review = req.action === 'review' ? this.reviewOrThrow(req, project, repo) : null;
+    // `resolveJiraActionOrThrow` answered a skill with an MR only for a review skill (a run skill with one is its 400), so `action.mr` set means exactly that.
+    const review =
+      req.action === 'review'
+        ? this.reviewOrThrow(req, project, repo)
+        : action?.kind === 'skill' && action.mr !== null
+          ? this.reviewSkillOrThrow(req, action.skill, action.mr, project, repo)
+          : null;
     const composeAction: JiraComposeAction = review?.action ?? (action as JiraComposeAction);
 
     // `none` names no branch and so has nothing to compare: it makes no git read at all.
@@ -173,7 +192,8 @@ export class JiraDispatchService {
 
     // From here to the branch hold's insert there is no `await`: the key reservation, the branch gate's reads (the hold map, the live links, the kept rows,
     // `mainCheckoutOf`'s synchronous file read) and the insert run in one turn of the event loop, so of two reviews racing for one branch exactly one holds it.
-    const strict = req.action === 'review';
+    // `strict` is any review, the bot's or a skill's: both push to an MR's branch, so neither yields to a quiet Run on the key (spec §6).
+    const strict = review !== null;
     if (!this.live.reserve(req.key, repo, kind, !strict)) throw kind === 'reply' ? this.replyBusy(req.key) : this.busy(req.key, strict);
     let hold: BranchHold | null = null;
     if (review !== null) {
@@ -222,8 +242,57 @@ export class JiraDispatchService {
     // The controller rebuilds a review request with both; a caller that skipped it is the controller's 400, in its words.
     if (mrRef === undefined) throw new HttpException({ error: 'mr must be { project, iid }' }, 400);
     if (half === undefined) throw new HttpException({ error: 'half must be request or fix' }, 400);
-    const mr = this.gitlab.findMr(mrRef.project, mrRef.iid);
-    if (mr === null || mr.state !== 'opened') throw notOpen(mrRef.iid, req.key);
+    const mr = this.openMrOrThrow(req.key, mrRef);
+    const candidates = this.candidatesOrThrow(req, project, repo, mr);
+    if (mr.review === null) throw new HttpException({ error: `no review state for !${mr.iid} yet` }, 409);
+    const state = reviewState(mr.review, Date.now());
+    if (state === 'reviewing' || state === 'clean') throw new HttpException({ error: `nothing to review on !${mr.iid}` }, 409);
+    if (state === 'unknown') throw new HttpException({ error: `!${mr.iid} has too many threads to read` }, 409);
+    if (reviewHalf(state) !== half) throw new HttpException({ error: `the review on !${mr.iid} moved on — reopen the sheet` }, 409);
+    return { mr, candidates, action: { kind: 'review', half, mr: { project: mr.project, iid: mr.iid } } };
+  }
+
+  /**
+   * Step 3a for a REVIEW SKILL (spec §6): `reviewOrThrow`'s cache checks without its state checks — a review skill is a reviewer of the person's choosing, on
+   * any open MR, so there is no review state to wait for, nothing that makes it "nothing to review", and no half. In its place, right after the MR is found
+   * open, the three values the sheet previewed are compared with the cache: the preview composed from the client's copy (`jira/` may not read the poller), so a
+   * `webUrl`, source or target that moved since means the person read a prompt this Start would not spawn — the bot's `moved on` pattern, a 409 telling them to
+   * reopen. It sits BEFORE the candidate and choice checks: a renamed source branch arrives with the old name in both `mr.source` and the choice, and is a
+   * stale sheet, not a wrong branch. The ticket/parent keys check stays in `launch`, after the detail read, as for the bot.
+   *
+   * The compose action carries the CACHE's values, which equal the sent ones once the comparison passed — so the spawn is the preview, byte for byte.
+   */
+  private reviewSkillOrThrow(
+    req: JiraDispatchRequest & { choice: JiraBranchChoice },
+    skill: JiraSkill,
+    sent: ReviewSkillMr,
+    project: string,
+    repo: string
+  ): { mr: GitlabMr; candidates: string[]; action: JiraComposeAction } {
+    const mr = this.openMrOrThrow(req.key, sent);
+    if (mr.webUrl !== sent.url || mr.sourceBranch !== sent.source || mr.targetBranch !== sent.target) {
+      throw new HttpException({ error: `!${mr.iid} changed since the sheet opened — reopen the sheet` }, 409);
+    }
+    const candidates = this.candidatesOrThrow(req, project, repo, mr);
+    const cached: ReviewSkillMr = { project: mr.project, iid: mr.iid, url: mr.webUrl, source: mr.sourceBranch, target: mr.targetBranch };
+    return { mr, candidates, action: { kind: 'skill', skill, mr: cached } };
+  }
+
+  /**
+   * The MR a review names, from the cache under the project path exactly as sent (`findMr` does not fold case), and `opened` — shared by the bot review and a
+   * review skill. Merged, closed and never cached are one sentence: the reader's next move is the same.
+   */
+  private openMrOrThrow(key: string, ref: { project: string; iid: number }): GitlabMr {
+    const mr = this.gitlab.findMr(ref.project, ref.iid);
+    if (mr === null || mr.state !== 'opened') throw notOpen(ref.iid, key);
+    return mr;
+  }
+
+  /**
+   * The repo and the choice a review takes, shared by the bot review and a review skill: `repo` one of the MR's candidate checkouts (`reposFor(<Jira
+   * project>, <MR project>)`, normalised), then `continue` on the MR's source branch without `openMr`. Answers the candidates, which the branch gate reads.
+   */
+  private candidatesOrThrow(req: JiraDispatchRequest & { choice: JiraBranchChoice }, project: string, repo: string, mr: GitlabMr): string[] {
     const candidates = this.gitlab
       .reposFor(project, mr.project)
       .map((p) => normaliseRepoPath(p, homedir()))
@@ -232,12 +301,7 @@ export class JiraDispatchService {
     if (req.choice.mode !== 'continue' || req.choice.branch !== mr.sourceBranch || req.choice.openMr) {
       throw new HttpException({ error: `a review continues ${mr.sourceBranch}` }, 400);
     }
-    if (mr.review === null) throw new HttpException({ error: `no review state for !${mr.iid} yet` }, 409);
-    const state = reviewState(mr.review, Date.now());
-    if (state === 'reviewing' || state === 'clean') throw new HttpException({ error: `nothing to review on !${mr.iid}` }, 409);
-    if (state === 'unknown') throw new HttpException({ error: `!${mr.iid} has too many threads to read` }, 409);
-    if (reviewHalf(state) !== half) throw new HttpException({ error: `the review on !${mr.iid} moved on — reopen the sheet` }, 409);
-    return { mr, candidates, action: { kind: 'review', half, mr: { project: mr.project, iid: mr.iid } } };
+    return candidates;
   }
 
   /**

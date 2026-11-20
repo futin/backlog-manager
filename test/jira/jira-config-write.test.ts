@@ -293,8 +293,8 @@ describe('deleteBoard', () => {
   });
 });
 
-const sk1 = { id: 's_00000001', name: 'Review', prompt: 'Review {key}' };
-const sk2 = { id: 's_00000002', name: 'Ship', prompt: 'Ship {key}: {summary}' };
+const sk1 = { id: 's_00000001', name: 'Review', prompt: 'Review {key}', group: 'run' as const };
+const sk2 = { id: 's_00000002', name: 'Ship', prompt: 'Ship {key}: {summary}', group: 'run' as const };
 
 describe('parseSkillWrite', () => {
   it('round-trips a valid body, trimmed, and keeps an id as given', () => {
@@ -320,6 +320,15 @@ describe('parseSkillWrite', () => {
     expect(parseSkillWrite({ name: 'n', prompt: 'x'.repeat(2000) }).ok).toBe(true);
   });
 
+  it('takes group as optional: absent stays undefined, review is ok, and anything else is 400 group must be run or review', () => {
+    const absent = parseSkillWrite({ name: 'n', prompt: 'p' });
+    expect(absent).toEqual({ ok: true, value: { name: 'n', prompt: 'p' } });
+    expect(parseSkillWrite({ name: 'n', prompt: 'p', group: 'review' })).toEqual({ ok: true, value: { name: 'n', prompt: 'p', group: 'review' } });
+    for (const group of ['Review', '', 1]) {
+      expect(parseSkillWrite({ name: 'n', prompt: 'p', group })).toEqual({ ok: false, error: 'group must be run or review' });
+    }
+  });
+
   it('refuses a body that is not an object, and an id that is not a string or null, naming id', () => {
     expect(parseSkillWrite([])).toEqual({ ok: false, error: expect.stringContaining('object') });
     expect(parseSkillWrite(null).ok).toBe(false);
@@ -328,9 +337,30 @@ describe('parseSkillWrite', () => {
 });
 
 describe('writeSkill', () => {
+  it('writes group run literally on a create without one, and stores review when asked', () => {
+    const a = writeSkill({ name: 'A', prompt: 'p' }, file);
+    const b = writeSkill({ name: 'B', prompt: 'p', group: 'review' }, file);
+    expect(parsed().skills).toEqual([
+      { id: a.id, name: 'A', prompt: 'p', group: 'run' },
+      { id: b.id, name: 'B', prompt: 'p', group: 'review' }
+    ]);
+    expect(b.group).toBe('review');
+  });
+
+  it('an update without group keeps a stored review; one with group run changes it; id and index never move', () => {
+    const rev = { id: 's_00000009', name: 'Rev', prompt: 'p', group: 'review' };
+    put({ skills: [sk1, rev, sk2] });
+    const kept = writeSkill({ id: rev.id, name: 'Rev2', prompt: 'q' }, file);
+    expect(kept).toEqual({ ...rev, name: 'Rev2', prompt: 'q' });
+    expect(parsed().skills).toEqual([sk1, kept, sk2]);
+    const changed = writeSkill({ id: rev.id, name: 'Rev2', prompt: 'q', group: 'run' }, file);
+    expect(changed.group).toBe('run');
+    expect(parsed().skills).toEqual([sk1, changed, sk2]);
+  });
+
   it('creates the file with one skill and a minted s_ id, trimmed, and returns what the reader reads', () => {
     const skill = writeSkill({ name: 'Review', prompt: 'Review {key}' }, file);
-    expect(skill).toEqual({ id: expect.stringMatching(/^s_[0-9a-f]{8}$/), name: 'Review', prompt: 'Review {key}' });
+    expect(skill).toEqual({ id: expect.stringMatching(/^s_[0-9a-f]{8}$/), name: 'Review', prompt: 'Review {key}', group: 'run' });
     expect(parsed()).toEqual({ skills: [skill] });
     expect(readJiraConfig(file).skills).toEqual([skill]);
   });
@@ -354,7 +384,7 @@ describe('writeSkill', () => {
   it('updates in place: keeps the id and the position, replaces name and prompt, and stores them trimmed', () => {
     put({ skills: [sk1, sk2] });
     const skill = writeSkill({ id: 's_00000001', name: ' Renamed ', prompt: ' New {url} ' }, file);
-    expect(skill).toEqual({ id: 's_00000001', name: 'Renamed', prompt: 'New {url}' });
+    expect(skill).toEqual({ id: 's_00000001', name: 'Renamed', prompt: 'New {url}', group: 'run' });
     expect(parsed().skills).toEqual([skill, sk2]);
   });
 
@@ -390,7 +420,7 @@ describe('writeSkill', () => {
     expect(skills[0]).toEqual(sk1);
     expect(skills[1]).toEqual({ id: 's_0000000a', name: '' });
     expect(skills[2]).toBe('junk');
-    expect(skills[3]).toEqual({ id: 's_00000002', name: 'Renamed', prompt: 'p' });
+    expect(skills[3]).toEqual({ id: 's_00000002', name: 'Renamed', prompt: 'p', group: 'run' });
     expect(after.boards).toEqual(extra.boards);
     expect(after.repos).toEqual(extra.repos);
     expect(after.note).toBe('mine');
@@ -468,7 +498,7 @@ describe('deleteSkill', () => {
   });
 });
 
-const sk3 = { id: 's_00000003', name: 'Groom', prompt: 'Groom {key}' };
+const sk3 = { id: 's_00000003', name: 'Groom', prompt: 'Groom {key}', group: 'run' as const };
 
 describe('parseSkillOrder', () => {
   it('accepts an array of non-empty strings, the empty one included', () => {

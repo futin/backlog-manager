@@ -1,5 +1,5 @@
 import { needsYou, type JiraSessionState } from '../../../shared/jira-sessions';
-import type { JiraIssue, JiraLiveSession, JiraParentRef, JiraSessionsPayload } from '../../../shared/types';
+import type { JiraIssue, JiraLiveSession, JiraParentRef, JiraSessionsPayload, JiraSkillGroup } from '../../../shared/types';
 import { repoBasename, type JiraLanes } from './jira';
 import { runLabel, surfaceWord, type SessionLink } from './jira-sessions';
 import { pollAge } from './tracker';
@@ -156,7 +156,7 @@ export function deckTally(entries: readonly DeckEntry[]): { needs: number; worki
  * `↳ <parent key>` (parent-lanes spec §5) — the card shows the session's own key, and this is what says which lane of the board it sits in, on the board
  * or off it. A reservation knows only its name and repo, so the surface and the model are absent rather than guessed.
  */
-export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string }[], opts: { lead?: boolean } = {}): string {
+export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string; group: JiraSkillGroup }[], opts: { lead?: boolean } = {}): string {
   // `lead: false` leaves the `↳ parent` out: the deck card draws it as a pill beside the key and keeps the crumb to the run's own words.
   const parts: (string | null)[] = [opts.lead === false || entry.parent === null ? null : `↳ ${entry.parent.key}`];
   const { link, starting } = entry;

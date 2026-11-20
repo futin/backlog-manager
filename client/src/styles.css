@@ -1370,6 +1370,9 @@ button.rail-count { cursor: pointer }
    control; the primitive carries the dashed no-repository look itself, and the live tint below reaches the group by structure (`> [role='group']`) because
    guard 7 keeps every `ui-*` family token out of a selector outside the primitives block. */
 .jira-run { position: relative; flex: none }
+/* `Review ▾` (ReviewMenu.tsx) — the Delivery row's reviewer menu: the wrapper is its Popover's positioning parent, as `.jira-run` is `Run ▾`'s, and an
+   inline-flex box so the split or the ghost inside sits on the next row's button line without a stray baseline gap. */
+.jira-review { position: relative; flex: none; display: inline-flex }
 .board-card-markers .jira-run { margin-left: auto }
 /* A running session: the whole pill goes green-on-tint, its dot steady (a pulse is the live strip's job, not the button's). The group's own ink background
    and the halves' ink fill are overridden together, since the halves paint over the group. */
@@ -1739,6 +1742,8 @@ button.rail-count { cursor: pointer }
 .jira-sess-face { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px }
 .jira-sess-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px 14px; margin: 0 }
 .jira-sess-facts > div { min-width: 0 }
+/* The Run fact takes two cells (JiraSessionCard.tsx): `Review the MR · <skill name>` is the longest value the card draws and the one it must not cut. */
+.jira-sess-fact-wide { grid-column: span 2 }
 .jira-sess-facts dt { font-size: 11px; font-weight: 400; color: var(--ink3) }
 .jira-sess-facts dd { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* One face everywhere (§8.1): the id and the branch are set apart by ink, not by a monospace. */
@@ -2288,6 +2293,13 @@ button.rail-count { cursor: pointer }
 .jira-setup-default { flex: none; font-size: 11px; color: var(--ink3) }
 .jira-setup-move { flex: none; display: flex; gap: 4px } /* The ↑/↓ pair keeps its 28 px chips whole and close: the row's 10 px gap would split them. */
 .jira-setup-skill .jira-setup-x { margin-left: 0 }
+/* Setup › Skills' Run | Review halves (2026-11-20 review-skills spec §2, mock Review-Skills.dc.html): the group head carries the order hint on its right, as
+   the mock's `.lbl .n` does — regular weight, no tracking, so it reads as a note on the head and not a second head. The inline editor is the add row's shape
+   plus a Group line (label, the pill toggle, Review's sub-line, wrapping on a phone) and its two chips. */
+.jira-skill-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px }
+.jira-skill-order-hint { font-weight: 400; letter-spacing: 0 }
+.jira-skill-edit-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px }
+.jira-skill-edit-actions { display: flex; gap: 8px }
 /* At phone width a skill row's controls (↑ ↓, `Make default`, ×) take ~200 px and crushed the name to an ellipsis of two letters (2026-11-17 ui-verify),
    so the name takes the first line beside its 28 px tile (+ the row's 10 px gap) and the controls wrap under it, pushed right by the first one. */
 @media (max-width: 700px) {
@@ -2824,6 +2836,11 @@ button.rail-count { cursor: pointer }
 .launch-tiles { align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
 /* Under the fold three tiles leave a 35 px text box (`End to …`); one column gives each its width. */
 @media (max-width: 700px) { .launch-tiles { grid-template-columns: minmax(0, 1fr) } }
+/* A review sheet's lone tile spans two of the three columns: its sub-line names the MR and its source branch (`on !16033 · <branch>`), which a third of the
+   row cut to `on !16033 · pay-151-ref…` (2026-11-20 ui-verify). At phone width the grid is one column, so the span is dropped — `span 2` there would add an
+   implicit second column and push the sheet sideways. */
+.launch-tile-wide { grid-column: span 2 }
+@media (max-width: 700px) { .launch-tile-wide { grid-column: auto } }
 .launch-tile {
   display: flex; align-items: center; gap: 10px; min-height: 64px; min-width: 0; padding: 8px 10px; text-align: left;
   border: 1.5px solid var(--hairline2); border-radius: 12px; background: var(--strip); color: var(--ink); cursor: pointer; font: inherit

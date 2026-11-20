@@ -8,8 +8,14 @@ import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage, TicketOrigin } from '../../lib/jira-page';
 import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
 
-/** What a review launch adds to the sheet's state: the half, the MR (its source branch is the sheet's locked branch) and the candidate repos. */
-type ReviewLaunch = { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
+/**
+ * What a review launch adds to the sheet's state: the half, the MR (its source branch is the sheet's locked branch) and the candidate repos — or, for a review
+ * SKILL picked from an MR's `Review menu` (Jira review skills spec §4, §6), the skill's id and the whole `GitlabMr` the row was drawn from, whose five values
+ * the sheet sends and the server re-checks against its cache.
+ */
+type ReviewLaunch =
+  | { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] }
+  | { skill: string; mr: GitlabMr; repos: string[] };
 import { JiraBoardView } from './JiraBoardView';
 import { JiraDetail } from './JiraDetail';
 import { JiraLaunchSheet } from './JiraLaunchSheet';
@@ -116,6 +122,10 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   // The CodeRabbit row's button (spec §5.4): the same sheet, pre-set to `review` on one MR. Reached from Detail's Delivery pane only, so `Run ▾` never offers it.
   const runReview = (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]): void =>
     setLaunch({ issue, action: 'review', review: { half, mr: { project: mr.project, iid: mr.iid, sourceBranch: mr.sourceBranch }, repos } });
+  // A review skill from the same row's `Review menu`: the same sheet, its action the skill and its `review` the skill variant on that MR — never `Run ▾`'s
+  // sheet, which offers run skills only (review skills spec §5).
+  const runReviewSkill = (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]): void =>
+    setLaunch({ issue, action: { skill: skillId }, review: { skill: skillId, mr, repos } });
   // A Start that landed, or a Start refused after the server's writes landed (the ticket moved either way): reload the shell's status, nudge the board, and
   // re-ask the sessions payload too — Detail's `sessionLive` and the List's `canRun` read it, and left to its own 15 s clock they would offer Start again
   // on a ticket the server now holds a run on (the Run gate's 409).
@@ -144,6 +154,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onWrote={() => setNudge((n) => n + 1)}
           onRun={run}
           onReview={runReview}
+          onReviewSkill={runReviewSkill}
         />
       ) : (
         <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onOpenPage={openPageOn} onRun={run} nudge={nudge} />
@@ -158,6 +169,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onWrote={() => setNudge((n) => n + 1)}
           onRun={run}
           onReview={runReview}
+          onReviewSkill={runReviewSkill}
           onOpenPage={openPage}
           onClose={() => setWalk([])}
         />

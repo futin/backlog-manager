@@ -53,7 +53,7 @@ describe('readJiraConfig — the file as a whole', () => {
 
   it('reads a full valid file back equal, arrays in file order', () => {
     const repos = { PAY: ['/w/payments-api', '/w/payments-web'] };
-    const skills = [{ id: 's_0123abcd', name: 'Groom', prompt: '/jira-groom {key}' }];
+    const skills = [{ id: 's_0123abcd', name: 'Groom', prompt: '/jira-groom {key}', group: 'run' }];
     put({ boards: [validBoard], repos, skills });
     expect(readJiraConfig(file)).toEqual({ boards: [validBoard], repos, repoDefaults: {}, skills, unreadable: null });
     expect(warn).not.toHaveBeenCalled();
@@ -246,9 +246,27 @@ describe('readJiraConfig — skills', () => {
         { id: 'b_0123abcf', name: 'wrong kind', prompt: 'p' }
       ]
     });
-    expect(readJiraConfig(file).skills).toEqual([{ id: 's_0123abcd', name: 'ok', prompt: 'p' }]);
+    expect(readJiraConfig(file).skills).toEqual([{ id: 's_0123abcd', name: 'ok', prompt: 'p', group: 'run' }]);
     put({ skills: 'x' });
     expect(readJiraConfig(file).skills).toEqual([]);
+  });
+
+  it('reads an entry without a group as run, keeps review, and drops (warned) a group that is not run or review while its siblings stay', () => {
+    put({
+      skills: [
+        { id: 's_0123abcd', name: 'old', prompt: 'p' },
+        { id: 's_0123abce', name: 'rev', prompt: 'p', group: 'review' },
+        { id: 's_0123abcf', name: 'bad word', prompt: 'p', group: 'x' },
+        { id: 's_0123abc0', name: 'bad type', prompt: 'p', group: 3 },
+        { id: 's_0123abc1', name: 'explicit', prompt: 'p', group: 'run' }
+      ]
+    });
+    expect(readJiraConfig(file).skills.map((s) => [s.name, s.group])).toEqual([
+      ['old', 'run'],
+      ['rev', 'review'],
+      ['explicit', 'run']
+    ]);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 

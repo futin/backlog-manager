@@ -49,7 +49,8 @@ export function JiraTicketPage({
   onLeave,
   onWrote,
   onRun,
-  onReview
+  onReview,
+  onReviewSkill
 }: {
   origin: TicketOrigin;
   /** Back to the origin page (`← <origin>`, and after `Forget`): `onOpenJiraPage(origin)`. */
@@ -58,6 +59,7 @@ export function JiraTicketPage({
   onWrote: () => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  onReviewSkill?: (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]) => void;
 }) {
   const key = useJiraTicketKey();
   // The tickets before the one on screen, oldest first; the last is the Back chip's.
@@ -86,6 +88,7 @@ export function JiraTicketPage({
       onWrote={onWrote}
       onRun={onRun}
       onReview={onReview}
+      onReviewSkill={onReviewSkill}
     />
   );
 }
@@ -100,7 +103,8 @@ export function JiraTicketFrame({
   onForget,
   onWrote,
   onRun,
-  onReview
+  onReview,
+  onReviewSkill
 }: {
   ticketKey: string;
   origin: TicketOrigin;
@@ -114,6 +118,7 @@ export function JiraTicketFrame({
   onWrote: () => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  onReviewSkill?: (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]) => void;
 }) {
   const { data } = useJiraContext();
   const { detail, kept, failure, reread } = useTicketDetail(ticketKey);
@@ -211,6 +216,7 @@ export function JiraTicketFrame({
           }}
           onRun={onRun}
           onReview={onReview}
+          onReviewSkill={onReviewSkill}
         />
       </div>
     </div>

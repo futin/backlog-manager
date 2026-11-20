@@ -716,7 +716,7 @@ describe('JiraDetail — the session fact (Jira phase 5)', () => {
 
 describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
   it('draws the chip in the frame’s head, and a pick hands the issue and the action up', async () => {
-    mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] } });
+    mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' }] } });
     await screen.findByText('not');
     // The frame's head since Jira detail tabs (spec §7.1), beside `Open in Jira ↗`.
     expect(modal().querySelector('.ui-modal-head')).toContainElement(modalRun());
@@ -745,7 +745,7 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     const scrolled = jest.fn();
     Element.prototype.scrollIntoView = scrolled;
     try {
-      mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'A very long skill name that the narrow panel ellipsises', prompt: '/x {key}' }] } });
+      mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'A very long skill name that the narrow panel ellipsises', prompt: '/x {key}', group: 'run' }] } });
       await screen.findByText('not');
       await userEvent.click(modalMore());
       const menu = screen.getByRole('dialog', { name: 'Run menu' });
@@ -1054,7 +1054,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
 
     localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 's_0a1b2c3d' }));
     const skilled = mount({
-      status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] },
+      status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' }] },
       sessions: payload(link({ sessionId: 'e1', startedAt: hoursAgo(2), endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' }))
     });
     await landed();

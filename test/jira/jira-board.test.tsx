@@ -1428,7 +1428,7 @@ describe('filters over lanes', () => {
   one level above the page (the modal's own Run reaches the same sheet) — a card's pick and a modal's pick are one code path ending in one sheet.
 */
 describe('Run ▾ on the card, and the deck card for a live key', () => {
-  const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+  const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}', group: 'run' as const };
   const MAPPED = { PAY: ['/Users/ada/pay'] };
   /** A session started three hours ago: the strip's elapsed reading is `3h` for the whole of a case. */
   const threeHoursAgo = (): string => new Date(Date.now() - 3 * 3_600_000).toISOString();

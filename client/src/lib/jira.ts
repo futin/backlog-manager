@@ -30,6 +30,7 @@ import type {
   JiraRepoDefaultsWriteResult,
   JiraRepoRefs,
   JiraSkill,
+  ReviewSkillMr,
   JiraStatusCategory,
   JiraSessionsPayload,
   JiraStatusPayload,
@@ -1115,11 +1116,17 @@ export function skillCommand(prompt: string): string | null {
 /**
  * The stored `jiraDefaultAction` as an action: `execute` and `context` as themselves, an id some skill on this machine holds as `{ skill }`, and anything
  * else — an id a deleted skill left behind, a hand-edited string, the empty list while the status is still loading — as `execute`. Never throws and never
- * rewrites the setting (spec §2): the clamp in `settings.ts` cannot know which ids exist, and this is the one place that can.
+ * rewrites the setting (spec §2): the clamp in `settings.ts` cannot know which ids exist, and this is the one place that can. A review skill is not a
+ * default either — it needs an MR a ticket-level Run ▾ cannot name — so an id that now names one reads as `execute`, the same way a deleted skill does.
  */
 export function resolveJiraAction(setting: string, skills: readonly JiraSkill[]): JiraAction {
   if (setting === 'execute' || setting === 'context') return setting;
-  return skills.some((k) => k.id === setting) ? { skill: setting } : 'execute';
+  return skills.some((k) => k.id === setting && k.group === 'run') ? { skill: setting } : 'execute';
+}
+
+/** Whether an action is a review skill, by the group the skills list holds — the group is looked up here, never stored on a link. A deleted id is not one. */
+export function isReviewSkill(action: JiraAction, skills: readonly JiraSkill[]): boolean {
+  return typeof action === 'object' && skills.some((k) => k.id === action.skill && k.group === 'review');
 }
 
 /**
@@ -1285,11 +1292,18 @@ export async function fetchJiraPrompt(
   action: JiraAction,
   repo: string,
   branch: JiraBranchChoice,
-  review?: { half: ReviewHalf; mr: { project: string; iid: number } }
+  review?: { half: ReviewHalf; mr: { project: string; iid: number } } | { skillMr: ReviewSkillMr }
 ): Promise<string> {
   const query = new URLSearchParams({ key, action: jiraActionParam(action), repo, mode: branch.mode });
   // A review names its MR and half on the query (CodeRabbit spec §5.4, §6): the preview only shapes them, the dispatch route is what resolves the MR.
-  if (review !== undefined) {
+  if (review !== undefined && 'skillMr' in review) {
+    // A review SKILL carries the MR's five values and no half (spec §5): the server composes `{mr.*}` from them and re-checks them against its cache.
+    query.set('mrProject', review.skillMr.project);
+    query.set('mrIid', String(review.skillMr.iid));
+    query.set('mrUrl', review.skillMr.url);
+    query.set('mrSource', review.skillMr.source);
+    query.set('mrTarget', review.skillMr.target);
+  } else if (review !== undefined) {
     query.set('mrProject', review.mr.project);
     query.set('mrIid', String(review.mr.iid));
     query.set('half', review.half);

@@ -42,6 +42,7 @@ export function JiraDeliveryTab({
   issue,
   now,
   onReview,
+  onReviewSkill,
   onRun,
   openRows,
   onToggleRow,
@@ -53,6 +54,11 @@ export function JiraDeliveryTab({
   now: number;
   /** A next row's review split — the frame opens the launch sheet pre-set to a review. Absent, no split draws. */
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  /**
+   * A next row's `Review menu` skill pick (Jira review skills spec §4) — the frame opens the launch sheet's skill variant on that row's MR. Absent, no
+   * chevron and no ghost `Review ▾` draw.
+   */
+  onReviewSkill?: (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]) => void;
   /** A next row's `Run ▾` (row 8, a failed pipeline): the frame's own `onRun`, so the second menu opens the same sheet as the head's. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   /** The ids (`targetRowId`) of the rows drawn open. */
@@ -95,6 +101,7 @@ export function JiraDeliveryTab({
         index={index}
         now={now}
         onReview={onReview}
+        onReviewSkill={onReviewSkill}
         onRun={onRun}
         openRows={openRows}
         onToggleRow={onToggleRow}
@@ -112,6 +119,7 @@ function TargetRows({
   index,
   now,
   onReview,
+  onReviewSkill,
   onRun,
   openRows,
   onToggleRow,
@@ -122,6 +130,7 @@ function TargetRows({
   index: DeliveryIndex;
   now: number;
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  onReviewSkill?: (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   openRows: ReadonlySet<string>;
   onToggleRow: (id: string) => void;
@@ -175,6 +184,7 @@ function TargetRows({
               agentsOn={agentsOn}
               liveReviewLink={liveReviewLink}
               onReview={onReview === undefined ? undefined : (half, mr, repos) => onReview(issue, half, mr, repos)}
+              onReviewSkill={onReviewSkill === undefined ? undefined : (skillId, mr, repos) => onReviewSkill(issue, skillId, mr, repos)}
               onRun={onRun}
               onIgnore={(step) => ignore(t.lead, step, ticketMrs)}
             />

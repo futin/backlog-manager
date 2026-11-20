@@ -33,6 +33,7 @@ import { LaunchSheet } from '../../client/src/components/board/LaunchSheet';
 import { OrchestrateSheet } from '../../client/src/components/board/OrchestrateSheet';
 import { JiraBoardSheet } from '../../client/src/components/jira/JiraBoardSheet';
 import { JiraDetail } from '../../client/src/components/jira/JiraDetail';
+import { JiraSkillsGroup } from '../../client/src/components/jira/JiraSkillsGroup';
 import { ReleasesDrawer } from '../../client/src/components/ReleasesDrawer';
 import { Confirm } from '../../client/src/components/ui/Confirm';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
@@ -471,6 +472,32 @@ describe('the inline confirmation on the stack', () => {
     expect([dismiss.mock.calls.length, closeModal.mock.calls.length]).toEqual([1, 0]);
 
     confirm.unmount();
+    await userEvent.keyboard('{Escape}');
+    expect(closeModal).toHaveBeenCalledTimes(1);
+  });
+
+  /* The Skills card's inline editor (2026-11-20 review-skills spec §2) is the same shape: no scrim, drawn in a row's place, joining the stack only while
+     it is open. Escape cancels the edit and leaves the dialog under it; with the editor gone, the next press is the dialog's. */
+  it("the Skills card's inline editor takes Escape from the dialog under it, and hands it back once cancelled", async () => {
+    stubFetch([fakeItem()]);
+    const closeModal = jest.fn();
+    const skill = { id: 's_000000b1', name: 'Claude code review', prompt: '/code-review high {mr.url}', group: 'review' as const };
+    const jira = { data: { ...JIRA_STATUS, skills: [skill] }, loading: false, error: false, reload: () => {} };
+    render(<ItemModal item={fakeItem()} hues={HUES} onClose={closeModal} />);
+    render(
+      <JiraContext.Provider value={jira}>
+        <JiraSkillsGroup />
+      </JiraContext.Provider>
+    );
+    await userEvent.click(within(screen.getByRole('group', { name: 'Skill group' })).getByRole('button', { name: /^Review/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Claude code review' }));
+    expect(screen.getByRole('textbox', { name: 'Edited skill name' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('textbox', { name: 'Edited skill name' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Edit Claude code review' })).toBeInTheDocument();
+    expect(closeModal).not.toHaveBeenCalled();
+
     await userEvent.keyboard('{Escape}');
     expect(closeModal).toHaveBeenCalledTimes(1);
   });

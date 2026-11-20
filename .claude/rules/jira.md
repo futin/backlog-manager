@@ -186,6 +186,21 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `JiraLiveService.activeRows()` — `working` / `question` dashboard rows on that branch. Those rows come from the reconciler's list, 15–60 s old by design; the
   spec accepts that window, and a refusal is 409 `a session is live on <branch>`. `JIRA_BUILTIN_LABELS.review` (`Review the MR`) is a label for links and the
   List, never a menu row. Why: [invariants.md](docs/subsystems/invariants.md#a-review-dispatch-decides-from-the-cache-and-gates-the-branch)
+- **A review skill is a `{ skill }` action whose skill has `group: 'review'`: composed against one MR from the GitLab cache and gated exactly as the bot's
+  review.** `readSkill` reads an absent `group` as `run` (nothing migrates, nothing rewrites); `parseSkillWrite` stores `run` on a create without one, keeps the
+  stored group on an update without one, and answers anything else 400 `group must be run or review`. A run skill's placeholders are the six it always had; a
+  review skill's are those plus `{mr.url}`, `{mr.iid}`, `{mr.source}`, `{mr.target}`, `{mr.project}` (`{ kind: 'skill', skill, mr }` — `{mr.*}` fill only while
+  `mr` is non-null, so a run skill's `{mr.url}` stays literal), the run ones filled from the `continue` workspace. Both routes take the skill wire with the
+  five-field `mr` `{ project, iid, url, source, target }` (`parseReviewSkillMr`: `url` http(s) of at most 2 000, `source`/`target` through `branchNameProblem`;
+  400 `mr must be { project, iid, url, source, target }`), and refuse before any lookup a `half` beside a skill (400 `half is the review bot's only`), then the
+  MR's shape; the group/MR pairing needs the skill, so it comes after the config read, in `resolveJiraActionOrThrow`: a review skill with no MR (400 `<name>
+  is a review skill and needs an MR`), a run skill with one (400 `<name> is a run skill and takes no MR`); `jira/` composes
+  the preview from the sent values and never reads the poller. Dispatch's `reviewSkillOrThrow` runs `reviewOrThrow`'s cache checks WITHOUT its state checks —
+  the MR open and the ticket's (or its parent's), a candidate repo, `continue` on the source branch, and `openMr` the route's existing 400 `openMr is only for
+  execute with a branch` — plus 409 `!<iid> changed since the sheet opened — reopen the sheet` when the cache's `webUrl`, source or target differs from the sent
+  one, then composes from the cache's values; the strict one-session gate and `branchHolds` apply to it exactly as to the bot. The link reads `Review the MR ·
+  <skill name>` (the client looks the skill's group up; a deleted skill reads as its bare id), and it is NOT `liveReviewLink` — that stays `action ===
+  'review'`, the bot's. Why: [invariants.md](docs/subsystems/invariants.md#a-review-skill-is-the-persons-reviewer-held-by-the-bots-gates)
 - **`reply` is the fourth built-in action: a read-only session that drafts an answer to a mention, dispatched only from the mention modal.** `parseJiraAction`
   / `parseJiraActionParam` accept `'reply'` and `resolveJiraActionOrThrow` maps it to `{ kind: 'reply' }`. Its wire shape is narrow (R2): `replyChoiceIsNarrow`
   (`branch-choice.util.ts`: mode `none`, no branch, base or target, `openMr`/`review` absent or false) plus `assign: false`, `transitionId: null`, no `prompt`

@@ -213,7 +213,7 @@ function RunPanel({
     { id: 'execute', action: 'execute', label: JIRA_BUILTIN_LABELS.execute, sub: onParent && parentKey !== null ? `Work ${parentKey} end to end` : 'Work the ticket end to end', glyph: 'play' },
     { id: 'context', action: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'A session, you drive', glyph: 'document' }
   ];
-  const skills: MenuRow[] = status.skills.map((k) => ({ id: k.id, action: { skill: k.id }, label: k.name, sub: skillCommand(k.prompt) ?? '', glyph: 'sparkle' }));
+  const skills: MenuRow[] = status.skills.filter((k) => k.group === 'run').map((k) => ({ id: k.id, action: { skill: k.id }, label: k.name, sub: skillCommand(k.prompt) ?? '', glyph: 'sparkle' }));
   const row = (r: MenuRow) => {
     const isDefault = r.id === preferred;
     return (

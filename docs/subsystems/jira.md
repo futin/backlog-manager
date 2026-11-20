@@ -33,10 +33,11 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   `configured: false`, and every route but `GET /api/jira` answers 503. Compose passes each through as `'${BM_JIRA_<NAME>:-}'`, never a literal.
 - **Per machine, in `~/.backlog-manager/settings/jira.json`** (`BM_JIRA_FILE` overrides): `{ boards, repos, repoDefaults, skills }`. The server is its one
   writer since phase 2 — the Setup page's boards and repository map, and since phase 5a its skills, through the seven config write routes below — and a hand edit
-  still lands, because every reader reads it fresh and every writer merges one entry into the RAW file. A skill is `{ id, name, prompt }` with an `s_` id: a
-  template the Run launch sheet offers beside the two built-ins, filled in by the composer (below). `repoDefaults` (the repo/branch work) maps an absolute
-  mapped path to `{ base?, namePattern? }`: the base a New branch is cut from and the pattern it is named by, per PATH because one checkout can serve two
-  projects.
+  still lands, because every reader reads it fresh and every writer merges one entry into the RAW file. A skill is `{ id, name, prompt, group }` with an `s_` id: a
+  template the Run launch sheet offers beside the two built-ins, filled in by the composer (below). `group` is `run` or `review` (Jira review skills): an absent
+  key reads `run`, so no file migrates, and a review skill is the prompt an open MR's `Review ▾` starts on that MR's source branch
+  ([below](#the-review-skill-action)); a bad value drops the entry with a warning. `repoDefaults` (the repo/branch work) maps an absolute mapped path to `{
+  base?, namePattern? }`: the base a New branch is cut from and the pattern it is named by, per PATH because one checkout can serve two projects.
 - **Per project: nothing.** A mapped repository is a path in `jira.json` and never enters `registry.json`. Under compose it has to sit under one of the two
   read-only mounts, `BM_PROJECT_ROOT` or `BM_JIRA_REPO_ROOT` (both passed to the server as `BM_REPO_ROOTS`), or its refs read as `not mounted into the board`.
   A root that does not exist on the host is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set `BM_JIRA_REPO_ROOT` to a
@@ -150,7 +151,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 | `POST /api/jira/boards/sweep`   | `{ id }`                                | `{ ok: true }`; writes NOTHING — the chip's per-board `now`: awaits `boardSaved(id)`, a save's own sweep, so a 429 window or an unanswered boot leaves the board owed rather than refusing; 409 for an unreadable file, 404 `unknown board` |
 | `POST /api/jira/repos`          | `{ project, paths }`                    | `{ project, paths }` as stored, normalised and deduplicated; `[]` removes the project's key; re-aims no poller, arms the session reconciler |
 | `POST /api/jira/repo-defaults`  | `{ path, base, namePattern }`           | `{ path, base, namePattern }` as stored, `null` for unset; both `null` deletes the path's entry; a base failing Table A or a pattern failing `patternProblem` is a 400 naming the field; after the 409, 400 `<path> is not mapped` unless SOME project maps it; re-aims nothing |
-| `POST /api/jira/skills`         | `{ id?, name, prompt }`                 | the skill as stored, an `s_` id minted on create; a trimmed `name` of 1–60 and `prompt` of 1–2 000; 404 `unknown skill` for an `id` the file does not hold; re-aims nothing |
+| `POST /api/jira/skills`         | `{ id?, name, prompt, group? }`         | the skill as stored, an `s_` id minted on create; a trimmed `name` of 1–60 and `prompt` of 1–2 000; 404 `unknown skill` for an `id` the file does not hold; 400 `group must be run or review`; a create without `group` stores `run`, an update without it keeps the stored one; re-aims nothing |
 | `POST /api/jira/skills/delete`  | `{ id }`                                | `{ ok: true }`; 404 `unknown skill`, a second delete included                                      |
 | `POST /api/jira/skills/order`   | `{ ids }`                               | `{ ok: true }`; the whole list in the new order; 400 for a non-array, an empty or non-string id, or `ids holds <id> twice`; 409 `the skill list changed since this page loaded — reload and try again; nothing was written` when the set is not exactly the stored skills' ids; an order already stored writes nothing; re-aims nothing |
 
@@ -557,7 +558,7 @@ nothing and written nothing.
 | 400 | `invalid issue key`; `action must be execute, context, review, reply or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `prompt must be a non-empty string`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for continue with openMr or review`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
 | 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> has a Run <phrase>` (`not seen by the dashboard`, `waiting on you`, `still working` or `not quiet yet` — a Run beside a live Run on the key that is not quiet); for a review, `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment`; for a review, `a session is live on <branch>`, `no review state for !<iid> yet`, `nothing to review on !<iid>`, `!<iid> has too many threads to read`, `the review on !<iid> moved on — reopen the sheet` |
-| 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long`; for a review, `!<iid> is not an open merge request of <KEY>`, `<repo> is not a review candidate for !<iid>`, `a review continues <branch>` |
+| 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long`; for a review (or a review skill), `!<iid> is not an open merge request of <KEY>`, `<repo> is not a review candidate for !<iid>`, `a review continues <branch>` |
 | 502 | dispatch is on and the dashboard is unreachable (the gate's reason); a spawn the dashboard refused |
 | as §8 | the issue read, the assign and the transition, through `unwrapJira` / `jiraWriteOrThrow` — `retryAt` verbatim; an assign or transition failure is prefixed `assign: ` / `transition: ` |
 
@@ -579,6 +580,21 @@ Step 4b is the branch gate, synchronous with `live.reserve`: `branchBusy` refuse
 checkout>\0<branch>`, released on a failed spawn and on a no-id desktop launch), a live link of any `how` on that branch (`mainCheckoutOf` of its repo), or a
 live dashboard row on it exists. The links and the dashboard rows can be 15 to 60 s stale; the spec accepts that, because the second session would only add its
 own comment.
+
+### The review skill action
+
+A skill whose `group` is `review` ([spec](../superpowers/specs/2026-11-20-jira-review-skills-design.md)) is started from an open MR's `Review ▾` on a Delivery
+target row (the split's chevron or the ghost `Review ▾`), never from `Run ▾`, which lists run skills only. The mechanism is in
+[`.claude/rules/jira.md`](../../.claude/rules/jira.md); the reasoning is [in the
+invariants](invariants.md#a-review-skill-is-the-persons-reviewer-held-by-the-bots-gates). The wire is the existing skill action with no `half` and a five-field
+`mr`: `GET /api/jira/prompt` takes `mrProject`, `mrIid`, `mrUrl`, `mrSource` and `mrTarget`, dispatch takes `mr: { project, iid, url, source, target }`
+(`parseReviewSkillMr`). Both routes answer 400 `mr must be { project, iid, url, source, target }` for a missing or malformed field, 400 `<name> is a review
+skill and needs an MR`, 400 `<name> is a run skill and takes no MR` and 400 `half is the review bot's only`. The preview composes from the sent values (`jira/`
+never reads the GitLab poller); `reviewSkillOrThrow` in dispatch runs the bot review's cache checks without its state checks, answers 409 `!<iid> changed since
+the sheet opened — reopen the sheet` when the cached `webUrl`, source or target differs from the sent one, and composes from the cache's values. `skillPrompt`
+fills `{mr.url}`, `{mr.iid}`, `{mr.source}`, `{mr.target}` and `{mr.project}` only for a review skill (a run skill's stay literal), beside the run placeholders
+filled from the `continue` workspace. The strict one-session gate and the branch hold apply as to the bot's review; the link is labelled `Review the MR · <skill
+name>` by the client, and is not `liveReviewLink`.
 
 ### `POST /api/agents/jira-stop`
 
@@ -679,8 +695,9 @@ section (nine dialogs). The browser still never talks to Jira or the dashboard: 
   key has a confirmed, non-`starting` entry — the `stoppable && agentsOn` gate `JiraSessionCard` applies before it passes `onStop`. It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same
   `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
-- **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
-  add row, `↑`/`↓` on each skill row and a `×` that asks through `ui/Confirm`; every write is one of the seven config routes and reloads the shell's
+- **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) draws one group at a time behind a `Run | Review` switch — the locked
+  built-ins and one row per stored skill of that group, an add row that adds to it, `↑`/`↓` inside the group, an inline `Edit` (Group toggle; Escape through
+  `useDialogEscape`) and a `×` that asks through `ui/Confirm`; every write is one of the seven config routes and reloads the shell's
   status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
   row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select

@@ -7,6 +7,7 @@ import {
   linkedHow,
   openButtons,
   primaryIsDesktop,
+  runLabel,
   sessionDuration,
   shortSessionId,
   surfaceWord,
@@ -332,5 +333,18 @@ describe('historySummary (Jira detail tabs spec §5.2)', () => {
 
   it('drops the `last` part when the newest end does not parse', () => {
     expect(historySummary([{ endedAt: 'not a date' }, { endedAt: '2026-11-12T09:05:00Z' }], NOW, 'UTC')).toBe('2 ended');
+  });
+});
+
+describe('runLabel names a skill by its group', () => {
+  const skills = [
+    { id: 's_run', name: 'Groom ticket', group: 'run' as const },
+    { id: 's_rev', name: 'Check MR', group: 'review' as const }
+  ];
+
+  it('prefixes a review skill, leaves a run skill bare, and reads a deleted id bare', () => {
+    expect(runLabel(link({ action: { skill: 's_rev' } }), skills)).toBe('Review the MR · Check MR');
+    expect(runLabel(link({ action: { skill: 's_run' } }), skills)).toBe('Groom ticket');
+    expect(runLabel(link({ action: { skill: 's_gone' } }), skills)).toBe('s_gone');
   });
 });

@@ -241,7 +241,7 @@ describe('configured, against a healthy Jira', () => {
     it('POST /skills creates a skill: 200, a minted s_ id, trimmed, read back by GET /api/jira, and the poller is not asked to sweep', async () => {
       const before = searches().length;
       const res = await post('/skills', { name: '  Review  ', prompt: '  Review {key}  ' }).expect(200);
-      expect(res.body).toEqual({ id: expect.stringMatching(/^s_[0-9a-f]{8}$/), name: 'Review', prompt: 'Review {key}' });
+      expect(res.body).toEqual({ id: expect.stringMatching(/^s_[0-9a-f]{8}$/), name: 'Review', prompt: 'Review {key}', group: 'run' });
       expect(skillsOnDisk()).toContainEqual(res.body);
       expect((await status()).skills).toContainEqual(res.body);
       expect(searches().length).toBe(before);
@@ -250,7 +250,7 @@ describe('configured, against a healthy Jira', () => {
     it('updates a skill it holds, keeping its id, and answers the stored skill', async () => {
       const created = (await post('/skills', SKILL).expect(200)).body;
       const updated = await post('/skills', { id: created.id, name: 'After', prompt: 'New' }).expect(200);
-      expect(updated.body).toEqual({ id: created.id, name: 'After', prompt: 'New' });
+      expect(updated.body).toEqual({ id: created.id, name: 'After', prompt: 'New', group: 'run' });
       expect((await status()).skills.filter((s) => s.id === created.id)).toEqual([updated.body]);
     });
 
@@ -309,6 +309,23 @@ describe('configured, against a healthy Jira', () => {
       const reversed = [...ids].reverse();
       expect((await post('/skills/order', { ids: reversed }).expect(200)).body).toEqual({ ok: true });
       expect((await status()).skills.map((s) => s.id)).toEqual(reversed);
+    });
+
+    it('POST /skills/order over a mixed run, review, run list reorders it and round-trips the groups', async () => {
+      const before = (await status()).skills.map((s) => s.id);
+      const mk = async (name: string, group: string) => (await post('/skills', { name, prompt: `${name} {key}`, group }).expect(200)).body.id as string;
+      const [a, b, c] = [await mk('MixA', 'run'), await mk('MixB', 'review'), await mk('MixC', 'run')];
+      const order = [c, b, ...before, a];
+      expect((await post('/skills/order', { ids: order }).expect(200)).body).toEqual({ ok: true });
+      const read = (await status()).skills;
+      expect(read.map((s) => s.id)).toEqual(order);
+      expect(read.filter((s) => [a, b, c].includes(s.id)).map((s) => s.group)).toEqual(['run', 'review', 'run']);
+    });
+
+    it('POST /skills with a bad group is 400 group must be run or review and the file is unchanged', async () => {
+      const before = readFileSync(file, 'utf8');
+      expect((await post('/skills', { ...SKILL, group: 'nope' }).expect(400)).body).toEqual({ error: 'group must be run or review' });
+      expect(readFileSync(file, 'utf8')).toBe(before);
     });
 
     it('POST /skills/order missing a stored id is 409 saying the list changed, and nothing moves', async () => {

@@ -25,7 +25,7 @@ import {
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, JIRA_PROMPT_MAX, jiraActionParam } from '../../../../shared/types';
-import type { JiraAction, JiraDispatchResult, JiraIssue, JiraLink, LaunchSurface, PermissionMode, ReviewHalf } from '../../../../shared/types';
+import type { GitlabMr, JiraAction, JiraDispatchResult, JiraIssue, JiraLink, LaunchSurface, PermissionMode, ReviewHalf, ReviewSkillMr } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { GlyphTile } from '../ui/GlyphTile';
@@ -111,9 +111,10 @@ export function JiraLaunchSheet({
   /**
    * Set by an MR's CodeRabbit button (spec §5.4): the sheet is then the review's, with `initialAction` `'review'`. One pressed tile in place of the three, the
    * repository one of `repos` (the MR's candidates — not every path the project maps), the branch locked to Continue on `mr.sourceBranch`, and the MR and the
-   * half carried on the preview's query and Start's body. Absent, the sheet is exactly what it was.
+   * half carried on the preview's query and Start's body. Absent, the sheet is exactly what it was. The `{ skill }` variant is a review SKILL's (Jira review
+   * skills spec §6) on one MR: the same locked sheet, its tile the skill's name, the MR's five values on the query and in the body and no half.
    */
-  review?: { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
+  review?: { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] } | { skill: string; mr: GitlabMr; repos: string[] };
   onClose: () => void;
   onStarted: () => void;
   onWrote: () => void;
@@ -127,7 +128,15 @@ export function JiraLaunchSheet({
   const me = data?.me ?? null;
   const paths = review !== undefined ? review.repos : (data?.repos[issue.project.key] ?? []);
   // What the server is told about the MR: its project and iid only — the source branch is the sheet's own, sent as the Continue choice.
-  const reviewWire = review === undefined ? undefined : { half: review.half, mr: { project: review.mr.project, iid: review.mr.iid } };
+  // A review skill's wire is the MR's five values from the `GitlabMr` the row was drawn from (the server re-checks them against its cache); the bot's is two.
+  const skillReview = review !== undefined && 'skill' in review ? review : null;
+  const skillMr: ReviewSkillMr | null =
+    skillReview === null
+      ? null
+      : { project: skillReview.mr.project, iid: skillReview.mr.iid, url: skillReview.mr.webUrl, source: skillReview.mr.sourceBranch, target: skillReview.mr.targetBranch };
+  const botReview = review !== undefined && 'half' in review ? review : null;
+  const reviewWire = botReview === null ? undefined : { half: botReview.half, mr: { project: botReview.mr.project, iid: botReview.mr.iid } };
+  const previewReview = skillMr !== null ? { skillMr } : reviewWire;
 
   const [action, setAction] = useState<JiraAction>(initialAction);
   // The ticket's last session (#503), frozen the first render the sessions payload is known: `undefined` until then, `null` for a ticket with none and for
@@ -203,7 +212,7 @@ export function JiraLaunchSheet({
   // Copy prompt are disabled — and the moment it settles the key changes once, so `useFetched` starts exactly one request for it. Start can therefore
   // never send a choice other than the one the preview was composed for: any edit after the answer makes the key differ again and the answer reads stale.
   const previewable = branchSent && settled !== null && settled.choice === choiceKey;
-  const preview = useFetched(previewable ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice, reviewWire) : null, [issue.key, actionKey, repo, choiceKey]);
+  const preview = useFetched(previewable ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice, previewReview) : null, [issue.key, actionKey, repo, choiceKey]);
   const detail = useFetched(() => fetchJiraDetail(issue.key), [issue.key]);
 
   const promptText = preview.status === 'ok' ? preview.value : null;
@@ -288,6 +297,7 @@ export function JiraLaunchSheet({
           action,
           // A review names its MR and the half the sheet previewed; the server derives the half again and 409s a mismatch.
           ...(reviewWire !== undefined ? { mr: reviewWire.mr, half: reviewWire.half } : {}),
+          ...(skillMr !== null ? { mr: skillMr } : {}),
           assign: assignNow,
           // `null` is "leave as is" — the server's own spelling, not an empty string it would have to refuse.
           transitionId: transitionId === '' ? null : transitionId,
@@ -325,11 +335,13 @@ export function JiraLaunchSheet({
     setAction(next);
     setPickedMode(null);
   };
-  const skillOptions = skills.map((k) => ({ value: `skill:${k.id}`, label: k.name }));
+  // Run skills only: a review skill starts from an MR's Review menu, never from here (spec §5), so it is neither counted nor offered.
+  const runSkills = skills.filter((k) => k.group === 'run');
+  const skillOptions = runSkills.map((k) => ({ value: `skill:${k.id}`, label: k.name }));
   // A skill the menu no longer lists (deleted since the action was chosen) still has to be the select's value, or React would show the first option
   // while the preview — and Start — carry another action. It is listed by its id, and the preview's refusal says what happened.
-  if (skillAction !== null && !skills.some((k) => k.id === skillAction)) skillOptions.push({ value: actionKey, label: `skill ${skillAction}` });
-  const skillSub = skillAction === null ? `${skills.length} on this machine` : (skills.find((k) => k.id === skillAction)?.name ?? `skill ${skillAction}`);
+  if (skillAction !== null && !runSkills.some((k) => k.id === skillAction)) skillOptions.push({ value: actionKey, label: `skill ${skillAction}` });
+  const skillSub = skillAction === null ? `${runSkills.length} on this machine` : (skills.find((k) => k.id === skillAction)?.name ?? `skill ${skillAction}`);
   const tiles: { key: string; title: string; sub: string; glyph: 'play' | 'document' | 'sparkle'; on: boolean; disabled?: boolean; hint?: string; pick: () => void }[] = [
     { key: 'execute', title: 'End to end', sub: 'plan, change, test, PR', glyph: 'play', on: action === 'execute', pick: () => pickAction('execute') },
     { key: 'context', title: 'Ticket loaded', sub: 'you drive', glyph: 'document', on: action === 'context', pick: () => pickAction('context') },
@@ -340,10 +352,10 @@ export function JiraLaunchSheet({
       glyph: 'sparkle',
       on: skillAction !== null,
       // Nothing to pick from: the tile stays drawn, so the machine's lack is visible, and says why it cannot be pressed.
-      disabled: skills.length === 0 && skillAction === null,
-      hint: skills.length === 0 && skillAction === null ? 'no skills on this machine' : undefined,
+      disabled: runSkills.length === 0 && skillAction === null,
+      hint: runSkills.length === 0 && skillAction === null ? 'no skills on this machine' : undefined,
       pick: () => {
-        if (skillAction === null && skills.length > 0) pickAction({ skill: skills[0].id });
+        if (skillAction === null && runSkills.length > 0) pickAction({ skill: runSkills[0].id });
       }
     }
   ];
@@ -354,8 +366,8 @@ export function JiraLaunchSheet({
       : [
           {
             key: 'review',
-            title: review.half === 'fix' ? 'Fix review' : 'Request review',
-            sub: `mr-review-loop on !${review.mr.iid}`,
+            title: skillReview !== null ? (skills.find((k) => k.id === skillReview.skill)?.name ?? `skill ${skillReview.skill}`) : botReview?.half === 'fix' ? 'Fix review' : 'Request review',
+            sub: skillReview !== null ? `on !${skillReview.mr.iid} · ${skillReview.mr.sourceBranch}` : `mr-review-loop on !${review.mr.iid}`,
             glyph: 'play',
             on: true,
             pick: () => undefined
@@ -434,7 +446,7 @@ export function JiraLaunchSheet({
                 <button
                   key={t.key}
                   type="button"
-                  className="launch-tile"
+                  className={review === undefined ? 'launch-tile' : 'launch-tile launch-tile-wide'}
                   aria-pressed={t.on}
                   aria-label={t.title}
                   aria-describedby={`${tileIds}-${t.key}`}
@@ -453,7 +465,10 @@ export function JiraLaunchSheet({
               ))}
             </div>
           </div>
-          {skillAction !== null && (
+          {/* Not on a review sheet: its one tile IS the action, and a review skill's sheet carries a `{ skill }` action too — the select drew there
+              (2026-11-20 ui-verify) as `skill s_…` (no run skill matched it) and offered the run skills, any of which the server then refused with
+              the MR attached (`<name> is a run skill and takes no MR`). */}
+          {skillAction !== null && review === undefined && (
             <label className="sheet-field">
               <span className="set-name">Skill</span>
               <Select

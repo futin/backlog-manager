@@ -22,10 +22,12 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
   item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira Detail's session card `Stop` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
-  — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with ten composers — the tracker's (`components/TrackerChip.tsx`), the band's
+  — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with eleven composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`), the board sheet's roots
-  search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraTicketStrip.tsx`, the Status chip in the ticket body's strip) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
-  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still ten dialogs counted.
+  search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraTicketStrip.tsx`, the Status chip in the ticket body's strip) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request) and the Delivery row's `Review menu` (`components/jira/ReviewMenu.tsx`, the split's `More reviewers` chevron or the ghost `Review ▾`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
+  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. The third is the Skills card's inline
+  editor (`SkillEditor`, `components/jira/JiraSkillsGroup.tsx`), joined only while a row is being edited, Escape cancelling the edit alone. Still ten dialogs
+  counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
@@ -149,7 +151,15 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   at a reason line under the row, since a disabled ink split draws like an enabled one; dispatch's 409s stay the authority for what the client cannot see. The click calls the row's `onReview`, threaded `JiraDeliveryTab` → `JiraTicketBody` → the modal or the ticket page's frame to `JiraView`'s launch state, and dispatches nothing itself. The sheet
   in review mode (`review` prop) shows ONE pressed tile (`Fix review` / `Request review`), offers only the MR's candidate repos (`GitlabProjectView.repos`, not
   every path the project maps), and locks the branch to `continue` on the MR's source branch (`useBranchState`'s `locked`, so the preview, Copy and Start carry
-  one choice); the MR and half ride the preview's query and Start's body. Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s,
+  one choice); the MR and half ride the preview's query and Start's body.
+  With at least one review skill the split gains a `More reviewers` chevron half (the `Chevron` mark, never a text triangle) that opens `ReviewMenu`'s `Review
+  menu` — the bot row, which is the left half's own action and marked `default`, then the skills — and every other expanded target whose lead MR is open draws a
+  ghost `Review ▾` (`Review with a skill`, skills only, never a bot row: a bot dispatch needs a half) after its `Open session`, `Run ▾` or GitLab chip, or alone
+  where the row drew nothing; the chevron, the ghost and every skill row are held by the same `reviewGate`, the ghost's reason tail reading `Review waits…`
+  (`reviewBlockedTail`). A skill row opens the sheet with `review={{ skill, mr, repos }}`: ONE pressed tile named for the skill (sub-line `on !<iid> · <source
+  branch>`), the same branch lock and repos, and the five `mr` values riding the query and the body; `Run ▾` and the sheet's `A skill` tile list run skills
+  only.
+  Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s,
   derived at draw time against `now`, so the step, the row, the chip and the `Review open` filter cannot word one MR two ways. A step's
   `Ignore` is this browser's alone, in `hooks/useIgnoredSteps.ts` (`backlog-manager.jira-ignored-steps`, keyed by MR and pruned against the ticket's MRs). Why:
   [invariants.md](docs/subsystems/invariants.md#the-review-button-belongs-to-the-mr-never-to-run)
