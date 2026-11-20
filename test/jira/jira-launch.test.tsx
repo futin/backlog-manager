@@ -1672,6 +1672,46 @@ describe('JiraView — the review button opens the launch sheet', () => {
     expect(tiles[0]).toHaveTextContent('mr-review-loop on !15958');
     expect(within(sheet).getByText('PAY-131-x')).toBeInTheDocument();
   });
+
+  // Jira review skills spec §4/§6: a skill picked from the MR's `Review menu` opens the SAME sheet in its skill variant, on the row's MR.
+  it('a review skill picked from `More reviewers` opens the sheet’s skill variant on that MR, over the dialog', async () => {
+    localStorage.clear();
+    setJiraPage('board');
+    const RSKILL = { id: 's_feedbeef', name: 'Deep review', prompt: '/deep {key} {mr.url}', group: 'review' as const };
+    const board = jiraStatus({ boards: [BOARD], skills: [SKILL, RSKILL] });
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/jira/issue/')) return Promise.resolve(res(200, detail({ boards: [BOARD.id] })));
+      if (url.includes('/issues')) return Promise.resolve(res(200, { issues: [CARD], polledAt: daysAgoStamp(0) }));
+      if (url.startsWith('/api/jira/')) return base(input, init);
+      if (url.startsWith('/api/agents/')) return base(input, init);
+      return Promise.resolve(res(200, board));
+    }) as unknown as typeof fetch;
+    render(
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: jest.fn() }}>
+          <JiraSessionsContext.Provider value={{ data: { links: [], reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>
+            <GitlabContext.Provider value={{ data: GITLAB, error: null, refresh: () => Promise.resolve(GITLAB) }}>
+              <JiraView onOpenJiraPage={jest.fn()} />
+            </GitlabContext.Provider>
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
+    const modal = await screen.findByRole('dialog', { name: 'Refund partial captures' });
+    await userEvent.click(within(modal).getByRole('tab', { name: /^Delivery/ }));
+    await userEvent.click(await within(modal).findByRole('button', { name: 'More reviewers' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Review menu' })).getByRole('button', { name: 'Deep review' }));
+
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    const tiles = within(within(sheet).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Deep review');
+    expect(tiles[0]).toHaveTextContent('on !15958 · PAY-131-x');
+  });
 });
 
 // A review SKILL on one MR (Jira review skills spec §6): the bot's locked sheet with the skill's name on its tile and the MR's five values on the wire.

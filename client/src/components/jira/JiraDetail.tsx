@@ -60,6 +60,7 @@ export function JiraDetail({
   onWrote,
   onRun,
   onReview,
+  onReviewSkill,
   onOpenPage,
   onClose
 }: {
@@ -74,6 +75,8 @@ export function JiraDetail({
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   /** The Delivery pane's CodeRabbit button — the page opens the launch sheet pre-set to a review (spec §5.4). Absent, the row draws no button. */
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  /** A Delivery row's `Review menu` skill pick (Jira review skills spec §4) — the page opens the launch sheet's skill variant on that MR. */
+  onReviewSkill?: (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]) => void;
   /** `Open full page ↗` — the ticket page for this key (Jira detail tabs spec §2.1). Absent, the head draws no such chip. */
   onOpenPage?: (key: string) => void;
   onClose: () => void;
@@ -133,6 +136,7 @@ export function JiraDetail({
           onWrote();
         }}
         onReview={onReview}
+        onReviewSkill={onReviewSkill}
         onRun={onRun}
         onOpenPage={onOpenPage === undefined ? undefined : (child) => onOpenPage(child.key)}
         titleId={titleId}

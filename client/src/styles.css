@@ -1370,6 +1370,9 @@ button.rail-count { cursor: pointer }
    control; the primitive carries the dashed no-repository look itself, and the live tint below reaches the group by structure (`> [role='group']`) because
    guard 7 keeps every `ui-*` family token out of a selector outside the primitives block. */
 .jira-run { position: relative; flex: none }
+/* `Review ▾` (ReviewMenu.tsx) — the Delivery row's reviewer menu: the wrapper is its Popover's positioning parent, as `.jira-run` is `Run ▾`'s, and an
+   inline-flex box so the split or the ghost inside sits on the next row's button line without a stray baseline gap. */
+.jira-review { position: relative; flex: none; display: inline-flex }
 .board-card-markers .jira-run { margin-left: auto }
 /* A running session: the whole pill goes green-on-tint, its dot steady (a pulse is the live strip's job, not the button's). The group's own ink background
    and the halves' ink fill are overridden together, since the halves paint over the group. */

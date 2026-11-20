@@ -9,6 +9,7 @@ import { JiraTicketBody } from '../../client/src/components/jira/JiraTicketBody'
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
+import { useDialogEscape } from '../../client/src/hooks/useDialogEscape';
 import { JIRA_IGNORED_STEPS_KEY } from '../../client/src/hooks/useIgnoredSteps';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
@@ -25,6 +26,7 @@ import type {
   JiraIssue,
   JiraIssueDetail,
   JiraSessionsPayload,
+  JiraSkill,
   JiraStatusPayload
 } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -81,7 +83,7 @@ function detail(of: JiraIssue): JiraIssueDetail {
   return { ...of, description: 'Partial captures are not refunded.', children: [], transitions: [], boards: [BOARD.id], session: null } as JiraIssueDetail;
 }
 
-function status(): JiraStatusPayload {
+function status(skills: JiraSkill[] = []): JiraStatusPayload {
   return {
     configured: true,
     configUnreadable: null,
@@ -94,7 +96,7 @@ function status(): JiraStatusPayload {
     repos: { PAY: REPOS },
     repoDefaults: {},
     projects: [{ key: 'PAY', name: 'Payments' }],
-    skills: [],
+    skills,
     calls: { sweep: 0, last429At: null },
     live: {},
     armed: true,
@@ -224,12 +226,14 @@ function json(body: unknown): Response {
 
 let worktrees: () => Promise<Response>;
 let onReview: jest.Mock;
+let onReviewSkill: jest.Mock;
 let onRun: jest.Mock;
 
 beforeEach(() => {
   window.localStorage.clear();
   mockAgents = { enabled: true } as AgentsStatus;
   onReview = jest.fn();
+  onReviewSkill = jest.fn();
   onRun = jest.fn();
   setJiraDetailTab('delivery');
   // The Worktrees read never answers unless a case says so: an answer would land after a synchronous case's last line, outside `act`.
@@ -246,6 +250,10 @@ interface Opts {
   issue?: JiraIssue;
   gitlab?: GitlabPayload | null;
   sessions?: JiraSessionsPayload;
+  /** `GET /api/jira`'s skills; none unless a case says so. */
+  skills?: JiraSkill[];
+  /** Draw the body with no `onReview` (and no `onReviewSkill`), as a frame that offers no review does. */
+  noReview?: boolean;
 }
 
 function tree(opts: Opts = {}) {
@@ -255,7 +263,7 @@ function tree(opts: Opts = {}) {
   return (
     <SettingsProvider>
       <GitlabContext.Provider value={{ data: gl, error: null, refresh: () => Promise.resolve(gl) }}>
-        <JiraContext.Provider value={{ data: status(), loading: false, error: false, reload: jest.fn() }}>
+        <JiraContext.Provider value={{ data: status(opts.skills), loading: false, error: false, reload: jest.fn() }}>
           <JiraSessionsContext.Provider value={{ data: live, reload: jest.fn(() => Promise.resolve()) }}>
             <JiraTicketBody
               issue={issue}
@@ -266,7 +274,8 @@ function tree(opts: Opts = {}) {
               onBack={jest.fn()}
               onOpenIssue={jest.fn()}
               onWrote={jest.fn()}
-              onReview={onReview}
+              onReview={opts.noReview ? undefined : onReview}
+              onReviewSkill={opts.noReview ? undefined : onReviewSkill}
               onRun={onRun}
             />
           </JiraSessionsContext.Provider>
@@ -429,6 +438,231 @@ describe('JiraDeliveryTab — the next step (T24, rows 8, 9, 12)', () => {
     expect(next.querySelector('.jira-dlv-next-text')?.textContent).toContain('2 open findings');
     expect(within(next).queryByRole('button', { name: 'Fix review' })).toBeNull();
     expect(within(next).getByRole('button', { name: 'Ignore' })).toBeInTheDocument();
+  });
+});
+
+/*
+  `Review ▾` (Jira review skills spec §4): with at least one review skill the review split gains a chevron, `More reviewers`, whose `Review menu` is the bot
+  row then the review skills, and every expanded target whose lead is OPEN offers the skills where the split is not drawn, through a ghost `Review ▾`
+  (`Review with a skill`) whose menu holds the skills alone. One gate (`reviewGate`) and one set of hide conditions serve the split, the chevron and the ghost.
+*/
+const RS1: JiraSkill = { id: 's_deep0001', name: 'Deep review', prompt: '/deep-review {mr.url}', group: 'review' };
+const RS2: JiraSkill = { id: 's_sec00002', name: 'Security pass', prompt: '/sec-pass {key} {mr.iid}', group: 'review' };
+const RUN_SKILL: JiraSkill = { id: 's_plan0003', name: 'Plan it', prompt: '/plan {key}', group: 'run' };
+const SKILLS = [RUN_SKILL, RS1, RS2];
+const reviewMenu = (): HTMLElement => screen.getByRole('dialog', { name: 'Review menu' });
+const menuHeads = (): string[] => [...reviewMenu().querySelectorAll('.jira-run-head')].map((h) => h.textContent ?? '');
+const menuRows = (): HTMLButtonElement[] => within(reviewMenu()).getAllByRole('button') as HTMLButtonElement[];
+const labels = (): string[] => menuRows().map((o) => o.querySelector('.jira-run-label')?.textContent ?? '');
+const ghostIn = (target: string): HTMLElement | null => within(row(target)).queryByRole('button', { name: 'Review with a skill' });
+const chevronIn = (target: string): HTMLElement | null => within(row(target)).queryByRole('button', { name: 'More reviewers' });
+const liveLinks = (links: SessionLink[]): JiraSessionsPayload => ({ links, reachable: true, rowsAt: new Date().toISOString() });
+const RUN_LINK = (): SessionLink => link({ sessionId: 's-run', state: 'working', action: 'execute', name: 'Execute PAY-12' });
+/** `develop`'s lead as `!42` on a `request` row: review `none`, pipeline green. */
+const REQUEST_42 = (): GitlabMr => DEVELOP_LEAD({ iid: 42, review: NONE, pipeline: 'success' });
+
+/** An earlier Escape-stack entry, mounted before the tree so the menu ranks above it — what the menu's Escape must NOT reach. */
+function Under({ onEscape }: { onEscape: () => void }) {
+  useDialogEscape(onEscape);
+  return null;
+}
+
+describe('JiraDeliveryTab — Review ▾ (review skills spec §4)', () => {
+  it('a `request` row: the split gains `More reviewers`; its menu is `Built in` with the bot row marked default, then `Your review skills`', () => {
+    mount({ gitlab: gitlab([REQUEST_42()]), skills: SKILLS });
+    const more = chevronIn('develop') as HTMLElement;
+    expect(more).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    // One pill, two halves: the chevron sits in the split whose left half is today's `Request review`.
+    expect(within(row('develop')).getByRole('button', { name: 'Request review' }).closest('.ui-split')).toBe(more.closest('.ui-split'));
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(menuHeads()).toEqual(['Built in', 'Your review skills']);
+    expect(labels()).toEqual(['Review bot — request review', 'Deep review', 'Security pass']);
+    expect(menuRows().map((o) => o.querySelector('.jira-run-sub')?.textContent ?? null)).toEqual(['Posts the review request on !42', '/deep-review', '/sec-pass']);
+    expect(menuRows()[0].querySelector('.jira-run-mark')?.textContent).toBe('default');
+    expect(menuRows()[1].querySelector('.jira-run-mark')).toBeNull();
+    expect(menuRows()[1]).toHaveAttribute('title', RS1.prompt);
+    // A run skill is Run ▾'s, never this menu's.
+    expect(reviewMenu().textContent).not.toContain(RUN_SKILL.name);
+  });
+
+  it('the bot row is the left half’s action, and closes the menu', () => {
+    mount({ gitlab: gitlab([REQUEST_42()]), skills: SKILLS });
+    fireEvent.click(chevronIn('develop') as HTMLElement);
+    fireEvent.click(menuRows()[0]);
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-12' }), 'request', expect.objectContaining({ iid: 42 }), REPOS);
+    expect(onReviewSkill).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Review menu' })).toBeNull();
+  });
+
+  it('a skill row opens the launch sheet’s skill variant for THIS row’s MR, with its candidate repos', () => {
+    mount({ gitlab: gitlab([REQUEST_42()]), skills: SKILLS });
+    fireEvent.click(chevronIn('develop') as HTMLElement);
+    fireEvent.click(within(reviewMenu()).getByRole('button', { name: 'Security pass' }));
+    expect(onReviewSkill).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-12' }), RS2.id, expect.objectContaining({ iid: 42, sourceBranch: 'pay-12-refunds' }), REPOS);
+    expect(onReview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Review menu' })).toBeNull();
+  });
+
+  it('a `fix` row’s bot row reads `Review bot — fix findings` / `Fixes the open findings on !42` and launches the fix half', () => {
+    mount({ gitlab: gitlab([DEVELOP_LEAD({ iid: 42, review: review() })]), skills: SKILLS });
+    fireEvent.click(chevronIn('develop') as HTMLElement);
+    expect(labels()[0]).toBe('Review bot — fix findings');
+    expect(menuRows()[0].querySelector('.jira-run-sub')?.textContent).toBe('Fixes the open findings on !42');
+    fireEvent.click(menuRows()[0]);
+    expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-12' }), 'fix', expect.objectContaining({ iid: 42 }), REPOS);
+  });
+
+  it.each<[string, () => GitlabMr[]]>([
+    ['request', () => [REQUEST_42()]],
+    ['run', () => [DEVELOP_LEAD()]],
+    ['merge', () => [DEVELOP_LEAD({ pipeline: 'success' })]],
+    ['gitlab', () => [DEVELOP_LEAD({ pipeline: 'canceled' })]],
+    ['none', () => [DEVELOP_LEAD({ pipeline: 'running' })]]
+  ])('with no review skill (a run skill only) a `%s` row draws no chevron and no ghost', (_kind, mrs) => {
+    mount({ gitlab: gitlab(mrs()), skills: [RUN_SKILL] });
+    expect(chevronIn('develop')).toBeNull();
+    expect(ghostIn('develop')).toBeNull();
+  });
+
+  it('with no review skill the split is exactly today’s: one half, no chevron', () => {
+    mount({ gitlab: gitlab([REQUEST_42()]), skills: [RUN_SKILL] });
+    const split = within(row('develop')).getByRole('button', { name: 'Request review' }).closest('.ui-split') as HTMLElement;
+    expect(split.querySelectorAll('button')).toHaveLength(1);
+  });
+
+  it('`fix` with a live bot review link: `Open session`, then the ghost — held by that session, so it says why with the ghost’s own tail', () => {
+    mount({ gitlab: gitlab([DEVELOP_LEAD({ review: review() })]), sessions: liveLinks([link({ sessionId: 's-review', state: 'working' })]), skills: SKILLS });
+    const next = nextRow('develop') as HTMLElement;
+    const open = within(next).getByRole('link', { name: 'Open session' });
+    const ghost = ghostIn('develop') as HTMLElement;
+    expect(open.compareDocumentPosition(ghost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ghost).toBeDisabled();
+    expect(row('develop').querySelector('.jira-dlv-next-why')?.textContent).toBe(
+      'Review PAY-12 s-review is live on this ticket — Review waits until it ends or you stop it.'
+    );
+  });
+
+  it('`fix` with a live bot review link elsewhere: the ghost’s menu holds the review skills alone — never the bot row', () => {
+    const elsewhere = link({ sessionId: 's-review', state: 'working', how: 'manual', repo: '/Users/dana/other', branch: 'other-branch' });
+    mount({ gitlab: gitlab([DEVELOP_LEAD({ review: review() })]), sessions: liveLinks([elsewhere]), skills: SKILLS });
+    expect(within(nextRow('develop') as HTMLElement).getByRole('link', { name: 'Open session' })).toBeInTheDocument();
+    const ghost = ghostIn('develop') as HTMLElement;
+    expect(ghost).toBeEnabled();
+    expect(ghost).toHaveTextContent(/^Review$/);
+    expect(ghost.querySelector('svg')).not.toBeNull();
+    fireEvent.click(ghost);
+    expect(menuHeads()).toEqual(['Your review skills']);
+    expect(labels()).toEqual(['Deep review', 'Security pass']);
+    expect(reviewMenu().textContent).not.toMatch(/Review bot/);
+    fireEvent.click(menuRows()[0]);
+    expect(onReviewSkill).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-12' }), RS1.id, expect.objectContaining({ iid: 41 }), REPOS);
+  });
+
+  it('`fix` with a live review-SKILL link on the branch: still the split and its chevron, never `Open session`', () => {
+    const skillLink = link({ sessionId: 's-skill', state: 'working', action: { skill: RS1.id }, name: 'Deep review PAY-12' });
+    mount({ gitlab: gitlab([DEVELOP_LEAD({ review: review() })]), sessions: liveLinks([skillLink]), skills: SKILLS });
+    const next = nextRow('develop') as HTMLElement;
+    expect(within(next).queryByRole('link', { name: 'Open session' })).toBeNull();
+    expect(within(next).getByRole('button', { name: 'Fix review' })).toBeInTheDocument();
+    expect(chevronIn('develop')).toBeInTheDocument();
+    expect(ghostIn('develop')).toBeNull();
+  });
+
+  it('`run`: `Run ▾`, then the ghost', () => {
+    mount({ skills: SKILLS });
+    const run = within(row('develop')).getByRole('button', { name: 'Run options for PAY-12' });
+    const ghost = ghostIn('develop') as HTMLElement;
+    expect(run.compareDocumentPosition(ghost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(ghost);
+    expect(labels()).toEqual(['Deep review', 'Security pass']);
+  });
+
+  it.each<[string, Partial<GitlabMr>, string]>([
+    ['merge', { pipeline: 'success' }, 'Merge in GitLab ↗'],
+    ['gitlab', { pipeline: 'canceled' }, 'GitLab ↗']
+  ])('`%s`: the chip, then the ghost', (_kind, over, chip) => {
+    mount({ gitlab: gitlab([DEVELOP_LEAD(over)]), skills: SKILLS });
+    const chipEl = within(row('develop')).getByRole('link', { name: chip });
+    expect(chipEl.compareDocumentPosition(ghostIn('develop') as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('no next kind on an OPEN lead (a running pipeline, no sentence): the row draws with the ghost alone', () => {
+    mount({ gitlab: gitlab([DEVELOP_LEAD({ pipeline: 'running' })]), skills: SKILLS });
+    const next = nextRow('develop') as HTMLElement;
+    expect(next).not.toBeNull();
+    expect(next.querySelector('.jira-dlv-next-text')).toBeNull();
+    expect(within(next).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Review with a skill']);
+  });
+
+  it.each<[string, () => GitlabMr]>([
+    ['merged', () => merged(41, 'develop', 10)],
+    ['closed', () => mr({ iid: 41, targetBranch: 'develop', state: 'closed', pipeline: null, updatedAt: minutesAgo(10) })]
+  ])('a %s lead draws no ghost, and the row stays absent', (_state, lead) => {
+    mount({ gitlab: gitlab([lead()]), skills: SKILLS });
+    expect(ghostIn('develop')).toBeNull();
+    expect(nextRow('develop')).toBeNull();
+  });
+
+  it('gate held (a live run on the key): the chevron is disabled with the gate’s sentence, and the split’s reason line is unchanged', () => {
+    mount({ gitlab: gitlab([REQUEST_42()]), sessions: liveLinks([RUN_LINK()]), skills: SKILLS });
+    const more = chevronIn('develop') as HTMLElement;
+    expect(more).toBeDisabled();
+    expect(more).toHaveAttribute('title', 'Execute PAY-12 is live on this ticket');
+    expect(row('develop').querySelector('.jira-dlv-next-why')?.textContent).toBe(
+      'Execute PAY-12 is live on this ticket — Request review waits until it ends or you stop it.'
+    );
+  });
+
+  it('gate held: the ghost is disabled in the dashed skin with the gate’s sentence, and its reason line ends ` — Review waits …`', () => {
+    mount({ sessions: liveLinks([RUN_LINK()]), skills: SKILLS });
+    const ghost = ghostIn('develop') as HTMLElement;
+    expect(ghost).toBeDisabled();
+    expect(ghost).toHaveAttribute('title', 'Execute PAY-12 is live on this ticket');
+    expect(ghost.closest('.ui-split')).toHaveClass('ui-split-dashed');
+    const why = row('develop').querySelector('.jira-dlv-next-why') as HTMLElement;
+    expect(why.textContent).toBe('Execute PAY-12 is live on this ticket — Review waits until it ends or you stop it.');
+    expect(ghost).toHaveAttribute('aria-describedby', why.id);
+  });
+
+  it('gate held while the menu is open: every row is disabled, titled with the gate’s sentence', () => {
+    const view = mount({ gitlab: gitlab([REQUEST_42()]), skills: SKILLS });
+    fireEvent.click(chevronIn('develop') as HTMLElement);
+    view.rerender(tree({ gitlab: gitlab([REQUEST_42()]), sessions: liveLinks([RUN_LINK()]), skills: SKILLS }));
+    for (const r of menuRows()) {
+      expect(r).toBeDisabled();
+      expect(r).toHaveAttribute('title', 'Execute PAY-12 is live on this ticket');
+    }
+  });
+
+  it.each<[string, () => void, Opts]>([
+    ['agents are off', () => (mockAgents = { enabled: false } as AgentsStatus), {}],
+    ['agents are not yet answered', () => (mockAgents = null), {}],
+    ['no candidate repo', () => undefined, { gitlab: gitlab(eight(), [{ ...PAY_API, repos: [] }]) }],
+    ['no `onReview`', () => undefined, { noReview: true }]
+  ])('hidden when %s: no chevron on the `request` row, no ghost on the `run` row', (_why, arrange, opts) => {
+    arrange();
+    mount({ skills: SKILLS, ...opts });
+    expect(chevronIn('demo')).toBeNull();
+    expect(ghostIn('develop')).toBeNull();
+    expect(screen.queryAllByRole('button', { name: /More reviewers|Review with a skill/ })).toHaveLength(0);
+  });
+
+  it('Escape closes the menu and nothing under it: the menu is a `ui/Popover` on the dialog stack', () => {
+    const under = jest.fn();
+    render(
+      <>
+        <Under onEscape={under} />
+        {tree({ gitlab: gitlab([REQUEST_42()]), skills: SKILLS })}
+      </>
+    );
+    fireEvent.click(chevronIn('develop') as HTMLElement);
+    expect(reviewMenu()).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Review menu' })).toBeNull();
+    expect(under).not.toHaveBeenCalled();
+    expect(chevronIn('develop')).toHaveAttribute('aria-expanded', 'false');
   });
 });
 

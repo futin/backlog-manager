@@ -1,5 +1,8 @@
+import type { RefObject } from 'react';
+
 import { reviewBlockedTail, reviewGateText } from '../../lib/review-copy';
 import type { GitlabMr, JiraIssue, JiraSessionsPayload, JiraStatusPayload } from '../../../../shared/types';
+import { Chevron } from '../ui/Chevron';
 import { Glyph } from '../ui/Glyphs';
 
 /**
@@ -7,12 +10,17 @@ import { Glyph } from '../ui/Glyphs';
  * §5.2; DESIGN.md §8.9.6, Delivery › the next row). `NextRow` composes them on its `request` and `fix` branches; this file keeps what was the CodeRabbit
  * row's own — the live-session gate, the split and the reason line — so the rules did not change when the row became one branch of a larger one.
  *
- * - **`ReviewSplit`** — an ink `ui-split-28` with the play glyph: a lone half of the Run split, no chevron, since there is no menu behind it. It opens the Run
- *   launch sheet pre-set to the review; it dispatches nothing itself. Blocked, it is DISABLED, wears the dashed skin (`.ui-split-dashed`, as `Run ▾` with no
- *   repo and a blocked Merge do — the ink skin has no :disabled look of its own, so a disabled ink split read as clickable, 2026-11-16), carries the gate's
- *   sentence as its title on both the button and its wrapper (a disabled button takes no hover), and points (`aria-describedby`) at the reason line.
+ * - **`ReviewSplit`** — an ink `ui-split-28` with the play glyph. With no review skill on this machine it is a lone half of the Run split, no chevron,
+ *   since there is no menu behind it — exactly what it was before review skills. With at least one (`more`, passed by `ReviewMenu`, Jira review skills spec
+ *   §4) it gains the chevron half, `More reviewers`, which opens the `Review menu`: the bot row (this half's own action) and then the skills. The left half
+ *   opens the Run launch sheet pre-set to the review; it dispatches nothing itself. Blocked, BOTH halves are DISABLED, the pill wears the dashed skin
+ *   (`.ui-split-dashed`, as `Run ▾` with no repo and a blocked Merge do — the ink skin has no :disabled look of its own, so a disabled ink split read as
+ *   clickable, 2026-11-16), carries the gate's sentence as its title on each button and on its wrapper (a disabled button takes no hover), and points
+ *   (`aria-describedby`) at the reason line. The chevron is held with the half because a skill session on the MR's branch collides with the review exactly
+ *   as the bot's would: one gate, one sentence, for every way of starting a review on this MR.
  * - **`ReviewWhy`** — the reason on screen, under the row rather than inside its pill: the session's name in bold, where it is live, and that the button
- *   waits until it ends or is stopped. The pill ellipsises and a branch name is long; this line wraps instead.
+ *   waits until it ends or is stopped. The pill ellipsises and a branch name is long; this line wraps instead. Its tail names the control that waits — the
+ *   split's own label, or `Review` for the ghost `Review ▾` that offers the skills where the split is not drawn (`ReviewMenu.tsx`).
  *
  * Whether the split draws at all is the caller's (hidden, not disabled, where it can never work: no candidate repo, agents off or not yet answered, no
  * `onReview`), because only the caller knows all three; `reviewGate` is the disabled half, and dispatch's 409s stay the authority for what this view cannot
@@ -51,17 +59,22 @@ export function reviewGate(
   return onBranch === undefined ? null : { name: onBranch.name, where: mr.sourceBranch };
 }
 
-/** The review play-button split; `blocked` is `reviewGateText`'s sentence while the gate holds, `whyId` the reason line it points at. */
+/**
+ * The review play-button split; `blocked` is `reviewGateText`'s sentence while the gate holds, `whyId` the reason line it points at. `more` draws the chevron
+ * half — its open state, its toggle and the ref the `Review menu` popover anchors to (and hands Escape's focus back to); absent, the split is one half.
+ */
 export function ReviewSplit({
   label,
   blocked,
   whyId,
-  onClick
+  onClick,
+  more
 }: {
   label: 'Fix review' | 'Request review';
   blocked: string | null;
   whyId: string;
   onClick: () => void;
+  more?: { open: boolean; onToggle: () => void; anchor: RefObject<HTMLButtonElement> };
 }) {
   return (
     <span className={blocked === null ? 'ui-split ui-split-28' : 'ui-split ui-split-28 ui-split-dashed'} title={blocked ?? undefined}>
@@ -78,12 +91,28 @@ export function ReviewSplit({
         </span>
         {label}
       </button>
+      {more !== undefined && (
+        <button
+          type="button"
+          ref={more.anchor}
+          className="ui-split-more"
+          aria-label="More reviewers"
+          aria-haspopup="dialog"
+          aria-expanded={more.open}
+          disabled={blocked !== null}
+          title={blocked ?? undefined}
+          aria-describedby={blocked === null ? undefined : whyId}
+          onClick={more.onToggle}
+        >
+          <Chevron dir={more.open ? 'up' : 'down'} />
+        </button>
+      )}
     </span>
   );
 }
 
-/** The blocked split's reason line: who holds the MR (bold), where, and that the button waits. */
-export function ReviewWhy({ gate, label, id }: { gate: { name: string; where: string | null }; label: 'Fix review' | 'Request review'; id: string }) {
+/** The blocked split's (or ghost's) reason line: who holds the MR (bold), where, and that the button waits. */
+export function ReviewWhy({ gate, label, id }: { gate: { name: string; where: string | null }; label: 'Fix review' | 'Request review' | 'Review'; id: string }) {
   return (
     <p className="jira-dlv-next-why" id={id}>
       <span>

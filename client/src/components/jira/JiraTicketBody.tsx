@@ -87,6 +87,7 @@ export function JiraTicketBody({
   onOpenIssue,
   onWrote,
   onReview,
+  onReviewSkill,
   onRun,
   onOpenPage,
   titleId
@@ -108,6 +109,8 @@ export function JiraTicketBody({
   onWrote: (reread: boolean) => void;
   /** The Delivery pane's review button — the frame opens the launch sheet pre-set to a review. Absent, no button draws. */
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
+  /** A Delivery row's `Review menu` skill pick (Jira review skills spec §4): the frame opens the launch sheet's skill variant on that MR. */
+  onReviewSkill?: (issue: JiraIssue, skillId: string, mr: GitlabMr, repos: string[]) => void;
   /** A Delivery next row's `Run ▾` (a failed pipeline): the frame's own `onRun`, the one its head's `Run ▾` calls. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   /** A Children row's Cmd-, Ctrl- or middle-click (spec §2.3): the ticket page on that child. The modal hands it; the page, already the page, does not. */
@@ -272,6 +275,7 @@ export function JiraTicketBody({
       issue={src}
       now={now}
       onReview={onReview}
+      onReviewSkill={onReviewSkill}
       onRun={onRun}
       openRows={openRows}
       onToggleRow={toggleRow}
