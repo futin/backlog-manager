@@ -151,7 +151,15 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   at a reason line under the row, since a disabled ink split draws like an enabled one; dispatch's 409s stay the authority for what the client cannot see. The click calls the row's `onReview`, threaded `JiraDeliveryTab` → `JiraTicketBody` → the modal or the ticket page's frame to `JiraView`'s launch state, and dispatches nothing itself. The sheet
   in review mode (`review` prop) shows ONE pressed tile (`Fix review` / `Request review`), offers only the MR's candidate repos (`GitlabProjectView.repos`, not
   every path the project maps), and locks the branch to `continue` on the MR's source branch (`useBranchState`'s `locked`, so the preview, Copy and Start carry
-  one choice); the MR and half ride the preview's query and Start's body. Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s,
+  one choice); the MR and half ride the preview's query and Start's body.
+  With at least one review skill the split gains a `More reviewers` chevron half (the `Chevron` mark, never a text triangle) that opens `ReviewMenu`'s `Review
+  menu` — the bot row, which is the left half's own action and marked `default`, then the skills — and every other expanded target whose lead MR is open draws a
+  ghost `Review ▾` (`Review with a skill`, skills only, never a bot row: a bot dispatch needs a half) after its `Open session`, `Run ▾` or GitLab chip, or alone
+  where the row drew nothing; the chevron, the ghost and every skill row are held by the same `reviewGate`, the ghost's reason tail reading `Review waits…`
+  (`reviewBlockedTail`). A skill row opens the sheet with `review={{ skill, mr, repos }}`: ONE pressed tile named for the skill (sub-line `on !<iid> · <source
+  branch>`), the same branch lock and repos, and the five `mr` values riding the query and the body; `Run ▾` and the sheet's `A skill` tile list run skills
+  only.
+  Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s,
   derived at draw time against `now`, so the step, the row, the chip and the `Review open` filter cannot word one MR two ways. A step's
   `Ignore` is this browser's alone, in `hooks/useIgnoredSteps.ts` (`backlog-manager.jira-ignored-steps`, keyed by MR and pruned against the ticket's MRs). Why:
   [invariants.md](docs/subsystems/invariants.md#the-review-button-belongs-to-the-mr-never-to-run)

@@ -750,6 +750,25 @@ Jira › Setup, `Setup.html` and `BoardsTen.html`: §8.6's Settings page applied
 
 **Skills.** Phase 5's card, under Connection: `SettingsGroup` titled `Skills`. Two locked rows first — the built-ins' labels (`Work it end to end`, `Open with the ticket loaded`) with a `neutral` `built-in` pill where a skill's `×` sits, no control, because a built-in is code and not a stored row — then one row per skill in the Run menu's own shape (restyle spec §4.4): a `GlyphTile` (`play` and `document` for the built-ins, `sparkle` for a skill, green on the default row), the name over the slash command as a `.jira-setup-code` sub-line, the whole template in the row's `title`, and at its right end `default` on the row `resolveJiraAction` names and a `Make default` chip on every other, which writes `jiraDefaultAction` — the per-browser Local setting, not a server write — so the Run menu, this page and Settings › Local agree. Before that default slot a skill row (never a built-in, which stays pinned above) carries `↑` and `↓`, two flat 28 px `Chip`s 4 px apart (`.jira-setup-move`), labelled `Move <name> up|down`: a click swaps the skill with its neighbour and stores the whole order (`POST /api/jira/skills/order`), which the Run menu then follows. `↑` is disabled on the first skill and `↓` on the last, both while a write is in flight, while that row's `×` is asking, and after a landed move until the status reload answers, so no click acts on the list drawn before it; a refusal (409 when another tab changed the list) is the server's sentence under the add row, like every other. Arrows over drag-and-drop for the reasons the Orchestrate order step and Settings › Dashboards chose them: keyboard-reachable, no library, testable. At phone width (≤ 700 px) every Skills row wraps: the name keeps the first line beside its tile and the controls sit under it, pushed right, since the three controls left a skill name two letters wide. "Mono" on this page means the code-span treatment, `.jira-setup-code` (`--steel` fill, `--ink`, 4 px radius), never a second face (§8.1 allows none). The template's two-line clamp is gone: the template is a sub-line on the Run menu and nowhere else to read, and a clamp only hid the part a person was checking. The `×` asks through `ui/Confirm` inline in its place, one row at a time. The add row stacks a 36 px name field, a `.sheet-prompt` textarea for the template and an `Add` chip, disabled until both hold something after trim; a refusal is the server's sentence in `--red` under it and changes nothing. The hint lists the three placeholders (`{key}`, `{url}`, `{repo}`), says a template without `{key}` gets the ticket key on a line after it, and says a skill has to exist in the repo or the Claude install and that this list only names it. Settings › Local › Dispatch gains `Jira default action` — a `Select` over the two built-ins by label and the skills — drawn only while the status says configured; its hint says the chosen action is listed first in a Jira card's Run menu, marked `default`, and ends `Saved in this browser.`, because it is a per-browser value on a page whose other cards write to the host. A stored skill that has been deleted reads as `Work it end to end` — in the select and in the menu alike — without the stored value being rewritten.
 
+**Run and Review groups** (Jira review skills spec §2; mock `Review-Skills.dc.html`). A skill carries a group, and the card draws one at a time behind a
+two-segment switch under its head — `Run <n>` | `Review <n>`, the counts from the list, Run pressed on every render (not persisted) — with the group's one-line
+explainer under it (`Run skills show in a ticket's Run ▾.` / `Review skills show in an MR's Review ▾ and start on that MR's source branch, never a new one.`).
+Each group has its own pinned `Built in` head: Run keeps the two locked rows above, Review has one, `Review bot` over `request a review, or fix what it found`,
+with no `Make default` (the bot is always the split's left half). Then `Your run skills · <n>` / `Your review skills · <n>` (no head at zero), the hint `↑↓ to
+reorder · order = menu order` while the group holds two or more, and the rows; `↑` and `↓` move a skill inside its group's slice and the card still posts the
+whole list, so the first row's `↑` and the last row's `↓` are disabled within the group. A group with no skills draws `No review skills yet.` under its built-in
+row (Run draws nothing extra). `Make default` is on run skills only. The add row sits under the shown group and adds to it, its placeholders per group (`Groom
+ticket` / `/jira-groom {key}`; `Claude code review` / `/code-review high {mr.url}`) and its hint per group: Review's reads `Fills in: {key}, {mr.url}, {mr.iid},
+{mr.source}, {mr.target}, {mr.project} · a template without {key} gets the ticket key on a line after it`. The `×` confirm names the menu that loses the skill
+(`A card's Run menu stops offering it.` / `An MR's Review menu stops offering it.`).
+
+**The inline editor** (`SkillEditor`, spec §2). Each skill row gains an `Edit` chip beside `↑` / `↓` / `×`. It swaps the row, in place and not in a sheet, for
+the add row's two fields pre-filled, a `Group` label over a two-segment `Segmented` `pill` (`Run` | `Review`, with `Review: shows on an open MR, works on its
+source branch` under it while Review is pressed) and the chips `Save` (a 28 px `Chip`, disabled until the name and template hold something after trim) and
+`Cancel` (flat). `Save` posts the skill with its id, so the id and list position are kept, and closes the editor; a refusal is the card's alert row and the
+editor stays open. One editor at a time: opening another, or asking `×` on a row, cancels the first. Escape cancels it through `useDialogEscape` — the card's
+alert row is cleared with it — and a group change moves the skill to the other segment while the shown segment stays where it was.
+
 **The board sheet.** `JiraBoardSheet`, `BoardSheet.html` and `NewBoard.html`: `FormSheet`'s third composer (§8.7), one sheet for new and edit — titled `New board` under a `new board` kicker, interval `1m`, `Create board` and no delete for a new one; the board's own name under `edit board`, `Save` and `Delete board` for an edit. Three sections on hairline rules, each a 15/500 title over a 13 px `--ink2` line saying what it is for:
 
 - **Name & sync** — two `SettingsRow`s, the name in the 36 px text field and the interval as a `Segmented` `pill` over `SYNC_INTERVALS`, the control GitHub › Settings' `Sync` card draws for a GitHub repo's interval, so the two read alike.
@@ -873,12 +892,26 @@ representative is open and whose next step is Review — `request` or `fix` — 
 own MR. The sentence names no product (spec §4.7): `Review · <n> open findings · 1 critical, 2 major · reviewed 3h ago` (`Fix review`), `Review · not
 reviewed yet`, `Review · <n> commit(s) since the last review` or `Review · the last review didn't land` (`Request review`), each with `· not refreshed since
 <age>` after a failed read (`reviewRowText`, `lib/review-copy.ts`); amber 14 % for findings to fix, `--strip-hi` and `--ink2` for a request. The button is an
-ink `ui-split-28` with the play glyph — a lone half of the Run split, no chevron — and is the slot the review-skills spec will turn into a menu. It is hidden
+ink `ui-split-28` with the play glyph — a lone half of the Run split, no chevron, while this machine has no review skill; with one it gains the chevron (below).
+It is hidden
 where it can never work and disabled while the live-session gate holds ([board.md](rules/board.md)) — then it wears the dashed skin (`.ui-split-dashed`, the
 look `Run ▾` without a repo and a blocked Merge wear), is titled with the gate's sentence, and a reason line (`.jira-dlv-review-why`) sits under the row: a
 7 px green live dot, the session's name at 500 `--ink`, then `is live on this ticket` / `is live on <branch>` and `— <label> waits until it ends or you stop
 it.` at 12 `--ink2`, wrapping rather than ellipsising. While a live `review` link is on the key, `fix` draws the Agent card's `Open session` instead (it asks
 fix-or-leave). It opens the Run launch sheet in review mode (§8.9.5) with that row's MR.
+
+**`Review ▾`** (`ReviewMenu`, `.jira-review`; Jira review skills spec §4; mock `Main.dc.html`'s target row). With at least one review skill the split gains a
+chevron half — always the `Chevron` mark (`components/ui/Chevron.tsx`), never a text `▾`, which the chevrons guard bans — named `More reviewers`; the left half
+stays the bot's preset action. It opens a 300 px `Popover`, `Review menu`, in `JiraRunMenu`'s row language (`.jira-run-*`: head, 40 px row, 28 px `sparkle`
+tile, label over a quiet sub-line): head `Built in`, the bot row — `Review bot — request review` over `Posts the review request on !<iid>`, or on the fix half
+`Review bot — fix findings` over `Fixes the open findings on !<iid>` — marked `default`, then head `Your review skills` and one row per review skill, its
+sub-line the leading slash command (`skillCommand`) and its whole template the title. Where the bot split is not drawn — the row's control is `Open session`,
+`Run ▾`, the GitLab chip, or the row has none — every expanded target whose lead MR is open still draws a **ghost `Review ▾`** after that control (or alone, the
+row drawing for it): an outline one-half split reading `Review` over the `Chevron`, named `Review with a skill`, whose menu holds the skills alone, never the
+bot row, because a bot dispatch needs a half. The same `reviewGate` disables the chevron, the ghost and every menu row — dashed skin, the gate's sentence as
+title, the reason line under the row with its tail naming the control that waits (`Review waits until it ends or you stop it.` for the ghost). A pick closes the
+menu and opens the launch sheet in review mode for that skill: one pressed tile, the skill's name over `on !<iid> · <source branch>`, the branch locked to
+`continue` on the MR's source branch (§8.9.5).
 
 **The track** (`DeliveryTrack`, `components/ui/`; `.jira-dlv-*`). Five equal columns — `Pushed`, `MR open`, `Review`, `Pipeline`, then `Merged` or `Closed` —
 the
