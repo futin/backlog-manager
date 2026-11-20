@@ -140,7 +140,8 @@ taken.
     other 409 `a session is live on S` (different keys, so only the branch hold can refuse).
 - [ ] **Step 2:** fail. **Step 3:** implement — controller parses `mr` with `iidFrom: 'body'` when the action is a skill and `body.mr` is present; service
   runs a `reviewSkillOrThrow` sharing `reviewOrThrow`'s candidate / `continue` / `notOpen` checks (extract the shared part; no state or half checks), with the
-  three-field comparison placed right after the cache / `opened` / keys check and BEFORE the candidate and `continue` checks, then composes from the cache
+  three-field comparison placed right after `findMr` + the `opened` check (`jira-dispatch.service.ts` ~225-226) and BEFORE the candidate and `continue`
+  checks — the keys check stays where it is, in `launch` after `issueDetail` (~301), and runs for a review skill too; then composes from the cache
   values; `strict` true for `review` and for a review skill; the branch hold applies to both.
 - [ ] **Step 4:** pass + the whole suite (bot cases unchanged). **Step 5:** commit `feat(jira): dispatch a review skill on an MR's branch`.
 
@@ -228,7 +229,8 @@ taken.
 - Modify: `client/src/components/jira/ReviewRow.tsx` (`ReviewSplit` chevron, header comment), `client/src/components/jira/NextRow.tsx` (control table, header
   comment), `client/src/components/jira/JiraDeliveryTab.tsx` (the one renderer of `NextRow`: thread `onReviewSkill(skillId, mr, repos)` beside
   `onReview`, and on up to wherever `onReview` opens the launch sheet — follow `onReview`'s callers)
-- Modify (composer count): `.claude/rules/board.md` ~25, `client/src/hooks/useDialogEscape.ts` ~52, `test/guards/dialog-count-docs.test.ts:114`
+- Modify (composer count): `.claude/rules/board.md` ~25, `client/src/hooks/useDialogEscape.ts` ~52, `test/guards/dialog-count-docs.test.ts:114`,
+  `docs/subsystems/invariants.md` ~2328 (unguarded prose copy)
 - Create: `client/src/components/jira/ReviewMenu.tsx` (the `ui/Popover` menu, `label="Review menu"`)
 - Test: `test/jira/jira-delivery-tab.test.tsx` (and `jira-delivery-pane.test.tsx` where it already covers the split)
 
@@ -249,8 +251,8 @@ taken.
   - gate held (live run link on KEY): chevron, ghost and skill rows disabled with the gate sentence as title; ghost reason line ends ` — Review waits until it
     ends or you stop it.`; split reason line unchanged.
   - hidden when agents off / no candidate repo / no `onReview` (each).
-  - Escape closes the menu only (it is a `ui/Popover`; add it to the composer lists in `board.md` ~line 25 and `client/src/hooks/useDialogEscape.ts` ~52, "ten composers" →
-    eleven, and update `test/guards/dialog-count-docs.test.ts:114`'s `/ten composers/` to match).
+  - Escape closes the menu only (it is a `ui/Popover`; add it to the composer lists in `board.md` ~line 25 and `client/src/hooks/useDialogEscape.ts` ~52 and `docs/subsystems/invariants.md`
+    ~2328, "ten composers" → eleven, and update `test/guards/dialog-count-docs.test.ts:114`'s `/ten composers/` to match).
 - [ ] **Step 2–4:** fail, implement, pass; run source guards for `reviewGate`, `ReviewSplit`, `skillCommand`, `JiraRunMenu` (`grep -l` in `test/`), plus
   `test/guards/dialog-count-docs.test.ts` and the `claude-rules` guard.
 - [ ] **Step 5:** commit `feat(jira): Review ▾ offers review skills on each open MR`.
