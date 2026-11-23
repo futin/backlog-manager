@@ -67,7 +67,7 @@ for every one inside this turn. Each dispatch carries:
 - `item file path` — `<item>`, when the caller has an item;
 - `item checks: yes` — group 1 only, and only when there is an item;
 - `earlier findings` — this group's `earlier` entries, each as `<id> — <path>:<line> — <severity>: <text>` (no location for an item-level
-  one) with its `anchor:` line, or `none`. An earlier Minor (an incremental review carries open Minors forward) is
+  one) with its `anchor:` line, or `none`. An earlier Minor (an incremental review and a §5 `--previous` round carry open Minors forward) is
   `<id> — <path>:<line> — Minor [<kind>]: <text>` with no `anchor:` line;
 - `outcome: none` — when `outcome` is `none` and there is an item.
 
@@ -141,7 +141,9 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-review/tools/review.mjs" scope --tree
 
 `<the latest manifest>` is the manifest of the round just merged (each round gets its own `report`, so its own manifest beside it). `scope` keeps that
 round's groups and each group's model and effort, puts any newly changed file in group 1, hands every finding the round left open to a group to re-check,
-and marks each group `rerun: true` (group 1, and every group a fix touched) or `false`. Then §2 for the `rerun` groups only, and §3 with the other groups'
+carries the round's open Minors forward from the branch's state (one in a file the fix touched goes to its group when that group re-runs, one the fix
+deleted is dropped, every other one is carried as it was), and marks each group `rerun: true` (group 1, and every group a fix touched) or `false`.
+Then §2 for the `rerun` groups only, and §3 with the other groups'
 latest reports passed as `--carried <report>` — they count for coverage, while their findings come back through the re-run groups as earlier findings —
 and §4 if anything is uncovered, and §4b.
 

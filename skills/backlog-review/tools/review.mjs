@@ -477,8 +477,11 @@ function assignEarlier(groups, findings, config, owns = () => true) {
 // to be marked resolved or open like any earlier finding; everything else is carried open without a reviewer (`carriedMinor`) — and, unlike
 // `assignEarlier`, never to group 1 and never into a group 1 created for it: a Minor cannot change the verdict, so dispatching a reviewer only to re-read one
 // would buy nothing. A rename moves the Minor with its file (same line — the best guess there is); a deletion drops it, because the code it named is gone,
-// and `merge` counts those (`droppedMinor`) as resolved. Mutates `groups`' `earlier`; returns { carriedMinor, droppedMinor }.
-function splitCarriedMinor(groups, files, minor) {
+// and `merge` counts those (`droppedMinor`) as resolved. `files` is the increment since the review that left the Minors open — the scoped diff itself in
+// incremental mode, the fix commit's own diff under `--previous` — and `owns` is `assignEarlier`'s: under `--previous` only a re-running group may take a
+// Minor, so one in a group that does not re-run is carried rather than handed to a reviewer nobody dispatches. Mutates `groups`' `earlier`; returns
+// { carriedMinor, droppedMinor }.
+function splitCarriedMinor(groups, files, minor, owns = () => true) {
   const renamed = new Map(files.filter((f) => f.status === 'R' && f.oldPath !== null).map((f) => [f.oldPath, f.path]));
   const byFile = new Map(files.map((f) => [f.path, f]));
   const carriedMinor = [];
@@ -486,7 +489,7 @@ function splitCarriedMinor(groups, files, minor) {
   for (const original of minor) {
     const m = original.path !== null && renamed.has(original.path) ? { ...original, path: renamed.get(original.path) } : original;
     const file = m.path === null ? undefined : byFile.get(m.path);
-    const owner = file?.decision === 'review' ? groups.find((grp) => grp.files.includes(m.path)) : undefined;
+    const owner = file?.decision === 'review' ? groups.find((grp) => owns(grp) && grp.files.includes(m.path)) : undefined;
     if (file?.decision === 'skip' && file.reason === 'deleted') droppedMinor.push(m);
     else if (owner) owner.earlier.push(m);
     else carriedMinor.push(m);
@@ -695,12 +698,21 @@ function scopeCommand(args) {
   }
   const files = listFiles(top, from, to, item);
   let groups;
-  // Only an incremental review carries Minors: a full one re-reads every file, so an earlier Minor is re-found fresh or not at all, and a `--previous` fix
-  // loop's gate never offers a Minor fix. Both lists are always present, `[]` when nothing is carried.
+  // A fresh full review carries no Minors: it re-reads every file, so an earlier Minor is re-found fresh or not at all. An incremental review and a
+  // `--previous` fix-loop round both carry them — the latter because its `merge` rewrites the branch's state, and a round that carried nothing would leave
+  // only its own fresh Minors there, losing every earlier one for good (#589). Both lists are always present, `[]` when nothing is carried.
   let carry = { carriedMinor: [], droppedMinor: [] };
   if (previous !== null) {
     groups = previousGroups(top, previous.manifest, to, files, item !== null, config);
     groups = assignEarlier(groups, previous.findings, config, (grp) => grp.rerun);
+    // The previous round's open Minors are in the branch's state, not its findings file (that holds Critical/Important only) — and only while the state
+    // is that round's own: its `to` is the previous manifest's. Any other state (none, a detached HEAD, a later or unrelated review recorded there) says
+    // nothing about this loop, so nothing is carried from it. They are split over the fix commit's own increment, exactly as an incremental review splits
+    // them: touched in a re-running group → re-checked, untouched → carried as they were, deleted → dropped.
+    const prior = readState(stateFile);
+    if (prior !== null && prior.to === previous.manifest.to) {
+      carry = splitCarriedMinor(groups, listFiles(top, previous.manifest.to, to, item), prior.minor, (grp) => grp.rerun);
+    }
   } else {
     groups = groupFiles(files, item !== null, config);
     if (mode === 'incremental') {
@@ -1049,7 +1061,15 @@ function mergeCommand(args) {
   // A Critical/Important the check refuted joins this round's fresh Minors as a `bug` — the safe side, as for an untagged Minor — and takes an `M` id like
   // every other Minor, so it carries and resolves the same way; the `## Checks` section still names it by the `F` id it was checked under.
   const refutedMinor = demoted.map(({ evidence, ...f }) => ({ ...f, kind: 'bug' }));
-  const freshMinor = [...live.flatMap((r) => r.minor), ...refutedMinor].sort(byKind).map(({ anchor, id: _, ...f }) => ({ id: `M${nextMinor++}`, ...f }));
+  // A fresh Minor at the `path:line` of one still open from an earlier round is that Minor re-found — a `--previous` round's reviewer re-reads its groups'
+  // whole files, so it meets every earlier Minor in them again (#589) — and the earlier entry, id and all, is the one kept. A location-less Minor has no
+  // line to match on, so it is never merged away.
+  const at = (f) => (f.path !== null && f.line !== null ? `${f.path}:${f.line}` : null);
+  const openAt = new Set([...openEarlierMinor, ...carriedMinor].map(at).filter(Boolean));
+  const freshMinor = [...live.flatMap((r) => r.minor), ...refutedMinor]
+    .filter((f) => !openAt.has(at(f)))
+    .sort(byKind)
+    .map(({ anchor, id: _, ...f }) => ({ id: `M${nextMinor++}`, ...f }));
   const minorOpen = [...openEarlierMinor, ...carriedMinor].map((f) => ({ ...f, kind: MINOR_KINDS.includes(f.kind) ? f.kind : 'bug', earlier: true }));
   minorOpen.push(...freshMinor);
   minorOpen.sort(byKind);
