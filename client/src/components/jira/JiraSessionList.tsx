@@ -6,7 +6,7 @@ import { useJiraListFilters } from '../../hooks/useJiraListFilters';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 import { useAction } from '../../hooks/useAction';
 import { useNarrow } from '../../hooks/useNarrow';
-import { openDesktopJira, repoBasename, runChipState, type JiraChildrenIndex } from '../../lib/jira';
+import { openDesktopJira, runChipState, type JiraChildrenIndex } from '../../lib/jira';
 import {
   LIST_CHIPS,
   DEFAULT_LIST_WINDOW,
@@ -24,6 +24,7 @@ import {
 import { openButtons, runLabel, stripTitle, surfaceWord } from '../../lib/jira-sessions';
 import type { JiraPage } from '../../lib/jira-page';
 import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
+import { projectLabel } from '../../lib/project-label';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
@@ -370,8 +371,8 @@ function ListRowView({
         </div>
       </td>
       <td className="jira-list-run" title={run === '' ? undefined : run}>{run}</td>
-      <td className="jira-list-repo" title={row.branch !== null && row.branch !== '' ? `${repoBasename(row.repo)} · ${row.branch}` : repoBasename(row.repo)}>
-        <span>{repoBasename(row.repo)}</span>
+      <td className="jira-list-repo" title={row.branch !== null && row.branch !== '' ? `${projectLabel(row.repo)} · ${row.branch}` : projectLabel(row.repo)}>
+        <span>{projectLabel(row.repo)}</span>
         {row.branch !== null && row.branch !== '' && <span className="jira-list-branch">{row.branch}</span>}
       </td>
       <td>{where ?? '—'}</td>

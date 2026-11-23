@@ -1,9 +1,9 @@
-import { polledPhrase, repoBasename } from './jira';
 import type { StateTone } from './tones';
 import { ignoreHolds } from './ignored-steps';
 import type { IgnoreEntry } from './ignored-steps';
 import { reviewStepWord } from './review-copy';
-import { pollAge } from './tracker';
+import { pollAge, polledPhrase } from './tracker';
+import { projectLabel } from './project-label';
 import { reviewState } from '../../../shared/review';
 import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, JiraIssue } from '../../../shared/types';
 
@@ -199,7 +199,7 @@ export function ticketDelivery(issue: JiraIssue, index: DeliveryIndex): TicketDe
  * it; it lives here rather than in the pane so a second surface naming an MR's repo cannot call it something else.
  */
 export function mrRepo(mr: GitlabMr, index: DeliveryIndex): string {
-  return index.byPath.get(mr.project)?.repo ?? repoBasename(mr.project);
+  return index.byPath.get(mr.project)?.repo ?? projectLabel(mr.project);
 }
 
 /** The palette a delivery look draws from (spec §7, "Tones") — names, not colours: the surfaces map each to `shared/theme.css` tokens. */

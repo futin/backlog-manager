@@ -16,10 +16,11 @@ import type { JiraMentionsWrite, JiraReplyWrite } from '../../hooks/useJiraMenti
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { useNarrow } from '../../hooks/useNarrow';
 import { elapsedSince } from '../../lib/item-age';
-import { fetchJiraDetail, initialsOf, repoBasename, statusTone, typeTone } from '../../lib/jira';
+import { fetchJiraDetail, initialsOf, statusTone, typeTone } from '../../lib/jira';
 import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, replyMarkdown, replyTo, threadFold } from '../../lib/jira-mentions';
 import { openButtons } from '../../lib/jira-sessions';
 import { renderMarkdown } from '../../lib/markdown';
+import { projectLabel } from '../../lib/project-label';
 import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
@@ -387,12 +388,12 @@ export function JiraMentionModal({
               <span className="jira-reply-repo">
                 <span className="jira-reply-repo-lbl">Repo</span>
                 {session !== null ? (
-                  <span className="jira-reply-repo-name">{repoBasename(session.repo)}</span>
+                  <span className="jira-reply-repo-name">{projectLabel(session.repo)}</span>
                 ) : repos.length > 0 && repo !== null ? (
                   <Select<string>
                     label="Repository"
                     value={repo}
-                    options={repos.map((r) => ({ value: r, label: repoBasename(r) }))}
+                    options={repos.map((r) => ({ value: r, label: projectLabel(r) }))}
                     onChange={setPickedRepo}
                     disabled={busy}
                   />

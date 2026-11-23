@@ -2,9 +2,8 @@ import type { ReactNode } from 'react';
 
 import { useDeliveryIndex } from '../../hooks/useDeliveryIndex';
 import { deliveryLook, mrRepo, type DeliveryNext, type TrackStep } from '../../lib/delivery';
-import { polledPhrase } from '../../lib/jira';
 import { reviewStepTitleSuffix, reviewStepWord } from '../../lib/review-copy';
-import { pollAge } from '../../lib/tracker';
+import { pollAge, polledPhrase } from '../../lib/tracker';
 import type { GitlabMr, JiraIssue } from '../../../../shared/types';
 import { DeliveryTrack } from '../ui/DeliveryTrack';
 

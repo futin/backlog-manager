@@ -1,6 +1,7 @@
 import { STATE_LABEL } from '../../../shared/jira-sessions';
 import type { JiraIssue, JiraSessionsPayload } from '../../../shared/types';
-import { fetchJiraDetail, repoBasename } from './jira';
+import { fetchJiraDetail } from './jira';
+import { projectLabel } from './project-label';
 import { ticketSessions, type SessionLink } from './jira-sessions';
 
 /**
@@ -104,5 +105,5 @@ export function parentLiveLine(issue: JiraIssue, payload: JiraSessionsPayload | 
 
 /** `Parent P-1 · Working · microservice →` — the line's words: the parent's key, the lead session's state label and its repo's last segment (spec §4.3). */
 export function parentLineText(parentKey: string, lead: SessionLink): string {
-  return `Parent ${parentKey} · ${STATE_LABEL[lead.state]} · ${repoBasename(lead.repo)} →`;
+  return `Parent ${parentKey} · ${STATE_LABEL[lead.state]} · ${projectLabel(lead.repo)} →`;
 }

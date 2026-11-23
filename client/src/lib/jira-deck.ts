@@ -1,6 +1,7 @@
 import { needsYou, type JiraSessionState } from '../../../shared/jira-sessions';
 import type { JiraIssue, JiraLiveSession, JiraParentRef, JiraSessionsPayload, JiraSkillGroup } from '../../../shared/types';
-import { repoBasename, type JiraLanes } from './jira';
+import type { JiraLanes } from './jira';
+import { projectLabel } from './project-label';
 import { runLabel, surfaceWord, type SessionLink } from './jira-sessions';
 import { pollAge } from './tracker';
 
@@ -163,9 +164,9 @@ export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name:
   if (link !== null) {
     const row = link.row;
     const model = [row?.model ?? link.model, row?.effort ?? link.effort].find((p) => p !== null && p !== undefined && p !== '');
-    parts.push(runLabel(link, skills), repoBasename(link.repo), surfaceWord(link, row), model ?? null);
+    parts.push(runLabel(link, skills), projectLabel(link.repo), surfaceWord(link, row), model ?? null);
   } else if (starting !== null) {
-    parts.push(starting.name, repoBasename(starting.repo));
+    parts.push(starting.name, projectLabel(starting.repo));
   }
   return parts.filter((p): p is string => p !== null && p !== '').join(' · ');
 }

@@ -9,6 +9,7 @@ import {
   itemSyncOff,
   pollAge,
   pollProgress,
+  polledPhrase,
   queuedReading,
   remoteBadge,
   resetClock,
@@ -76,6 +77,19 @@ describe('pollAge', () => {
 
   it('clamps a stamp from the future rather than going negative', () => {
     expect(pollAge('2026-09-18T12:00:30Z', NOW)).toBe('0 s');
+  });
+});
+
+// The sentence half every poll line shares (#600 moved it here from lib/jira.ts, beside the age it wraps, so lib/delivery.ts no longer imports lib/jira.ts).
+describe('polledPhrase', () => {
+  it('says not polled yet for no stamp', () => {
+    expect(polledPhrase(null, NOW)).toBe('not polled yet');
+    expect(polledPhrase('', NOW)).toBe('not polled yet');
+  });
+
+  it('wraps the age, and says last polled for Setup’s off-board wording', () => {
+    expect(polledPhrase('2026-09-18T11:59:48Z', NOW)).toBe('polled 12 s ago');
+    expect(polledPhrase('2026-09-18T11:59:48Z', NOW, true)).toBe('last polled 12 s ago');
   });
 });
 

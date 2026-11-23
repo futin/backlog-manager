@@ -1,8 +1,8 @@
-import type { DeliveryFilter } from './delivery';
+import { DELIVERY_FILTER_LABELS, type DeliveryFilter } from './delivery';
 import type { Settings } from './settings';
 import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
-import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
+import { countdownReading, pollAge, pollProgress, polledPhrase, type PollReading } from './tracker';
 import { serviceTone } from './service-status';
 import type { StateTone } from './tones';
 import { runBlockPhrase, runYields } from '../../../shared/jira-sessions';
@@ -641,15 +641,6 @@ export function browseUrl(site: string, key: string): string | null {
 }
 
 /**
- * The age half of a poll sentence: `polled 12 s ago`, or `not polled yet`. `last` is Setup's off-board wording, where the poll is history. Exported for
- * the chip popover, so a board's age is worded once across the Band, Setup and the chip.
- */
-export function polledPhrase(polledAt: string | null, now: number, last = false): string {
-  const age = pollAge(polledAt, now);
-  return age === null ? 'not polled yet' : `${last ? 'last polled' : 'polled'} ${age} ago`;
-}
-
-/**
  * What the last sweep could not read, as one phrase: Jira's own message for the FIRST failure, `+N more` when there are several. `null` when there is
  * nothing to say. The one derivation behind the Band's red sub-line and the Setup row's red failure — Jira's sentence ("Field 'foo' does not exist") is
  * the one a person can act on, and two surfaces must not word one failure two ways.
@@ -897,8 +888,11 @@ export type JiraPanelFilters = Omit<JiraBoardFilters, 'search'>;
 
 export const NO_JIRA_PANEL_FILTERS: JiraPanelFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], delivery: 'all' };
 
-/** The stored `delivery` values `clampJiraPanelFilters` accepts — a literal list because `lib/delivery.ts` imports this file, and a value import back would cycle. */
-const DELIVERY_VALUES: readonly DeliveryFilter[] = ['all', 'has-mr', 'failing', 'done-not-merged', 'review-open'];
+/**
+ * The stored `delivery` values `clampJiraPanelFilters` accepts: the keys of the labels table both Delivery controls draw, so a value the UI offers is a
+ * value the clamp keeps. Read from `lib/delivery.ts` since #600 broke the import cycle that once made this a hand-kept literal copy.
+ */
+const DELIVERY_FILTERS = Object.keys(DELIVERY_FILTER_LABELS) as DeliveryFilter[];
 
 /**
  * The per-browser key holding the panel filters (`usePersistedState`, so the value is JSON). ONE key for every board, not one per board: a pick already
@@ -919,7 +913,7 @@ export function clampJiraPanelFilters(v: unknown): JiraPanelFilters {
     assignee: o.assignee === 'me' || o.assignee === 'unassigned' ? o.assignee : 'anyone',
     sprint: typeof o.sprint === 'string' || o.sprint === null ? o.sprint : undefined,
     statuses: Array.isArray(o.statuses) ? o.statuses.filter((s): s is string => typeof s === 'string') : [],
-    delivery: DELIVERY_VALUES.find((d) => d === o.delivery) ?? 'all'
+    delivery: DELIVERY_FILTERS.find((d) => d === o.delivery) ?? 'all'
   };
 }
 
@@ -1099,12 +1093,6 @@ function runHold(key: string, status: Pick<JiraStatusPayload, 'live'>, sessions:
     if (!runYields(l, l.row, sessions.reachable)) return runBlockPhrase(l, l.row, sessions.reachable) ?? 'not quiet yet';
   }
   return null;
-}
-
-/** The last segment of an absolute path, trailing slashes ignored: `/Users/ada/pay` → `pay`. The strip names a session's repo this short way (spec §6.2). */
-export function repoBasename(path: string): string {
-  const segments = path.split('/').filter((seg) => seg !== '');
-  return segments.length === 0 ? path : segments[segments.length - 1];
 }
 
 /** The slash command a skill's prompt opens with (`/jira-groom {key}` → `/jira-groom`) — the menu's quiet right-hand hint — or `null` for a prompt that is prose. */
