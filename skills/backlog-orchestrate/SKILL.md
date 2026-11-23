@@ -922,7 +922,7 @@ echo $! > "<dir>/verify/<id>.pid"
 **All four lines in one Bash call**, and the `rm -f` in particular must never be skipped or split off — see the first detail below for what it is actually
 preventing.
 
-**Detached, for the same reason the session in step 4 is.** A baseline suite is the one step in this loop with no upper bound, and a Bash call cannot outlive
+**Detached, for the same reason the session in step 4 is.** A baseline suite is the longest step in this loop — `verify` kills only a command past an hour — and a Bash call cannot outlive
 ten minutes. Run inline, a suite that outruns the call is killed mid-flight and `verify` writes no exit code at all — an undefined state at the merge gate,
 unattended. Detached, the ten-minute ceiling applies only to the polling, which is built to be re-called. (`references/rationale.md`, §8.)
 

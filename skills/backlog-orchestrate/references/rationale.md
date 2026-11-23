@@ -227,8 +227,9 @@ would have, from the run file alone.
 
 ### Why the verification is detached rather than run inline
 
-A project's whole baseline suite is the one step in this loop with no upper bound — `pnpm test` plus a typecheck plus a build is minutes on a small repo and
-much more on a large one — and a Bash call cannot outlive ten minutes even with its timeout at the maximum. Run inline, a suite that outruns the call is killed
+A project's whole baseline suite is the longest step in this loop — `pnpm test` plus a typecheck plus a build is minutes on a small repo and much more on a
+large one, and `verify` bounds each command only at an hour (#585: the bound exists to end a command that never exits, not to judge a slow one) — and a Bash
+call cannot outlive ten minutes even with its timeout at the maximum. Run inline, a suite that outruns the call is killed
 mid-flight, and `verify` has then written nothing and returned no exit code this section has a branch for: an undefined state at the merge gate, in an
 unattended loop, which is the one place this design cannot afford one. Detached, the ceiling stops applying to the suite and applies only to the polling, which
 is built to be re-called.
