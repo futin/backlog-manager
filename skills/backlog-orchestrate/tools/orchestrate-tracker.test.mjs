@@ -6,12 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   TRACKER_POLL_WINDOW_MS,
+  pullBaseArgs,
+  pullFailure,
   trackerPollAgeText,
   trackerRetryDelayMs
 } from './orchestrate.mjs';
@@ -48,6 +51,7 @@ import {
 // and stubbing its transport would test the stub.
 
 const API_CALL_SCRIPT = fileURLToPath(new URL('./api-call.mjs', import.meta.url));
+const STREAM_NOINIT = fileURLToPath(new URL('./fixtures/stream-noinit.jsonl', import.meta.url));
 const UNGROOMED_TASK_BODY = '## Goal\n\nSomething.\n\n## Plan\n\n## Done when\n';
 
 // --- O-1: a files run never touches the API ---------------------------------
@@ -169,6 +173,96 @@ test('api-call.mjs exits 3 for a non-2xx and still writes the body to stdout', a
   assert.equal(out.status, 3);
   assert.deepEqual(JSON.parse(out.stdout), { error: 'held', holder: { session: 'B' } });
   assert.match(out.stderr, /409/);
+});
+
+// --- #586: no request to the API can hold a command forever ----------------
+//
+// Before #586 neither `api-call.mjs` nor the `spawnSync` that runs it had a bound, so an API that took the socket and never answered held the driver's
+// Bash call for as long as the hang lasted. These cases dial a server that answers nothing (or answers late) and shrink the 30 s bound through the
+// test-only `BM_API_CALL_TIMEOUT_MS`, so the proof takes milliseconds.
+
+/** A server that reads each request and answers `/api/items/heartbeat` after `delayMs` — or never, for `delayMs === null` — and 404s every other route. */
+async function stallingApi(t, delayMs) {
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      seen.push(new URL(req.url, 'http://127.0.0.1').pathname);
+      if (delayMs === null) return;
+      setTimeout(() => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      }, delayMs);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(resolve);
+      }),
+  );
+  return { port: server.address().port, seen };
+}
+
+// A regression here does not fail, it hangs — the defect is that nothing ends the wait — so each case carries node:test's own timeout and goes red.
+const HANG_BOUND_MS = 20_000;
+
+/** Sets an env var for the rest of one case. Safe because a file's cases run one after another (#390). */
+function envForCase(t, name, value) {
+  const was = process.env[name];
+  process.env[name] = value;
+  t.after(() => {
+    if (was === undefined) delete process.env[name];
+    else process.env[name] = was;
+  });
+}
+
+test('#586: api-call.mjs exits 6 when the API never answers, saying a write may have landed, with null on stdout', { timeout: HANG_BOUND_MS }, async (t) => {
+  const { port } = await stallingApi(t, null);
+  const out = await new Promise((resolve) => {
+    const proc = spawn('node', [API_CALL_SCRIPT, 'POST', '/api/items/heartbeat', '{}'], {
+      env: { ...process.env, BM_API_PORT: String(port), BM_API_CALL_TIMEOUT_MS: '200' },
+    });
+    t.after(() => proc.kill('SIGKILL'));
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => (stdout += d));
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+
+  assert.equal(out.status, 6, out.stderr);
+  assert.equal(out.stdout.trim(), 'null');
+  assert.match(out.stderr, /did not answer POST \/api\/items\/heartbeat/);
+  assert.match(out.stderr, /may have landed/);
+});
+
+test('#586: a command whose API call times out exits 9, never 8, and names the request', { timeout: HANG_BOUND_MS }, async (t) => {
+  const { home, project } = trackerFixture(t);
+  const { port } = await stallingApi(t, null);
+  envForCase(t, 'BM_API_CALL_TIMEOUT_MS', '200');
+
+  const init = await runApi(project, home, port, 'init', '--project', project);
+  assert.equal(init.status, 9, init.stderr);
+  assert.match(init.stderr, /did not answer GET/);
+  assert.match(init.stderr, /may have landed/);
+  assert.equal(fs.existsSync(runFile(home, project)), false);
+});
+
+test('#586: watch keeps its budget in wall time, so a slow heartbeat cannot stretch it', { timeout: HANG_BOUND_MS }, async (t) => {
+  const { home, project } = await seededTrackerRun(t, [{ id: '3', stage: 'dispatched', claim: 11 }]);
+  // Each heartbeat costs 700 ms against a 300 ms budget. Counting intervals slept, the old loop heartbeated three times (100 ms each against the budget)
+  // before it noticed; reading the clock, the first heartbeat alone spends the budget.
+  const { port, seen } = await stallingApi(t, 700);
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+  t.after(() => child.kill('SIGKILL'));
+
+  const out = await runApi(project, home, port, 'watch', '3', '--pid', String(child.pid), '--jsonl', STREAM_NOINIT, '--interval-ms', '100', '--budget-ms', '300');
+
+  assert.equal(out.status, 3, out.stderr);
+  assert.equal(seen.filter((p) => p === '/api/items/heartbeat').length, 1);
 });
 
 // --- G-1 / G-2: the tracker gate --------------------------------------------
@@ -552,6 +646,30 @@ test('a files queue preview says nothing about a tracker cache', async (t) => {
 });
 
 // --- G-3 / G-4: init's pull, and the API being down -------------------------
+
+test('#586: the init pull carries a timeout and never prompts for credentials', () => {
+  const { args, options } = pullBaseArgs('/some/tree', 'main');
+  assert.deepEqual(args, ['-C', '/some/tree', 'pull', '--ff-only', 'origin', 'main']);
+  assert.ok(Number.isFinite(options.timeout) && options.timeout > 0, `timeout must be a positive number, got ${options.timeout}`);
+  assert.equal(options.env.GIT_TERMINAL_PROMPT, '0');
+});
+
+test('#586: a pull that timed out or died on a signal refuses init with its own sentence, not the fast-forward one', () => {
+  const timedOut = pullFailure('/t', 'main', { status: null, signal: 'SIGTERM', error: Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }) });
+  assert.equal(timedOut.code, 1);
+  assert.match(timedOut.message, /did not finish within 60 s/);
+  assert.doesNotMatch(timedOut.message, /fast-forward/);
+
+  const killed = pullFailure('/t', 'main', { status: null, signal: 'SIGKILL', stderr: '' });
+  assert.match(killed.message, /did not finish/);
+
+  const diverged = pullFailure('/t', 'main', { status: 1, signal: null, stderr: 'fatal: Not possible to fast-forward, aborting.\n' });
+  assert.equal(diverged.code, 1);
+  assert.match(diverged.message, /cannot fast-forward onto/);
+  assert.match(diverged.message, /Not possible to fast-forward/);
+
+  assert.equal(pullFailure('/t', 'main', { status: 0, signal: null, stdout: 'Already up to date.\n' }), null);
+});
 
 test('init refuses when the base cannot fast-forward onto origin, and writes nothing', async (t) => {
   const { home, project } = trackerFixture(t);

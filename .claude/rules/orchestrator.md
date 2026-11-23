@@ -55,7 +55,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `mergeStateStatus` of `BLOCKED` or `BEHIND`, elsewhere only once every check has concluded green, since gh merges an already-mergeable PR at once. GitHub
   performs the merge into the base, behind its own branch protection; the `--fix` loop's `git merge origin/<base>` is a merge into the PR's own branch, never
   into a base. The orchestrator's push half is task-47's
-  and is exactly three commands, none of them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree,
+  and is exactly three commands, none of them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree (and
+  once at `init`, bounded at 60 s with terminal prompts off),
   `push origin <base>` after each merge and
   before `stage <n> merged`, and `push -u origin backlog/<n>` from the item worktree under branch mode. **A rejected or classifier-denied push PARKS, never
   degrades** — the merge has already landed, so `branched` would be false — which is the one exception to the classifier-denial rule. PR mode pushes its run

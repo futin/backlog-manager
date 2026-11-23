@@ -72,6 +72,17 @@ const CLAIM_LIVE_MS = 15 * 60 * 1000;
 // `gh pr list`'s ceiling, asked for explicitly because gh's default is 30. A result that REACHES it may have been cut, so it cannot be a count.
 const GH_PR_LIMIT = 500;
 
+// `gh pr list`'s bound (#586). It had none: a stalled GitHub, or a `gh` waiting on a prompt, held `decide` — and so the scheduled step — for as long as the
+// stall lasted, while every API read beside it was already bounded by `API_TIMEOUT_MS`. The same 15 s, because it is the same kind of read. A timed-out
+// `gh` is one more way the count cannot be trusted, so it lands in the `null` branch `openExecutePrs` already has, and execute is capped. `BM_GH_TIMEOUT_MS`
+// exists for the tests alone, read per call and ignored unless it is a positive integer.
+const GH_TIMEOUT_MS = 15_000;
+
+function ghTimeoutMs() {
+  const raw = Number(process.env.BM_GH_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw > 0 ? raw : GH_TIMEOUT_MS;
+}
+
 const MARKER = '[backlog-tick]';
 
 // Twin: `SECTIONS` in skills/backlog/tools/backlog.mjs — the directory under `backlog/` and the id prefix its files carry.
@@ -280,10 +291,17 @@ function markerRepo(root) {
 // --- open execute PRs ----------------------------------------------------
 
 // Every open PR whose head starts with `execute/` — hand-run `--finish pr` PRs included, because the cap is about the review pile, not who made it. `null` for
-// every way the count cannot be trusted: no `gh`, a non-zero exit, output that is not a JSON list, or a list that reached the limit and may have been cut.
-// The repo squash-merges, so a branch's merged state cannot be read from git alone, and no count is safer than a wrong one: execute is capped.
+// every way the count cannot be trusted: no `gh`, a non-zero exit, a `gh` killed at `GH_TIMEOUT_MS` (`r.error` is ETIMEDOUT), output that is not a JSON
+// list, or a list that reached the limit and may have been cut. The repo squash-merges, so a branch's merged state cannot be read from git alone, and no
+// count is safer than a wrong one: execute is capped. `GH_PROMPT_DISABLED` makes a `gh` that wants input fail at once instead of waiting on a terminal no
+// one is at.
 function openExecutePrs(root) {
-  const r = spawnSync('gh', ['pr', 'list', '--state', 'open', '--limit', String(GH_PR_LIMIT), '--json', 'headRefName'], { cwd: root, encoding: 'utf8' });
+  const r = spawnSync('gh', ['pr', 'list', '--state', 'open', '--limit', String(GH_PR_LIMIT), '--json', 'headRefName'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: ghTimeoutMs(),
+    env: { ...process.env, GH_PROMPT_DISABLED: '1' }
+  });
   if (r.error || r.status !== 0) return null;
   let list;
   try {

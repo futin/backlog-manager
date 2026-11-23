@@ -191,8 +191,9 @@ comment per file; `retro.mjs`'s is the long-form copy the others point at, and `
 
 `backlog.mjs` (task-46), `api-call.mjs` (task-47), `jira.mjs` (Jira phase 4) and `tick.mjs` (backlog-tick) end `process.exitCode = await main(...)`, and the
 rule is untouched by the `await`: it is `process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open
-when `main` returns. Each awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call — `tick.mjs`'s request
-timeout is an `AbortSignal.timeout`, an unref'd timer, and every child it runs is `spawnSync`; the source guard accepts the awaited form for those four files
+when `main` returns. Each awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call — the request
+timeouts of `tick.mjs`, `backlog.mjs` and `api-call.mjs` are each an `AbortSignal.timeout`, an unref'd timer, and every child `tick.mjs` runs is `spawnSync`;
+the source guard accepts the awaited form for those four files
 and still requires the synchronous one of `orchestrate.mjs`, `retro.mjs` and `review.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
 `CLI_SOURCES` is where the list of files lives, never a count in prose.
 
@@ -205,7 +206,7 @@ the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | the queue            | candidates from `GET /api/items` filtered to this project; bodies from `GET /api/items/body`; the UNCHANGED `gateItem` verdicts. No `<base>` read, so no "not committed on `<base>`" skip. `hoisted` reads the `runner-fix` LABEL. That index is the poller's CACHE, so (bug-41) a `--ids` entry it has not polled yet buys one re-read timed off `polledAt` before the refusal, and a whole-queue preview prints the cache's age on stderr |
 | ids                  | the BARE issue number (`31`). `--ids` accepts nothing else, naming the shape it wants                                                                 |
-| `init`               | `git pull --ff-only origin <base>` in the tree holding the base, BEFORE the queue is built. A failure refuses the init, nothing written                |
+| `init`               | `git pull --ff-only origin <base>` in the tree holding the base, BEFORE the queue is built, bounded at 60 s with terminal prompts off. A failure or a timeout refuses the init, nothing written |
 | the claim            | `stage <n> preflight` claims, and so does the first `stage` out of `parked` to a non-release stage (#250); every field-changing command heartbeats the state; a terminal stage releases with this run's bill, and so does `finish` for everything the run still holds on any status but `paused` — a `needs-answers` item's claim, say (reason `finished`, #240; `aborted` when `abort` ends the run, bug-40); `stage <n> merged --outcome <file>` closes the issue |
 | publishing (task-48) | `finish` stamps `finished` on the last-touched claimed item; `attention` posts a `bm:attention` comment with an `@mention`; `heartbeat` heartbeats every held claim — all best-effort, one stderr line on failure |
 | `orchestrator:queued` (task-52) | `init` adds the label to every queue item as built, within `--max`; a skip removes it from an item never claimed; `finish` and `--abort` sweep every never-claimed item. All through `POST /api/items/queue`, all advisory: a refusal is one stderr line per item, the API down is ONE line for the batch, and no exit code moves. A won claim removes it server-side, so a claimed item needs nothing here |

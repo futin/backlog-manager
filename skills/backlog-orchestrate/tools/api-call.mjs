@@ -38,8 +38,12 @@
 //      two commands `backlog.mjs` names for the same condition, because a
 //      person who sees this has one thing to do and it should read the same
 //      from every tool that says it.
+//   6  the API took the request and did not answer within API_CALL_TIMEOUT_MS
+//      (#586). Stdout is `null`. Distinct from `5` because the fix is not the
+//      same: something IS listening, and a write may already have landed, so
+//      the caller re-reads before it retries rather than starting the stack.
 //
-// Those three codes are PRIVATE to this file. `orchestrate.mjs` maps them onto
+// Those four codes are PRIVATE to this file. `orchestrate.mjs` maps them onto
 // its own exit vocabulary (`8` for the stack being down, `9` for an API
 // refusal a command cannot absorb) before anything else sees them, because `3`
 // and `5` already mean "budget elapsed" and "nothing to verify" there, and
@@ -52,9 +56,12 @@
 // and asynchrony has nothing to do with it. What the rule actually requires is
 // that nothing hold the event loop open when `main` returns. This file makes
 // exactly one `fetch`, awaits it to completion, and sends `connection: close`
-// so no pooled socket outlives the call; there is no timer, no server and no
-// child process anywhere in it. The same argument `backlog.mjs` records for
-// its own awaited guard, for the same reason.
+// so no pooled socket outlives the call; there is no server and no child
+// process anywhere in it. Its one timer is `AbortSignal.timeout`'s, which
+// Node creates unref'd, so it cannot hold the loop open after `main` returns
+// either — and it is the reason a stuck API cannot hold this child, and the
+// synchronous parent reaping it, forever (#586). The same argument
+// `backlog.mjs` records for its own awaited guard, for the same reason.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -70,6 +77,31 @@ function apiBase() {
 }
 
 const USAGE = 'usage: api-call.mjs <METHOD> <path> [<json body> | -]';
+
+// How long one request may take, body included (#586). Before this there was no bound at all: a server that accepted the socket and never answered — a
+// wedged event loop, a GitHub call hung behind a route — held this child, and so `orchestrate.mjs`'s `spawnSync`, and so the driver's Bash call, for as long
+// as the hang lasted. 30 s is far past any answer the API gives in health (its own outbound GitHub calls are bounded tighter than that) and short enough
+// that `watch`'s eight-minute budget survives a hung heartbeat. `BM_API_CALL_TIMEOUT_MS` exists for the tests alone, so a case can prove the bound in
+// milliseconds; it is read per call and ignored unless it is a positive integer.
+const API_CALL_TIMEOUT_MS = 30_000;
+const EXIT_TIMEOUT = 6;
+
+function callTimeoutMs() {
+  const raw = Number(process.env.BM_API_CALL_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw > 0 ? raw : API_CALL_TIMEOUT_MS;
+}
+
+// The one sentence a timeout prints, for a write and a read alike: this child cannot tell which routes are idempotent, and "re-read before retrying" is
+// harmless advice for a read.
+function timeoutText(method, requestPath) {
+  return (
+    `the backlog-manager API did not answer ${method} ${requestPath} within ${Math.round(callTimeoutMs() / 1000)} s — ` +
+    'a write may have landed; re-read before retrying'
+  );
+}
+
+// `AbortSignal.timeout` rejects with a DOMException named `TimeoutError`; anything else reaching a catch below is a transport failure.
+const isTimeout = (e) => e !== null && typeof e === 'object' && e.name === 'TimeoutError';
 
 async function main(argv) {
   const [method, requestPath, bodyArg] = argv;
@@ -95,10 +127,13 @@ async function main(argv) {
     body = bodyArg;
   }
 
+  // One signal for the whole exchange, so a server that sends headers and then stalls the body is bounded by the same clock as one that never answers.
+  const signal = AbortSignal.timeout(callTimeoutMs());
   let res;
   try {
     res = await fetch(`${apiBase()}${requestPath}`, {
       method,
+      signal,
       // No `Origin` header, deliberately: `SameOriginPostGuard` allows an
       // absent origin — a non-browser caller cannot forge its way past a check
       // a browser enforces — and sending a made-up one would be this file
@@ -106,7 +141,12 @@ async function main(argv) {
       headers: body === undefined ? { connection: 'close' } : { 'content-type': 'application/json', connection: 'close' },
       body
     });
-  } catch {
+  } catch (e) {
+    if (isTimeout(e)) {
+      process.stdout.write('null\n');
+      console.error(timeoutText(method, requestPath));
+      return EXIT_TIMEOUT;
+    }
     // Every transport failure reads the same: ECONNREFUSED for nothing
     // listening, a `TypeError` for a malformed base, EHOSTUNREACH for a
     // half-configured port. All three mean "there is no API here", which is
@@ -118,7 +158,15 @@ async function main(argv) {
     return 5;
   }
 
-  const text = await res.text();
+  let text;
+  try {
+    text = await res.text();
+  } catch (e) {
+    if (!isTimeout(e)) throw e;
+    process.stdout.write('null\n');
+    console.error(timeoutText(method, requestPath));
+    return EXIT_TIMEOUT;
+  }
   let payload = null;
   try {
     payload = text === '' ? null : JSON.parse(text);
@@ -150,7 +198,7 @@ function isMain(url) {
 // nothing — and `await main(...)` inside it, for which see this file's header:
 // the rule is about `process.exit()` truncating a pipe, and what it requires
 // is that nothing hold the event loop open. One awaited `fetch` with
-// `connection: close`, no timer, no server, no child of its own.
+// `connection: close`, one unref'd abort timer, no server, no child of its own.
 if (isMain(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2));
 }

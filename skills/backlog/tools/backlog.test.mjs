@@ -3734,8 +3734,8 @@ const codeLines = (file) =>
 // at all and stay on the synchronous form, so a stray `await` appearing in either of them still goes red here.
 //
 // `api-call.mjs` takes the awaited shape too (task-47), and its safety argument is its own rather than a copy of backlog.mjs's: it makes exactly ONE `fetch`,
-// awaits it to completion, sends `connection: close`, and holds no timer, server or child of its own. A-1 asserts it behaviourally from the other side — the
-// child is expected to EXIT with a code, not to hang.
+// awaits it to completion, sends `connection: close`, and holds no server or child of its own — its one timer is the unref'd
+// `AbortSignal.timeout` (#586). A-1 asserts it behaviourally from the other side — the child is expected to EXIT with a code, not to hang.
 //
 // `jira.mjs` (Jira phase 4) takes it for backlog.mjs's reason: one awaited `fetch` per request, each with `connection: close`, nothing else asynchronous. Its
 // suite's children are expected to exit too, and its RF 5 case pipes a 200 000-byte ticket through stdout whole.
@@ -4215,6 +4215,40 @@ test('API mode: nothing listening is exit 5, names the port and both start comma
   assert.match(out.stderr, /pnpm run dev/)
   assert.match(out.stderr, /pnpm run docker:up/)
   assert.equal(out.stdout, '')
+})
+
+// #586: an API that takes the request and never answers. Before the fix `fetch` had no bound, so these cases did not fail — they hung — which is why each
+// carries node:test's own timeout. `BM_API_TIMEOUT_MS` shrinks the 90 s bound so the proof takes milliseconds.
+async function withStallingApi(fn) {
+  const server = http.createServer((req) => req.resume())
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    return await fn(server.address().port)
+  } finally {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+  }
+}
+
+test('API mode: a read the API never answers is exit 6, says nothing was written, and prints nothing to stdout', { timeout: 20_000 }, async () => {
+  const { dir } = trackerFixture()
+  const out = await withStallingApi((port) => runNode(dir, apiEnv(port, { BM_API_TIMEOUT_MS: '200' }), 'board'))
+
+  assert.equal(out.status, 6, out.stderr)
+  assert.match(out.stderr, /did not answer GET \/api\/items/)
+  assert.match(out.stderr, /nothing was written/)
+  assert.equal(out.stdout, '')
+})
+
+test('API mode: a write the API never answers is exit 6, and says it may have landed with the show command to check', { timeout: 20_000 }, async () => {
+  const { dir } = trackerFixture()
+  const out = await withStallingApi((port) =>
+    runNode(dir, apiEnv(port, { BM_API_TIMEOUT_MS: '200', CLAUDE_CODE_SESSION_ID: 'sess-abc' }), 'start', '31', '--as', 'groom'),
+  )
+
+  assert.equal(out.status, 6, out.stderr)
+  assert.match(out.stderr, /did not answer POST \/api\/items\/claim/)
+  assert.match(out.stderr, /the write may have landed; run `show #31 --json` before retrying/)
 })
 
 test('API mode: a marker naming a kind this tool cannot write to is exit 1, and makes no request', async () => {

@@ -60,6 +60,10 @@ backlog-manager API running on this machine, which holds the credential. Nothing
 nobody else can see. A refused connection is **exit `5`**, naming the port and both ways to start the stack (`pnpm run dev`, `pnpm run docker:up`). Treat it
 exactly like exit `2` — a precondition to fix, not a backlog to report.
 
+**An API that takes the request and never answers is exit `6`**, after 90 s. Something is listening, so starting the stack is not the fix. A read (`board`,
+`show`) says `nothing was written` and can simply be run again. A write says `the write may have landed; run \`show <id> --json\` before retrying` — the
+server may have reached GitHub before it stalled, so read the item back and retry only what did not land. Never retry a write blind.
+
 **An item is `#31`.** `31`, `#31` and the full URN `gh:<owner>/<repo>#31` all name the same issue, so use whichever the context hands you; a file-shaped id
 (`task-31`) is refused with its own message, because in a tracker project there is no such thing. A URN naming a different repository is refused too.
 

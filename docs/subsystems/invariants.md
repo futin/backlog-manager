@@ -3157,7 +3157,8 @@ What `process.exit()` bought was a forced teardown even if something _were_ hold
 - **`api-call.mjs` (task-47) is the fourth file the guard reads, and the reason `orchestrate.mjs` can still say the above.** A tracker project needs `fetch`,
   which is asynchronous, so the asynchrony is exiled into a CHILD process that `orchestrate.mjs` runs with `spawnSync` and reaps before its own call returns.
   The parent stays synchronous by construction rather than by argument. The child itself takes the awaited entry shape, on its own safety argument: exactly one
-  `fetch`, awaited to completion, `connection: close`, no timer, no server and no child of its own. The title of this section says "every" rather than "all
+  `fetch`, awaited to completion, `connection: close`, no timer but the one unref'd `AbortSignal.timeout` that bounds that fetch and its body (#586), no
+  server and no child of its own. The title of this section says "every" rather than "all
   three" for that reason — the rule was never about a count, and `backlog.test.mjs`'s `CLI_SOURCES` is where the list lives.
 - **`jira.mjs` (Jira phase 4) is the fifth, and takes the awaited shape on `backlog.mjs`'s argument**: one awaited `fetch` per request, each with
   `connection: close`, and nothing else asynchronous. Its suite pipes a 200 000-byte ticket through `show`'s stdout and expects every byte.

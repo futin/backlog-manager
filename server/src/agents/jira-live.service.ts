@@ -33,6 +33,14 @@ export const JIRA_QUIET_MS = 120_000;
 /** The most Jira reads one tick spends confirming detected keys (spec §5): the rest wait for the next tick, so a first sweep over a long session list cannot burst. */
 export const JIRA_DETECT_READS_PER_TICK = 5;
 
+/**
+ * How long a pair whose `issueSummary` failed with anything but a 404 (a 5xx, 401, 429, a transport failure) is skipped before detection asks again (#586).
+ * Without it the failed pair was forgotten and re-read first on the very next tick, so five failing pairs at the head of the dashboard's row order spent the
+ * whole JIRA_DETECT_READS_PER_TICK budget every tick and no session behind them was ever reached. Long enough that a persistently failing pair stops eating
+ * the budget, short enough that a Jira that recovers links the session within minutes.
+ */
+export const JIRA_DETECT_RETRY_MS = 5 * 60_000;
+
 /** The two statuses that mean a session is still doing something — the test `ItemsAbortService` case B already makes, and for the same reason. */
 const ACTIVE = new Set(['working', 'question']);
 
@@ -85,6 +93,13 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
    * reach. Without it a shutdown during a slow dashboard call leaves a live timer behind `app.close()` — the same hazard `WatchdogService.stopped` documents.
    */
   private stopped = false;
+
+  /**
+   * When each `(key, session id)` pair last failed a detection read with anything but a 404, keyed `<key>\u0000<session id>` as `detect`'s `known` set is.
+   * Memory only, never written to `jira-links.json`: the failure is transient by definition, `neverLink` there means "never", and a restart retrying each pair
+   * once is the right answer. Pruned at the top of every `detect`, so it holds at most the pairs that failed in the last JIRA_DETECT_RETRY_MS.
+   */
+  private readonly failedAt = new Map<string, number>();
 
   constructor(
     private readonly live: JiraLiveService,
@@ -207,7 +222,8 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
    * that project (or in a linked worktree of one — `mainCheckoutOf`, a file read), is linked. It only ever ADDS: nothing here ends, edits or re-attaches a link,
    * so a session that moved on from `PAY-151-x` keeps its PAY-151 line. A pair already in the store (live or ended), unlinked by a person, or answered 404 before
    * is skipped without a read; every other pair costs one `issueSummary` — at most JIRA_DETECT_READS_PER_TICK a tick, in the dashboard's row order, so a long list
-   * drains over a few ticks. A 404 marks the pair never-link (the branch merely looks like a ticket); any other failure leaves it to the next tick.
+   * drains over a few ticks. A 404 marks the pair never-link (the branch merely looks like a ticket); any other failure parks the pair for
+   * JIRA_DETECT_RETRY_MS (`failedAt`, skipped before it costs budget), so a failing pair cannot spend the reads the pairs behind it are owed.
    *
    * A session that holds a `run` or `manual` link — live or ended, on any key — is never detected at all. A person named that session's ticket, and the branch
    * is only what the checkout held when it started: a Run launched without a worktree inherits whatever branch the last session left checked out, so detection
@@ -223,6 +239,8 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
     const known = new Set(links.map((l) => `${l.key}\u0000${l.sessionId}`));
     const named = new Set(links.filter((l) => l.how !== 'branch' && l.sessionId !== null).map((l) => l.sessionId));
     let budget = JIRA_DETECT_READS_PER_TICK;
+    const now = Date.now();
+    for (const [pair, at] of this.failedAt) if (now - at >= JIRA_DETECT_RETRY_MS) this.failedAt.delete(pair);
     for (const row of rows) {
       if (!ACTIVE.has(row.status) || row.gitBranch === undefined || row.gitBranch === '' || row.projectPath === undefined || row.projectPath === '') continue;
       if (named.has(row.id)) continue;
@@ -233,12 +251,14 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
       for (const key of keys) {
         const repo = [...(mapped.get(key.slice(0, key.lastIndexOf('-'))) ?? [])].find((r) => r === path || r === main);
         if (repo === undefined || !branchCarriesKey(row.gitBranch, key)) continue;
-        if (known.has(`${key}\u0000${row.id}`) || this.live.isSuppressed(key, row.id) || this.live.isNeverLink(key, row.id)) continue;
+        const pair = `${key}\u0000${row.id}`;
+        if (known.has(pair) || this.failedAt.has(pair) || this.live.isSuppressed(key, row.id) || this.live.isNeverLink(key, row.id)) continue;
         if (budget === 0) return;
         budget -= 1;
         const res = await this.poller.issueSummary(key);
         if (!res.ok) {
           if (res.response.status === 404) this.live.markNeverLink(key, row.id);
+          else this.failedAt.set(pair, Date.now());
           continue;
         }
         const issue = res.value;
