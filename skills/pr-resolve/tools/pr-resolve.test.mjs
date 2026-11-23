@@ -26,10 +26,17 @@ function lockAt(dir, sessionId, atMs) {
   return file;
 }
 
-function cli(home, args, env = {}) {
+function cli(home, args, env = {}, cwd = home) {
   const e = { ...process.env, BM_PR_RESOLVE_HOME: home, ...env };
   if (env.CLAUDE_CODE_SESSION_ID === undefined) delete e.CLAUDE_CODE_SESSION_ID;
-  return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: e, cwd: home });
+  return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: e, cwd });
+}
+
+// git in a throwaway repo, with an identity and signing pinned so a machine's global config cannot fail the commit.
+function git(cwd, ...args) {
+  const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
+  assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout;
 }
 
 test('parseTarget accepts owner/repo#N and nothing else', () => {
@@ -174,4 +181,63 @@ test('CLI outcome: shape, null session, and the head rules', (t) => {
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).headSha, 'aaa');
   assert.equal(cli(home, ['outcome', 'acme/web#12', '--outcome', 'stopped', '--reason', 'r', '--from', 'aaa', '--head', 'bbb']).status, 2);
   assert.equal(cli(home, ['outcome', 'acme/web#12', '--outcome', 'pushed', '--reason', 'r', '--from', 'aaa']).status, 2);
+});
+
+// A recovered lock is a resolve that died mid-flight, so `lock take` cleans up after it before handing over (`cleanup` in pr-resolve.mjs). Three leftovers,
+// one per branch of that function: a real worktree at the PR's tree path (removed), a plain directory at the base-tree path (`worktree remove` refuses it, and
+// the refusal is reported in `cleanup` rather than thrown), and a worktree whose directory is already gone (only `git worktree prune` clears its entry).
+test('CLI lock take on a recovered lock removes the dead resolve’s trees, prunes, and reports what it could not remove', (t) => {
+  const home = tmp(t);
+  const repo = tmp(t);
+  git(repo, 'init', '-q');
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+  const p = paths(repo, home, parseTarget('acme/web#12'));
+  git(repo, 'worktree', 'add', '-q', p.tree, '-b', 'pr-resolve-12');
+  fs.mkdirSync(p.baseTree, { recursive: true });
+  const gone = path.join(repo, '.worktrees', 'gone');
+  git(repo, 'worktree', 'add', '-q', gone, '-b', 'gone');
+  fs.rmSync(gone, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(p.lockFile), { recursive: true });
+  fs.writeFileSync(p.lockFile, JSON.stringify({ sessionId: 's1', at: new Date(Date.now() - H - 60_000).toISOString() }));
+
+  const r = cli(home, ['lock', 'take', 'acme/web#12'], { CLAUDE_CODE_SESSION_ID: 's2' }, repo);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.taken, true);
+  assert.equal(out.recovered, true);
+  assert.equal(out.cleanup.length, 1, JSON.stringify(out.cleanup));
+  assert.match(out.cleanup[0], /pr-resolve-12-base/);
+  assert.equal(fs.existsSync(p.tree), false, 'the dead resolve’s worktree is removed');
+  const listed = git(repo, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  assert.deepEqual(listed, [`worktree ${repo}`], 'prune dropped the entry whose directory was already gone');
+  assert.equal(JSON.parse(fs.readFileSync(p.lockFile, 'utf8')).sessionId, 's2');
+});
+
+test('CLI outcome: up-to-date is accepted and keeps --from as the head', (t) => {
+  const home = tmp(t);
+  const r = cli(home, ['outcome', 'acme/web#12', '--outcome', 'up-to-date', '--reason', 'nothing to merge', '--from', 'aaa']);
+  assert.equal(r.status, 0, r.stderr);
+  const rec = JSON.parse(fs.readFileSync(JSON.parse(r.stdout).written, 'utf8'));
+  assert.equal(rec.outcome, 'up-to-date');
+  assert.equal(rec.reason, 'nothing to merge');
+  assert.equal(rec.headSha, 'aaa');
+});
+
+test('CLI refusals: an unknown --outcome, a missing --reason or --from, and lock without take or release are usage, and write nothing', (t) => {
+  const home = tmp(t);
+  const cases = [
+    [['outcome', 'acme/web#12', '--outcome', 'merged', '--reason', 'r', '--from', 'aaa'], '--outcome must be pushed, stopped or up-to-date'],
+    [['outcome', 'acme/web#12', '--reason', 'r', '--from', 'aaa'], '--outcome must be pushed, stopped or up-to-date'],
+    [['outcome', 'acme/web#12', '--outcome', 'stopped', '--from', 'aaa'], '--reason is required'],
+    [['outcome', 'acme/web#12', '--outcome', 'stopped', '--reason', 'r'], '--from is required'],
+    [['lock'], 'lock needs take or release'],
+    [['lock', 'grab', 'acme/web#12'], 'lock needs take or release'],
+  ];
+  for (const [args, sentence] of cases) {
+    const r = cli(home, args);
+    assert.equal(r.status, 2, args.join(' '));
+    assert.equal(r.stdout, '', args.join(' '));
+    assert.equal(r.stderr.split('\n')[0], sentence, args.join(' '));
+  }
+  assert.deepEqual(fs.readdirSync(home), [], 'no outcome file and no lock were written');
 });
