@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { isRepo } from './github.client';
 import { PullRequestsService, type PrWriteAnswer } from './pulls.service';
 import {

@@ -38,8 +38,8 @@ One line per seam; the full description of each is in [docs/overview.md](docs/ov
 there, and the reasoning behind the rules below in [docs/subsystems/invariants.md](docs/subsystems/invariants.md).
 
 - `server/src/` — Nest, every route under `/api`, one module per directory: `health/`, `items/`, `agents/`, `tracker/`, `jira/`, `gitlab/`, `orchestrator/`,
-  `hub/`, `releases/`, `tick/`, `settings/`, `registry/`; plus `static.ts`, `security.ts`, `allowed-hosts.ts`, `git-run.util.ts`, `atomic-write.util.ts`. →
-  [docs/subsystems/api.md](docs/subsystems/api.md)
+  `hub/`, `releases/`, `tick/`, `settings/`, `registry/`; plus `static.ts`, `security.ts`, `allowed-hosts.ts`, `origin.guard.ts`, `git-run.util.ts`,
+  `atomic-write.util.ts`. → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: Files, GitHub, Jira, Runs and Settings behind a side rail. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language. Not a `.claude/rules/` file.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (the predicates both sides must agree on), `theme.css`, `jira-branch.ts`, `jira-sessions.ts`,

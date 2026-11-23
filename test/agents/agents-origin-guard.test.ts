@@ -47,7 +47,7 @@ function recordFetches(): string[] {
  * loopback boundary, and Nest registers `express.urlencoded` on every app — so
  * a hidden cross-origin form, which needs no CORS preflight, would otherwise
  * reach /api/agents/dispatch and start a session carrying an attacker-written
- * prompt. See server/src/agents/origin.guard.ts.
+ * prompt. See server/src/origin.guard.ts.
  */
 describe('the agents POST guard', () => {
   let app: INestApplication;

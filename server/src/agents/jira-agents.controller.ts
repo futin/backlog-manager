@@ -7,7 +7,7 @@ import { JIRA_TRANSITION_ID_MAX_CHARS } from '../jira/config.util';
 import { isSessionId, SESSION_ID_RE } from '../jira/session-id.util';
 import { JIRA_PROMPT_MAX, parseReviewHalf, parseReviewMr, parseReviewSkillMr } from '../jira/prompt.util';
 import { JiraDispatchService } from './jira-dispatch.service';
-import { SameOriginPostGuard } from './origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 
 // The session-id shape moved to `jira/session-id.util.ts` (the draft route needs it and jira/ imports nothing from agents/); re-exported for its callers.
 export { SESSION_ID_RE, isSessionId };

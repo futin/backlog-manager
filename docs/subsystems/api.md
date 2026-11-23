@@ -301,6 +301,9 @@ WHERE it calls — not how many modules do: home's dashboard (`BM_AGENTS_URL`) a
 `~/.backlog-manager/settings/dashboards.json` names, each read per request with a token that is env-only. With no such file every route below is what it was:
 the machine is `home`.
 
+A route lives in `agents/` when it calls a dashboard — spawn, stop, health, usage, a remote board — whatever its URL prefix, which is why
+`/api/items/abort` and `/api/dashboards/*` are here; the prefix never decides the module.
+
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's and a groom plan's prompt have no
   closing clause: the finish clause is the sheet's picker, not editable text (only a capture's keeps its commit rule in the text). An execute or a groom plan
@@ -566,6 +569,9 @@ so every app built from `AppModule` carries both, the tests' included, and ahead
 `allowed-hosts.ts` is that gate: `isAllowedHost` refuses any `Host` header that is not an IP literal, `localhost`, a `.ts.net` name or an entry in
 `BM_ALLOWED_HOSTS`, with 403 and `{ error }`. It answers the question the origin guard cannot — which host was this request _addressed_ to — and so closes DNS
 rebinding, which satisfies that guard with two matching lies. Global rather than scoped to `agents/`, because the read routes are exposed to the same page.
+
+`origin.guard.ts` is that origin guard, `SameOriginPostGuard`: at the server root because every module with a POST names it in `@UseGuards`, and listed in no
+module's `providers:`. What it checks and why is in [invariants.md](invariants.md#every-agents-post-is-guarded-by-content-type-and-origin).
 
 ## Interfaces
 

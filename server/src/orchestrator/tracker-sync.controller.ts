@@ -1,7 +1,7 @@
 import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { resolveSource } from '../items/sources/resolve.util';
 import type { SourceSummary } from '../items/sources/source';
 import { RegistryService } from '../registry/registry.service';

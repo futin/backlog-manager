@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
 import { isSyncInterval, SYNC_INTERVALS, type GitlabPayload, type SyncInterval } from '../../../shared/types';
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { GitlabPollerService } from './poller.service';
 import { GitlabSyncUnreadableError, readGitlabInterval, writeGitlabInterval } from './sync-config.util';
 

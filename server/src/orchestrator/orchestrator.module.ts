@@ -7,7 +7,6 @@ import { RemoteStartingService } from './remote-starting.service';
 import { StartingRunsService } from './starting-runs.service';
 import { TrackerSyncController } from './tracker-sync.controller';
 import { WatchdogStateService } from './watchdog-state.service';
-import { SameOriginPostGuard } from '../agents/origin.guard';
 import { RegistryModule } from '../registry/registry.module';
 import { TrackerModule } from '../tracker/tracker.module';
 
@@ -42,8 +41,7 @@ import { TrackerModule } from '../tracker/tracker.module';
  * `remote: []`, so the claim-derived runs are only reachable through this service.
  *
  * `TrackerSyncController` (#17, `POST /api/trackers/sync`) is here rather than in `TrackerModule` because its off-under-a-live-run 409 needs the two
- * services above, and `TrackerModule` providing them would be a module cycle — see the controller's header. `SameOriginPostGuard` is provided for it on the
- * same footing `AgentsModule` provides it: a guard named in `@UseGuards` is resolved from the injector of the module whose controller names it.
+ * services above, and `TrackerModule` providing them would be a module cycle — see the controller's header.
  */
 @Module({
   // `TrackerModule` for the poller's cached comments, which `RemoteRunsService`
@@ -51,7 +49,7 @@ import { TrackerModule } from '../tracker/tracker.module';
   // imports only `RegistryModule`.
   imports: [RegistryModule, TrackerModule],
   controllers: [OrchestratorController, TrackerSyncController],
-  providers: [OrchestratorService, RemoteRunsService, RemoteStartingService, StartingRunsService, WatchdogStateService, SameOriginPostGuard],
+  providers: [OrchestratorService, RemoteRunsService, RemoteStartingService, StartingRunsService, WatchdogStateService],
   exports: [OrchestratorService, RemoteRunsService, RemoteStartingService, StartingRunsService, WatchdogStateService]
 })
 export class OrchestratorModule {}

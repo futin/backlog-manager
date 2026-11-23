@@ -1,7 +1,7 @@
 import { Body, Controller, HttpException, Post, UseGuards } from '@nestjs/common';
 
 import { ItemsService } from './items.service';
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
 import { isMergeMode, isQuestionMode } from '../../../shared/agent';
 import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../shared/types';

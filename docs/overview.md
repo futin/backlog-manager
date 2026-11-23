@@ -202,7 +202,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   outbound-calling module either), `settings/` (`settings/timezone.json`'s reader/writer and `GET`/`POST /api/settings/timezone`, the board's one shared
   time zone, and `settings/review.json`'s through `GET`/`POST /api/settings/review`, the reviewer),
   `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
-  route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git), `atomic-write.util.ts`
+  route is gated by), `origin.guard.ts` (`SameOriginPostGuard`, the content-type and origin check every module's POSTs carry),
+  `git-run.util.ts` (`runGit`, the one way this server runs git), `atomic-write.util.ts`
   (`writeJsonAtomic`, the one way this server replaces a JSON file it owns).
   → [docs/subsystems/api.md](subsystems/api.md)
 - `client/src/` — React SPA: five lazy sections behind a side rail (Files, GitHub, Jira, Runs, Settings — Files and GitHub each drawn only while a registered

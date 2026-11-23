@@ -2191,7 +2191,7 @@ so a stop after a restart can route by it.
 
 ## Every agents POST is guarded by content-type and origin
 
-(`server/src/agents/origin.guard.ts`) — this is the one place in the app where loopback is NOT the access control. Nest registers `express.urlencoded` on every
+(`server/src/origin.guard.ts`) — this is the one place in the app where loopback is NOT the access control. Nest registers `express.urlencoded` on every
 app it builds, and `application/x-www-form-urlencoded` is a content type a cross-origin HTML form posts with no CORS preflight — so before this guard existed,
 any page in the developer's browser could auto-submit a hidden form at `/api/agents/dispatch` and spawn a session with an attacker-written prompt. The browser
 is already inside the loopback boundary; a bind cannot help. Both halves are load-bearing: a non-`application/json` content type is refused (which forces a
@@ -2214,6 +2214,10 @@ That list has since outgrown those five, which is the point of keeping it there:
 session-starting POST) and its `jira-stop`, and the four `/api/dashboards` settings POSTs, guarded because they change which machine a launch may be sent to
 and so are as guarded as the launch itself. The POSTs that list does not carry — Jira's `jira.json` and issue writes, the two `/api/ticks` writes and
 `POST /api/trackers/sync` — carry the same `SameOriginPostGuard` and are pinned in their own route suites.
+
+That reach is why the guard sits at the server root beside `security.ts` and `allowed-hosts.ts` rather than inside `agents/`: every module with a POST uses
+it, none lists it in `providers:` (Nest registers a `@UseGuards` class as an injectable of the controller's own module), and
+`test/guards/server-layering.test.ts` pins both facts (#593).
 
 ## Launch sheet model/effort pickers seed from Settings, never the last launch
 

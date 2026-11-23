@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { canonicalTimeZone, readTimeZone, writeTimeZone } from './timezone-config.util';
 import type { TimeZoneSetting } from '../../../shared/types';
 

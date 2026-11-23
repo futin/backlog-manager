@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { parseReviewConfig } from '../../../shared/agent';
 import { readReview, writeReview } from './review-config.util';
 import type { ReviewConfig, ReviewSetting } from '../../../shared/types';

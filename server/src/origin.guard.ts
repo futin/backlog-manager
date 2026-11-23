@@ -3,8 +3,15 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
 /**
- * origin.guard.ts — the only thing standing between a page the developer did
+ * server/src/origin.guard.ts — the only thing standing between a page the developer did
  * not write and a spawned Claude Code session.
+ *
+ * It sits at the server root, beside `security.ts` and `allowed-hosts.ts` (the two other app-wide request defences), because every module with a POST
+ * uses it — it started in `agents/` when `dispatch` was the only POST, and every later module had to reach into that feature module for it (#593). It
+ * is listed in no module's `providers:`: Nest's scanner registers each class a controller names in `@UseGuards` as an injectable of that controller's
+ * own module, so each host module builds its own instance with nothing declared. That holds only while the constructor is empty. A dependency added
+ * here must be resolvable from EVERY host module, and the shape for that is a `@Global()` provider of the dependency itself — never a provider listing
+ * of this guard, which `test/guards/server-layering.test.ts` refuses.
  *
  * Until this branch every route in this app was a read-only GET, so "loopback
  * is the access control" (see the BM_BIND invariant) was the whole story. It no

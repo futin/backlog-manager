@@ -16,7 +16,6 @@ import { ItemsAbortService } from './items-abort.service';
 import { JiraAgentsController } from './jira-agents.controller';
 import { JiraDispatchService } from './jira-dispatch.service';
 import { JiraLiveReconciler } from './jira-live.service';
-import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { RegistryModule } from '../registry/registry.module';
 import { ItemsModule } from '../items/items.module';
@@ -26,10 +25,14 @@ import { JiraModule } from '../jira/jira.module';
 import { GitlabModule } from '../gitlab/gitlab.module';
 
 /**
- * SameOriginPostGuard is listed here rather than left to `@UseGuards`'s own
- * instantiation so it resolves out of this module's container like any other
- * provider — the guard has no dependencies today, and this is what keeps
- * giving it one from being a surprise.
+ * `agents/` is the dashboard-calling module — one of the four outbound-calling modules in this server, each owning one remote: `agents/` the Claude
+ * dashboards (spawn, stop, health, usage, a remote board), `tracker/` GitHub, `jira/` Jira and `gitlab/` GitLab. A route lives in this module when it calls a
+ * dashboard, whatever its URL prefix: `/api/items/abort` and `/api/dashboards/*` are here for that reason, and the prefix never decides the module. The rest of
+ * this comment is the edges that rule produces.
+ *
+ * `SameOriginPostGuard`, the CSRF check on every POST here, is not this module's: it sits at the server root (`server/src/origin.guard.ts`), is used by every
+ * module with a POST, and is listed in no `providers:` — Nest registers each class a controller names in `@UseGuards` as an injectable of that controller's
+ * own module (#593).
  *
  * ItemsModule arrived in task-46, with the dispatch lift. `AgentsService` used
  * to find an item through the allowlist and the scanner as plain function
@@ -39,8 +42,8 @@ import { GitlabModule } from '../gitlab/gitlab.module';
  * runs agents → items and never back: nothing in `ItemsModule` knows dispatch
  * exists, so there is no cycle for Nest to refuse.
  *
- * `ItemsAbortController` and its service are here since #225 although the route is `/api/items/abort`: the abort calls the dashboard, and this module
- * and `tracker/` are the only two that call out. It reaches the item write seam through `ItemsService` and `DispatchRecordsService`, both exported by
+ * `ItemsAbortController` and its service are here since #225 although the route is `/api/items/abort`: the abort calls a dashboard, and `items/` is not an
+ * outbound-calling module — moving the route there would make it a fifth. It reaches the item write seam through `ItemsService` and `DispatchRecordsService`, both exported by
  * `ItemsModule` — the same agents → items edge.
  *
  * OrchestratorModule is imported for the same reason RegistryModule is:
@@ -63,10 +66,11 @@ import { GitlabModule } from '../gitlab/gitlab.module';
  * builds. Everything past bootstrap is the sweeper's own `setTimeout` chain
  * and the armer callback it registers on WatchdogStateService (which lives
  * in OrchestratorModule, already imported above, and is where the runs
- * payload reads the sweeper's state back out). *
+ * payload reads the sweeper's state back out).
+ *
  * JiraModule arrived with Jira phase 5's `POST /api/agents/dispatch-jira` (`JiraAgentsController` → `JiraDispatchService`): the route reads an issue and
  * writes assign and transition through `JiraPollerService`, and reserves the key in `JiraLiveService`, both exported by that module for exactly this. It is
- * here and not in `jira/` because it calls the dashboard, which this module (and `tracker/`) is for. The edge runs agents → jira and never back —
+ * here and not in `jira/` because it calls a dashboard, which is what this module is for. The edge runs agents → jira and never back —
  * `jira.module.ts` says why — so there is no cycle for Nest to refuse. `JiraLiveReconciler` is a provider for the same reason as `WatchdogService`: it is the
  * 60 s timer that clears a live-map entry whose session ended, armed by a confirmed dispatch and `OnApplicationShutdown`-cleared, so it has to be built by Nest
  * to have its shutdown hook called; `POST /api/agents/jira-stop` is `JiraDispatchService.stop`, beside the dispatch it undoes.
@@ -90,7 +94,8 @@ import { GitlabModule } from '../gitlab/gitlab.module';
  * `PrResolveController` / `PrResolveService` (PR conflict resolve) are the board's Resolve conflicts action: `POST /api/agents/dispatch-pr-resolve` reads one PR
  * through `PullRequestsService` (the agents → tracker edge `TrackerModule`'s import above already makes) and spawns the skill session through
  * `AgentsService`; `GET /api/agents/pr-resolve` is the live map plus the skill's outcome files. The state lives here and not in `TrackerModule` because
- * `GET /api/prs` cannot read it without the edge running tracker → agents, a cycle Nest cannot construct; the client joins the two reads instead.
+ * `GET /api/prs` cannot read it without the edge running tracker → agents, a cycle Nest cannot construct; the client joins the two reads instead,
+ * and that second request is the accepted cost of keeping the module graph acyclic.
  */
 @Module({
   // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
@@ -107,7 +112,6 @@ import { GitlabModule } from '../gitlab/gitlab.module';
     OffersService,
     OrchestrateArgsService,
     PrResolveService,
-    SameOriginPostGuard,
     UsageService,
     WatchdogService
   ]

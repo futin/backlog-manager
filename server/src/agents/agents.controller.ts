@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards 
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
 import { OrchestrateArgsService } from './orchestrate-args.service';
-import { SameOriginPostGuard } from './origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';

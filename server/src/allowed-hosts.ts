@@ -5,7 +5,7 @@ import type { NextFunction, Request, Response } from 'express';
  * allowed-hosts.ts — the layer that asks which host a request was ADDRESSED
  * to, which is the one question DNS rebinding cannot answer.
  *
- * The origin guard next door (agents/origin.guard.ts) asks whether two headers
+ * The origin guard next door (origin.guard.ts) asks whether two headers
  * AGREE: `new URL(origin).host === req.headers.host`. A page the attacker
  * serves on evil.test, whose DNS re-resolves to 127.0.0.1 after load, satisfies
  * that with two matching lies — `Origin: http://evil.test:4322` and
