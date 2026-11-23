@@ -921,7 +921,7 @@ export function watchdogStoodDown(w: { enabled: boolean; exhausted: boolean; fai
 
 /**
  * Moved here from agents/prompt.util.ts so jira/prompt.util.ts can share it: `server/src/jira/` imports no `agents/` service or prompt code (the module
- * dependency runs agents → jira; the one import the other way is the `SameOriginPostGuard`, spec §3), and a second copy of a prompt-safety rule is the copy
+ * dependency runs agents → jira and never back), and a second copy of a prompt-safety rule is the copy
  * that drifts.
  *
  * For one-line text that goes into a prompt: an item title (frontmatter is a `key: value` line, so a newline cannot legally be in one) or a Jira summary.
