@@ -1,6 +1,6 @@
 # Jira › Board — parent lanes — design
 
-Status: written, awaiting approval. Date: 2026-11-18. Branch `feat/jira-parent-lanes`. Amends
+Status: shipped in #574 (merged 2026-11-18). Date: 2026-11-18. Branch `feat/jira-parent-lanes`. Amends
 [2026-10-16-jira-grouped-board-design.md](2026-10-16-jira-grouped-board-design.md): its fold (§3), card fold block (§4) and filter rule (§5) are replaced by
 this spec on the Board page; its modal (§6) stands. Mocks: the Design-canvas artifact "Jira parent lanes"
 (<https://claude.ai/artifact/QTu3kedaND4mjoLmWFigpG>, private, Version 7), copied into

@@ -1,6 +1,6 @@
 # backlog-execute: a per-project finish mode that ends in a pull request
 
-Date: 2026-10-21. Status: draft, awaiting approval.
+Date: 2026-10-21. Status: shipped in #326 (merged 2026-10-21).
 
 ## Why
 

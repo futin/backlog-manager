@@ -1,6 +1,6 @@
 # Jira › Detail — tabs, a ticket page, every MR per target — design
 
-Status: accepted after two review rounds (autopilot); plan `docs/superpowers/plans/2026-11-19-jira-detail-tabs.md`, not yet executed. Date: 2026-11-19. Branch `jira-detail-tabs`. Amends DESIGN.md §8.9.2 (Detail dialog) and §8.9.6 (Delivery, the Detail
+Status: accepted after two review rounds (autopilot); plan `docs/superpowers/plans/2026-11-19-jira-detail-tabs.md`; shipped in #579 (merged 2026-11-20). Date: 2026-11-19. Branch `jira-detail-tabs`. Amends DESIGN.md §8.9.2 (Detail dialog) and §8.9.6 (Delivery, the Detail
 half only), and the board.md rule "The Jira section's four pages". Mocks: the Design-canvas artifact "Jira Detail" (<https://claude.ai/artifact/DPpfcBD3A4RDu1dq83fcjt>,
 private, Version 9, twelve comment threads all resolved), copied into [2026-11-19-jira-detail-tabs-mockups/](2026-11-19-jira-detail-tabs-mockups/) and read
 against the code in [00-mock-audit.md](2026-11-19-jira-detail-tabs-mockups/00-mock-audit.md). The `*.dc.html` files need the canvas runtime; standalone copies that open in any

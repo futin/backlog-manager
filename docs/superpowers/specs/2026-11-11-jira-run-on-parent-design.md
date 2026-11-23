@@ -1,6 +1,6 @@
 # Jira: run a sub-task's parent from the sub-task — design
 
-Status: draft, 2026-11-11. Mocks: [`2026-11-11-jira-run-on-parent-mockups/`](2026-11-11-jira-run-on-parent-mockups/) — prototyped over the live Detail of
+Status: shipped in #499 (merged 2026-11-12); written 2026-11-11. Mocks: [`2026-11-11-jira-run-on-parent-mockups/`](2026-11-11-jira-run-on-parent-mockups/) — prototyped over the live Detail of
 TIMIFY-28028 (`prototype.cjs` is the injection that drew them).
 
 ## 1. Intent

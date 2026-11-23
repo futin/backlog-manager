@@ -1,6 +1,6 @@
 # Jira Run gate: a quiet Run no longer blocks the next one
 
-Short design (small change). Status: draft, awaiting approval.
+Short design (small change). Status: shipped in #551 (merged 2026-11-17).
 
 ## Intent
 

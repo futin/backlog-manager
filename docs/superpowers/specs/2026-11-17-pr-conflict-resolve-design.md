@@ -1,6 +1,6 @@
 # PR conflict resolution from the board — design
 
-Status: draft, 2026-11-17, builder-checked. Approach B picked (a new skill the board triggers).
+Status: shipped in #556 (merged 2026-11-17); written 2026-11-17, builder-checked. Approach B picked (a new skill the board triggers).
 
 ## Intent
 

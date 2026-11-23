@@ -1,6 +1,6 @@
 # GitLab connection — every Jira ticket's merge request, on the board
 
-Status: draft, 2026-11-12. Mocks: `2026-11-12-gitlab-connection-mockups/` (canvas `canvas.json`; live copy https://claude.ai/artifact/9ExNThxnFRYmXzsfF6f1Qr).
+Status: shipped in #506 (merged 2026-11-13); written 2026-11-12. Mocks: `2026-11-12-gitlab-connection-mockups/` (canvas `canvas.json`; live copy https://claude.ai/artifact/9ExNThxnFRYmXzsfF6f1Qr).
 Picked: `OptionC.dc.html` (Detail), `Cards.dc.html`, `List.dc.html`, `Settings.dc.html`. Rejected and kept for the record: `Main.dc.html` (A, an MR section
 in the Ticket column), `OptionB.dc.html` (B, one fact row).
 

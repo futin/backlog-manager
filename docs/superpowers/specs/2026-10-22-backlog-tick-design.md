@@ -1,6 +1,6 @@
 # backlog-tick: one unattended unit of backlog work per scheduled tick
 
-Date: 2026-10-22. Status: draft, awaiting approval.
+Date: 2026-10-22. Status: shipped in #330 (merged 2026-10-22).
 
 ## Why
 
