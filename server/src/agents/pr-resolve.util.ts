@@ -8,9 +8,18 @@ import type { PrResolveOutcome, PrResolveRequest } from '../../../shared/types';
  * pr-resolve.util.ts — the pure half of the pr-resolve route: the on-disk contract the skill's tool (`skills/pr-resolve/tools/pr-resolve-lib.mjs`) writes and
  * this server only READS, and the trigger and body shapes.
  *
- * The server never imports a skill's tools (skills are self-contained, and the server never reaches into them), so `prResolveHome` and `fileKey` are this side's
- * COPY of the tool's; a change to either is a change to both, and `test/agents/agents-dispatch-pr-resolve.test.ts` writes its fixtures through the keying
- * spelled out here, so a drift shows as a red case rather than a PR that never reads its outcome.
+ * The server never imports a skill's tools (skills are self-contained, and the server never reaches into them), so five things here are this side's COPY of
+ * the tool's, and a change to any of them is a change to both:
+ *
+ * - `prResolveHome` — `prResolveHome` in `pr-resolve-lib.mjs`;
+ * - `fileKey` — `fileKey` in `pr-resolve-lib.mjs` (`parseFileKey` is its inverse, which the tool has no need of);
+ * - the target grammar `parseResolveBody` checks — `TARGET` in `pr-resolve-lib.mjs`, split here into a `repo` and a JSON `number`;
+ * - `PR_RESOLVE_OUTCOMES` — the list the `outcome` command of `pr-resolve.mjs` checks `--outcome` against;
+ * - `PR_RESOLVE_LOCK_TTL_MS` — `LOCK_TTL_MS` in `pr-resolve-lib.mjs`.
+ *
+ * `test/guards/pr-resolve-twin.test.ts` is what ties the copies together: it runs the tool's `parse` command against the functions here and reads the
+ * outcome list and the TTL out of the tool's source, so a copy changed on one side alone turns it red. (Suites that build their fixtures through this file's
+ * own `fileKey` cannot catch a drift — both sides of their assertions are this copy.)
  */
 
 /** The tool's home rule, read per call and never cached — the suites point it at a temp dir through the env. */
@@ -51,14 +60,21 @@ function readJson(file: string): unknown {
   }
 }
 
-const OUTCOMES: readonly string[] = ['pushed', 'stopped', 'up-to-date'];
+/** The outcomes the tool's `outcome` command accepts, in its order — a TWIN of the list in `pr-resolve.mjs`, pinned by the twin guard. */
+export const PR_RESOLVE_OUTCOMES: readonly PrResolveOutcome['outcome'][] = ['pushed', 'stopped', 'up-to-date'];
+
+/**
+ * How long the tool honours a lock before a successor may claim it — a TWIN of `LOCK_TTL_MS` in `pr-resolve-lib.mjs`, pinned by the twin guard. The server
+ * reads it to judge a lock that names no session (`PrResolveService`), which has nothing but its age to go on.
+ */
+export const PR_RESOLVE_LOCK_TTL_MS = 3 * 60 * 60 * 1000;
 
 /** The outcome file, or `null` for a missing, unparseable or hand-edited one — any field of the wrong type or value makes the whole file unreadable. */
 export function readOutcome(file: string): PrResolveOutcome | null {
   const raw = readJson(file);
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (typeof o.outcome !== 'string' || !OUTCOMES.includes(o.outcome)) return null;
+  if (typeof o.outcome !== 'string' || !(PR_RESOLVE_OUTCOMES as readonly string[]).includes(o.outcome)) return null;
   if (typeof o.reason !== 'string' || typeof o.fromSha !== 'string' || typeof o.headSha !== 'string') return null;
   if (o.sessionId !== null && typeof o.sessionId !== 'string') return null;
   return { outcome: o.outcome as PrResolveOutcome['outcome'], reason: o.reason, fromSha: o.fromSha, headSha: o.headSha, sessionId: o.sessionId };

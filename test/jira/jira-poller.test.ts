@@ -2,13 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { JIRA_MENTIONS_WINDOW_DAYS, type JiraBoard, type JiraQuery } from '../../shared/types';
+import { JIRA_BOARD_CAP, JIRA_MENTIONS_WINDOW_DAYS, type JiraBoard, type JiraQuery } from '../../shared/types';
 import { JIRA_RATE_LIMIT_DEFAULT_MS } from '../../server/src/jira/errors.util';
 import { JIRA_BACKOFF_MAX_MS, JIRA_BACKOFF_MIN_MS, JiraBootState, nextBackoff } from '../../server/src/jira/identity';
 import { JiraClient } from '../../server/src/jira/jira.client';
 import { JIRA_ISSUE_FIELDS } from '../../server/src/jira/map-issue';
 import {
-  JIRA_BOARD_CAP,
   JIRA_DESCENDANT_ROUNDS,
   JIRA_PAGE_SIZE,
   JIRA_POLL_MS,

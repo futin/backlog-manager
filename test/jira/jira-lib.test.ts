@@ -1,6 +1,9 @@
 /**
  * @jest-environment jsdom
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, renderHook } from '@testing-library/react';
 
 import { setJiraPage, useJiraPage } from '../../client/src/hooks/useJiraPage';
@@ -2563,5 +2566,18 @@ describe('lane folds', () => {
   it('stores a toggle equal to the default', () => {
     const r = setLaneFold({}, 'b1', boardOf([lane('PAY-1')]), 'PAY-1', true);
     expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open' });
+  });
+});
+
+/**
+ * #599: the band's cap fact is built from `JIRA_BOARD_CAP` (`shared/types.ts`), the value the poller keeps, so the band can never name a number the server no
+ * longer applies. Before, `bandSub` hard-coded `first 500 shown`, and the cap was private to the poller. A literal anywhere in the client is that copy back.
+ */
+describe('the board cap is never a literal in the client', () => {
+  it('no file under client/src spells the cap as a number before "shown"', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+    const hits = walk(join(__dirname, '..', '..', 'client', 'src')).filter((f) => /500 shown/.test(readFileSync(f, 'utf8')));
+    expect(hits).toEqual([]);
   });
 });

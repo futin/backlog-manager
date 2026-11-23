@@ -1260,6 +1260,11 @@ export const JIRA_MENTIONS_POLL_MS = 180_000;
 export const JIRA_MENTIONS_WINDOW_DAYS = 30;
 /** The most issues one mentions check keeps (one search page); `truncated` on the payload when it bites. */
 export const JIRA_MENTIONS_ISSUE_CAP = 100;
+/**
+ * Issues kept per Jira board, after dedupe; the one cap `truncated` reports. The poller applies it and the board band renders it (`first <cap> shown`,
+ * `bandSub` in `client/src/lib/jira.ts`), so it lives here rather than in the poller, where the client could only restate it.
+ */
+export const JIRA_BOARD_CAP = 500;
 /** The newest comments the thread route returns; `truncated` beyond. */
 export const JIRA_THREAD_MAX = 100;
 /** A mention excerpt is cut to this many characters on a word boundary, with `…`. */
@@ -1597,8 +1602,9 @@ export interface AgentDispatchRequest {
 }
 
 /**
- * 201 body of a headless launch — the dashboard's minted session id. Every launch but a desktop item dispatch or Jira Run answers this: orchestrate, resume
- * and abort never send a `surface`. `surface` is never present on the wire; it is typed so `ItemDispatchResult` can be narrowed on it.
+ * 201 body of a headless launch — the dashboard's minted session id. Every launch but a desktop item dispatch or Jira Run answers this: orchestrate, resume,
+ * abort and the PR conflict resolve (`POST /api/agents/dispatch-pr-resolve`) never send a `surface`. `surface` is never present on the wire; it is typed so
+ * `ItemDispatchResult` can be narrowed on it.
  */
 export interface AgentDispatchResult {
   sessionId: string;

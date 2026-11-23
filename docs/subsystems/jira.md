@@ -231,7 +231,8 @@ the end of every sweep, so a boot that turns out `unsupported` stops the chain o
 process. Otherwise it is due when `SYNC_INTERVALS[interval]` has passed since its `polledAt`; `off` is then never due.
 
 **One board.** Its queries in board order, then its roots in board order, deduplicated by key (first occurrence wins), capped at `JIRA_BOARD_CAP` (500,
-`truncated` when it bit) and swapped into the cache whole. A query is one JQL, paged by `nextPageToken` at `maxResults: 100`, kept to `JIRA_QUERY_CAP` (200).
+`truncated` when it bit — the constant lives in `shared/types.ts`, because the board band renders it as `first 500 shown`)
+and swapped into the cache whole. A query is one JQL, paged by `nextPageToken` at `maxResults: 100`, kept to `JIRA_QUERY_CAP` (200).
 A root is `key = "K"` and then `JIRA_DESCENDANT_ROUNDS` (2) rounds of `parent in (…)` over the keys the previous round returned, the whole walk kept to
 `JIRA_ROOT_CAP` (200). The field list is `JIRA_ISSUE_FIELDS` plus the discovered sprint field. Only the 500 cap is reported; the other two are silent.
 

@@ -363,7 +363,7 @@ export function mentionsCheckGate(input: {
  *   sentence `accessPhrase` gives the Connection card (the server's own words for a bad token), else the check's failure, else `not checked yet`.
  * - `fail`, red: the reason the last check could not run — a blocking access, the cache's own `detail`, or a refused write's message — kept beside the rows
  *   the last good check left (Review Focus 2: a failed check never reads as "Nothing waiting").
- * - `tail`: `newest 100 tickets checked` while the cap bit, always last, the Board band's `first 500 shown` placement.
+ * - `tail`: `newest 100 tickets checked` while the cap bit, always last, where the Board band puts its own cap fact (`first <JIRA_BOARD_CAP> shown`).
  *
  * `disabled` and `title` are the Sync now chip's: off while a check is out, while a wait is open (its tooltip names the end) or while access blocks every
  * check (its tooltip says why).
