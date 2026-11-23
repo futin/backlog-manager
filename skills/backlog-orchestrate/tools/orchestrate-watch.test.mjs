@@ -509,6 +509,48 @@ test('verify distinguishes "could not run this command" from a command that ran 
   assert.doesNotMatch(rows[1].tail, /could not run this command/);
 });
 
+// #585: a check that never exits used to block verify forever while `watch` kept the run fresh, so nothing ever stepped in. Now each command is bounded
+// (`BM_VERIFY_TIMEOUT_MS` shortens the hour to 400 ms here), the hung one is a red row that says it timed out, and the command after it still runs. The
+// outer `timeout` is the regression's failure mode: without the bound this spawn is killed at 30 s and the status assertion fails, rather than the suite
+// hanging the way the run did.
+test('verify kills a command that outlives BM_VERIFY_TIMEOUT_MS and records it as a red "timed out" row, then runs the next command', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-10', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
+  const hang = 'node -e "setInterval(() => {}, 1000)"';
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: [hang, 'node -e "process.exit(0)"'] }));
+
+  const started = Date.now();
+  const out = spawnSync('node', [SCRIPT, 'verify', 'task-10', '--cwd', worktree, '--json'], {
+    encoding: 'utf8',
+    cwd: project,
+    maxBuffer: CLI_MAX_BUFFER,
+    timeout: 30_000,
+    env: {
+      ...process.env,
+      BM_ORCH_HOME: home,
+      BM_ORCH_CONTROL_HOME: `${home}-control`,
+      CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID,
+      BM_VERIFY_TIMEOUT_MS: '400'
+    }
+  });
+  const elapsed = Date.now() - started;
+
+  assert.equal(out.status, 1, `verify did not return within the bound: ${out.error?.code ?? ''} ${out.stderr}`);
+  assert.ok(elapsed < 15_000, `verify took ${elapsed} ms against a 400 ms bound`);
+  const rows = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].verification;
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].cmd, hang);
+  assert.equal(rows[0].ok, false);
+  assert.match(rows[0].tail, /^timed out after 400 ms and was killed/);
+  assert.doesNotMatch(rows[0].tail, /could not run this command/);
+  assert.equal(rows[1].ok, true, 'the command after a timed-out one must still run');
+});
+
 // #294: verify's children used to inherit the driver's environment verbatim, and a driver launched under a parent `pnpm` (the dashboard's) carries
 // `COREPACK_ROOT`, which makes a non-corepack pnpm earlier on PATH refuse the `packageManager` pin instead of switching — every check red before it ran. The
 // unit case pins exactly which keys go (a parent's identity) and which stay (the user's own configuration, PATH included); `orch.verifyEnv` through the

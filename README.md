@@ -400,7 +400,8 @@ only `retro.mjs` reads, `BM_RETRO_HOME` and `BM_CLAUDE_PROJECTS`, come from the 
 `review.mjs` reads; `BM_REVIEW_FILE` moves the file only for the process it is set in, so the server and the skill's shell each need it. The tables leave
 out, on purpose,
 `BM_IMPORT_PACE_MS` (the pace of `backlog.mjs import`, default 1000 ms, documented in `skills/backlog/SKILL.md`) and the seams that exist for the test suites:
-`BM_RELEASES_ROOT`, `BM_ENV_FILE`, `BM_NODETEST_TMP_ROOT`, `BM_RUN_LOCK_TIMEOUT_MS`, `BM_JIRA_FETCH_RETRY_MS` and `BM_JIRA_FETCH_TIMEOUT_MS`.
+`BM_RELEASES_ROOT`, `BM_ENV_FILE`, `BM_NODETEST_TMP_ROOT`, `BM_RUN_LOCK_TIMEOUT_MS`, `BM_VERIFY_TIMEOUT_MS`, `BM_JIRA_FETCH_RETRY_MS` and
+`BM_JIRA_FETCH_TIMEOUT_MS`.
 
 ### Core
 

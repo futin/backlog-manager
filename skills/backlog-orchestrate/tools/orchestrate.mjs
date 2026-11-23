@@ -6116,6 +6116,29 @@ const VERIFY_MAX_BUFFER = 64 * 1024 * 1024;
 // narrow enough that run.json stays a state file rather than a log.
 const VERIFY_TAIL_MAX_CHARS = 8 * 1024;
 
+// The longest one verify command may run before it is killed and recorded
+// red (#585; runVerifyCommand has the failure it prevents). An hour, because
+// the bound exists to end a command that will NEVER exit, not to judge a
+// slow one: this repo's whole `pnpm test` is minutes, a large project's suite
+// or build can be tens of minutes, and a bound that cut a healthy suite short
+// would send a fix loop after code that was never broken — the ENOBUFS
+// lesson above, again. Per command, not per verify: the commands run one
+// after another, so a verify of N commands is bounded at N hours.
+// `BM_VERIFY_TIMEOUT_MS` overrides it — the seam the test that pins it uses,
+// as `BM_RUN_LOCK_TIMEOUT_MS` is for the run lock.
+const VERIFY_TIMEOUT_MS = 60 * 60 * 1000;
+
+function verifyTimeoutMs() {
+  const raw = Number(process.env.BM_VERIFY_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw > 0 ? raw : VERIFY_TIMEOUT_MS;
+}
+
+// "60 min" for the shipped bound, "400 ms" for a test's — whole minutes only
+// when the value is one, so the row never rounds a bound it reports.
+function formatVerifyTimeout(ms) {
+  return ms % 60_000 === 0 ? `${ms / 60_000} min` : `${ms} ms`;
+}
+
 // Runs one command through a shell (so a plain string like `pnpm run test`
 // or a `## Done when` line works exactly as typed, with no argv-splitting
 // of this tool's own to get wrong), captures combined stdout+stderr, and
@@ -6159,12 +6182,40 @@ const VERIFY_TAIL_MAX_CHARS = 8 * 1024;
 // deliberately left alone: reordering a person's PATH from `engines` or
 // `.nvmrc` is guessing at their toolchain, and the leaked variable — not the
 // PATH order — is what turned "wrong pnpm first" into "every check red".
+//
+// `timeout` bounds every command at `verifyTimeoutMs()` (#585). Without it a
+// command that never exits — a Jest open handle, a watch-mode script, a dev
+// server a `## Done when` line starts — blocked here forever, and nothing
+// noticed: SKILL.md §8 polls the detached verify with `watch`, each `watch`
+// tick freshens the run, and the server watchdog acts only on a run that is
+// `running` and NOT fresh. A timed-out command is a red row whose tail begins
+// `timed out after`, never "could not run this command": it did run, it just
+// never finished, and that is no proof the item works. `killSignal` is
+// SIGKILL because spawnSync sends its signal once and then waits — a child
+// that ignores SIGTERM would put the hang straight back. What SIGKILL reaches
+// is the shell's own child only: a grandchild (pnpm → jest) is reparented and
+// may keep running. spawnSync still returns on time — measured: it does not
+// wait for an orphan holding the inherited pipes — so the run moves on; the
+// orphan is the leftover of a command that was already hung.
 function runVerifyCommand(cmd, cwd) {
-  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', maxBuffer: VERIFY_MAX_BUFFER, env: verifyEnv(process.env) });
+  const timeoutMs = verifyTimeoutMs();
+  const result = spawnSync(cmd, {
+    shell: true,
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: VERIFY_MAX_BUFFER,
+    timeout: timeoutMs,
+    killSignal: 'SIGKILL',
+    env: verifyEnv(process.env)
+  });
   const combined = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   const lines = combined.split('\n');
   const trimmedLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
   const tail = trimmedLines.slice(-20).join('\n').slice(-VERIFY_TAIL_MAX_CHARS);
+  if (result.error?.code === 'ETIMEDOUT') {
+    const why = `timed out after ${formatVerifyTimeout(timeoutMs)} and was killed — a check that never exits (an open handle, watch mode, a server) proves nothing`;
+    return { cmd, ok: false, tail: tail === '' ? why : `${why}\n${tail}` };
+  }
   if (result.error) {
     const why = `could not run this command (${result.error.code ?? 'spawn failed'}): ${result.error.message}`;
     return { cmd, ok: false, tail: tail === '' ? why : `${why}\n${tail}` };
