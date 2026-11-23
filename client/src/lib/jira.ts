@@ -1333,6 +1333,25 @@ export async function fetchJiraWorktrees(): Promise<JiraWorktreesPayload> {
 }
 
 /**
+ * `GET /api/jira/projects` — the Jira projects Setup's `Jira project` pickers offer. Rejects with the sentence the page shows under the empty picker: the
+ * server's own `{ error }` when it sent one, else the HTTP status; `malformed response` when the body is not a list at all. A row without a string `key`
+ * and `name` is dropped rather than failing the read — `parseJiraBoardIssues`'s rule for a list a person picks from, where one bad row must not blank the
+ * picker.
+ */
+export async function fetchJiraProjects(): Promise<JiraProjectRef[]> {
+  let res: Response;
+  try {
+    res = await fetch('/api/jira/projects');
+  } catch {
+    throw new Error('the project list could not be read — the server did not answer');
+  }
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(errorOf(body, `the project list could not be read (HTTP ${res.status})`));
+  if (!Array.isArray(body)) throw new Error('the project list could not be read — malformed response');
+  return body.filter((r): r is JiraProjectRef => r !== null && typeof r === 'object' && typeof r.key === 'string' && typeof r.name === 'string');
+}
+
+/**
  * `POST /api/jira/repo-defaults`. BOTH keys always go out, `null` for unset: the server treats the body as a full replace of the path's entry, so leaving a key
  * off would not mean "keep it" — and a client that sent only the one it edited would have no way to say the other was already empty. Resolves to the entry as
  * stored (the path normalised); rejects with the server's sentence.

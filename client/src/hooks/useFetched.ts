@@ -16,8 +16,8 @@ function sameDeps(a: DependencyList, b: DependencyList): boolean {
 /**
  * The one-shot "fetch on a key, drop a stale answer" read (#285) — what eight call sites used to write by hand as an `alive` flag in an effect:
  * `useProjectSources`, the item modal's body, the launch sheet's plan, the Orchestrate sheet's merge-check, uncommitted flag and branch list, the run
- * detail's archived run, and the Jira issue modal's detail. Not a poller: nothing here re-asks on focus or on a clock (`useRefreshing` is that), only
- * when `deps` change.
+ * detail's archived run, and the Jira issue modal's detail — and, since #600, the Jira Setup page's project list. Not a poller: nothing here re-asks on
+ * focus or on a clock (`useRefreshing` is that), only when `deps` change.
  *
  * - `load === null` is the skip case — `idle`, no request (merge-check under branch mode, a run detail that is live-backed or remote).
  * - A change of `deps` reads `pending` with `value: null` on the very render that carries the new key, never one frame of the previous key's answer under

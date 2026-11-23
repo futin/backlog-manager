@@ -14,6 +14,7 @@ import {
   JIRA_CUSTOM_QUERY,
   JIRA_QUERY_PRESETS,
   dispatchJira,
+  fetchJiraProjects,
   fetchJiraPrompt,
   fetchJiraRefs,
   fetchJiraWorktrees,
@@ -1639,6 +1640,32 @@ describe('the branch choice wire', () => {
     await expect(fetchJiraWorktrees()).rejects.toThrow('Jira is not configured');
     answer(200, {});
     await expect(fetchJiraWorktrees()).rejects.toThrow('malformed response');
+  });
+
+  describe('fetchJiraProjects', () => {
+    it('reads the list in order from /api/jira/projects', async () => {
+      const f = answer(200, [{ key: 'PAY', name: 'Payments' }, { key: 'OPS', name: 'Platform' }]);
+      await expect(fetchJiraProjects()).resolves.toEqual([{ key: 'PAY', name: 'Payments' }, { key: 'OPS', name: 'Platform' }]);
+      expect(f.mock.calls[0][0]).toBe('/api/jira/projects');
+    });
+    it('drops a row without a string key and name, and keeps the rest', async () => {
+      answer(200, [{ key: 'PAY', name: 'Payments' }, { key: 7, name: 'x' }, null, { key: 'OPS' }]);
+      await expect(fetchJiraProjects()).resolves.toEqual([{ key: 'PAY', name: 'Payments' }]);
+    });
+    it('rejects a body that is not a list as malformed', async () => {
+      answer(200, { projects: [] });
+      await expect(fetchJiraProjects()).rejects.toThrow('the project list could not be read — malformed response');
+    });
+    it('rejects with the server’s sentence, else the HTTP status', async () => {
+      answer(502, { error: 'Jira refused: forbidden' });
+      await expect(fetchJiraProjects()).rejects.toThrow('Jira refused: forbidden');
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.reject(new SyntaxError('Unexpected token <')) });
+      await expect(fetchJiraProjects()).rejects.toThrow('the project list could not be read (HTTP 500)');
+    });
+    it('says the server did not answer when fetch itself rejects', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+      await expect(fetchJiraProjects()).rejects.toThrow('the project list could not be read — the server did not answer');
+    });
   });
 
   it('saveRepoDefaults always sends both keys, null when unset', async () => {
