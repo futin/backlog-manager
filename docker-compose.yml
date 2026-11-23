@@ -23,7 +23,7 @@
 # permission in another repo. It is still the right boundary for other machines
 # — but it is no boundary at all against a page in this machine's own browser,
 # which is why those two POST routes additionally check content-type and
-# Origin (server/src/agents/origin.guard.ts).
+# Origin (server/src/origin.guard.ts).
 #
 # Reaching this from elsewhere (a phone, another machine on the tailnet) is a
 # separate, deliberate step layered on top: `pnpm run tailnet`

@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 
-import { SameOriginPostGuard } from '../agents/origin.guard';
 import { JiraLiveService } from '../jira/live.service';
 import { JiraModule } from '../jira/jira.module';
 import { GitlabClient } from './gitlab.client';
@@ -17,8 +16,7 @@ import { GitlabPollerService } from './poller.service';
   controllers: [GitlabController],
   providers: [
     { provide: GitlabClient, useFactory: () => new GitlabClient() },
-    { provide: GitlabPollerService, useFactory: (client: GitlabClient, live: JiraLiveService) => new GitlabPollerService(client, live), inject: [GitlabClient, JiraLiveService] },
-    SameOriginPostGuard
+    { provide: GitlabPollerService, useFactory: (client: GitlabClient, live: JiraLiveService) => new GitlabPollerService(client, live), inject: [GitlabClient, JiraLiveService] }
   ],
   // Review dispatch (`agents/`) reads the poller's cache through `findMr` / `reposFor` and never makes a GitLab call of its own.
   exports: [GitlabPollerService]

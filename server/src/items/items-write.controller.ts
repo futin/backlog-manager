@@ -1,7 +1,7 @@
 import { Body, Controller, HttpException, Post, UseGuards } from '@nestjs/common';
 
 import { ItemsService } from './items.service';
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
 import { isMergeMode, isQuestionMode } from '../../../shared/agent';
 import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
@@ -34,9 +34,9 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
  *
  * ## Why these are guarded like the agents POSTs
  *
- * `@UseGuards(SameOriginPostGuard)` on every one of them, imported from
- * `agents/` — the guard has no agents-specific dependency and moving it to a
- * shared home is not this phase's job. These routes CREATE AND CLOSE ISSUES in
+ * `@UseGuards(SameOriginPostGuard)` on every one of them, imported from the
+ * server root (`server/src/origin.guard.ts`), where the guard has lived since
+ * #593 because every module with a POST uses it. These routes CREATE AND CLOSE ISSUES in
  * somebody's repository with a credential the browser never sees, which is a
  * strictly larger consequence than the dispatch route the guard was written
  * for: a hidden cross-origin form auto-submit needs no CORS preflight, and

@@ -72,7 +72,8 @@ Ten POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin
 | `review`    | `project, id, inReview`                                   | adds (`true`) or removes (`false`) `in-review` (execute `pr` mode, decision 9); `queue`'s twin — a literal boolean or a 400, a removal's 404 is SUCCESS | 201 `{ id, inReview }` |
 | `plan-review` | `project, id, planReview`                               | adds (`true`) or removes (`false`) `plan-review` (backlog-tick); `review`'s twin — a literal boolean or a 400, a removal's 404 is SUCCESS. `create` and `body` carry the same mark as an optional `planReview`, so it lands in the same write as the plan | 201 `{ id, planReview }` |
 
-Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `agents/` — these create and close issues with a credential the browser never sees, which is
+Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `server/src/origin.guard.ts` — these create and close issues with a credential
+the browser never sees, which is
 a larger consequence than the dispatch route the guard was written for. A JSON POST with no `Origin` still passes, because `backlog.mjs` in API mode is exactly
 that caller.
 
@@ -300,6 +301,9 @@ One of the four modules that call outbound, and every POST in it is guarded by c
 WHERE it calls — not how many modules do: home's dashboard (`BM_AGENTS_URL`) as ever, plus any remote dashboard and any remote board that
 `~/.backlog-manager/settings/dashboards.json` names, each read per request with a token that is env-only. With no such file every route below is what it was:
 the machine is `home`.
+
+A route lives in `agents/` when it calls a dashboard — spawn, stop, health, usage, a remote board — whatever its URL prefix, which is why
+`/api/items/abort` and `/api/dashboards/*` are here; the prefix never decides the module.
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's and a groom plan's prompt have no
@@ -566,6 +570,9 @@ so every app built from `AppModule` carries both, the tests' included, and ahead
 `allowed-hosts.ts` is that gate: `isAllowedHost` refuses any `Host` header that is not an IP literal, `localhost`, a `.ts.net` name or an entry in
 `BM_ALLOWED_HOSTS`, with 403 and `{ error }`. It answers the question the origin guard cannot — which host was this request _addressed_ to — and so closes DNS
 rebinding, which satisfies that guard with two matching lies. Global rather than scoped to `agents/`, because the read routes are exposed to the same page.
+
+`origin.guard.ts` is that origin guard, `SameOriginPostGuard`: at the server root because every module with a POST names it in `@UseGuards`, and listed in no
+module's `providers:`. What it checks and why is in [invariants.md](invariants.md#every-agents-post-is-guarded-by-content-type-and-origin).
 
 ## Interfaces
 

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 
 import { originRepo } from './origin.util';
 import { TrackerPollerService } from './poller.service';

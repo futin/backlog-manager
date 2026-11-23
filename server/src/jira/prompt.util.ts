@@ -107,7 +107,7 @@ function closingTail(ws: JiraWorkspace | null): string {
  * `execute`: implement, verify; then move the issue ONLY when the workflow offers exactly one way to `done` — a ticket with two (`Done` and `Won't do`) or
  * none is a judgement for the person, and the session is told to say so rather than pick. The workspace block owns the branch step, so the instruction no
  * longer says "create a branch" (a Run with no branch is refused for `execute` upstream). The commit rule is item dispatch's, imported from `shared/agent.ts`
- * (`server/src/jira/` imports no `agents/` service or prompt code; the one allowed import from there is the `SameOriginPostGuard`, spec §3).
+ * (`server/src/jira/` imports nothing from `agents/`; the `SameOriginPostGuard` its controllers share lives at the server root since #593).
  *
  * With the review gate on (`ws.review`, docs/superpowers/specs/2026-11-13-jira-review-gate-design.md) the order changes, and only then: commit first (the
  * staging half of the rule), review that commit with the jira skill's `references/review.md`, and only on its `approve` the transition and the closing tail

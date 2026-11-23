@@ -128,9 +128,6 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   started a session, the run heartbeating again (on the `fresh` branch itself, NOT inside the `recovered` guard, which needs `attempts > 0`), and
   `noteBoardResume`. Raising "Give up after" revives a stalled run exactly as it revives an exhausted one. Why:
   [invariants.md](docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts)
-- **Every agents POST is guarded by content-type and origin** (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the access control.
-  `test/agents/agents-origin-guard.test.ts`'s route list is where the guarded set lives, never a count in prose. Absent `Origin` stays allowed; the guard compares host
-  and port, not scheme. Why: [invariants.md](docs/subsystems/invariants.md#every-agents-post-is-guarded-by-content-type-and-origin)
 - **`~/.backlog-manager/settings/dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** The file is
   `$BM_DASHBOARDS_FILE` (read per call), else `~/.backlog-manager/settings/dashboards.json`, shaped `{ home?, dashboards: [{ name, url, bmUrl, host, account?,
   models?, efforts? }], order?, strategy?, threshold? }`; `writeDashboardsFile` in `server/src/agents/dashboards/dashboards-file.util.ts` is the only thing that

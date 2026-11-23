@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 
 import { isJiraKey } from '../../../shared/types';
 import type { JiraBoard, JiraIssueWriteResult, JiraRepoDefaultsWriteResult, JiraSkill, JiraStatusPayload } from '../../../shared/types';
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import {
   JIRA_TRANSITION_ID_MAX_CHARS,
   JiraConfigUnreadableError,

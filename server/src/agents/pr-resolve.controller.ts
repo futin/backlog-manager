@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 
-import { SameOriginPostGuard } from './origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { PrResolveService } from './pr-resolve.service';
 import type { PrResolvePayload } from '../../../shared/types';
 

@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
 import type { DashboardsView, MachinesStatus, ProjectOffers } from '../../../../shared/types';
-import { SameOriginPostGuard } from '../origin.guard';
+import { SameOriginPostGuard } from '../../origin.guard';
 import { DashboardsFileUnreadable } from './dashboards-file.util';
 import { DashboardsService } from './dashboards.service';
 import { MachinesService } from './machines.service';

@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpException, Param, Post, UseGuards 
 
 import { JIRA_MENTIONS_DISMISS_MAX, JIRA_REPLY_MAX_CHARS, isJiraKey } from '../../../shared/types';
 import type { JiraMentionIssue, JiraMentionReplyAnswer, JiraMentionsConfigured, JiraMentionsPayload, JiraThreadPayload } from '../../../shared/types';
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { jiraEnv } from './env.util';
 import { JiraLiveService } from './live.service';
 import { JiraMentionsStore, type JiraDismissal } from './mentions.store';

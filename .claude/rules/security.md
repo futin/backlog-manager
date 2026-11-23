@@ -20,6 +20,9 @@ paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml", "server/src/j
   `git -C <repo> worktree remove <path>`. The foreign repos `jira/refs.util.ts` reads are listed as of their last fetch, and say so. Under compose both
   project roots are mounted `:ro`; a host-run API has no such net, so a new git call under `server/src` is a read or it belongs to a session. Why:
   [invariants.md](docs/subsystems/invariants.md#the-server-never-writes-git)
+- **Every agents POST is guarded by content-type and origin** (`server/src/origin.guard.ts`) — the one place loopback is NOT the access control.
+  `test/agents/agents-origin-guard.test.ts`'s route list is where the guarded set lives, never a count in prose. Absent `Origin` stays allowed; the guard compares host
+  and port, not scheme. Why: [invariants.md](docs/subsystems/invariants.md#every-agents-post-is-guarded-by-content-type-and-origin)
 - **Container mounts land on host paths, read-only**, because the registry stores absolute host paths — and so does `jira.json`, whose mapped repos get a
   second root, `BM_JIRA_REPO_ROOT`. Compose passes both roots as `BM_REPO_ROOTS`, so the server can tell a path outside every mount from a missing one.
 - **Editing `vite.config.ts` needs `docker compose restart client`.**

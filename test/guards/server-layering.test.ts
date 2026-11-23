@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, normalize, relative } from 'node:path';
 
 /**
  * Source guard, in the shape `test/guards/supertest-bind.test.ts` and `test/guards/fixture-clock.test.ts` already use: read the files, assert on their text.
@@ -105,4 +105,50 @@ describe('server layering', () => {
     expect(importsOf(join('agents', 'agents.controller.ts'))).not.toContain('writeWatchdogConfig');
     expect(importsOf(join('agents', 'watchdog.service.ts'))).toContain('writeWatchdogConfig');
   });
+
+  /* #593 — `SameOriginPostGuard` is the CSRF check every module with a POST uses, so it lives at the server root beside `security.ts` and
+     `allowed-hosts.ts`, not inside `agents/` where every other module had to reach into a feature module for it. The spec is resolved against the
+     importing file's directory rather than matched as text, because `agents/dashboards/` imports it as `../../origin.guard` and everything else as
+     `../origin.guard` — a string match would either miss one or let a re-export file under `agents/` slip through. */
+  it('imports SameOriginPostGuard only from server/src/origin.guard', () => {
+    const offenders = allEdges
+      .filter((e) => e.names.includes('SameOriginPostGuard') && resolveSpec(e) !== 'origin.guard')
+      .map((e) => `${e.file}: ${e.text}`);
+    expect(offenders).toEqual([]);
+    expect(allEdges.some((e) => e.names.includes('SameOriginPostGuard'))).toBe(true);
+  });
+
+  /* #593 — Nest's scanner registers every class a controller names in `@UseGuards` as an injectable of that controller's own module, so listing the
+     guard in a module's `providers:` changes nothing about how it resolves. Five modules used to list it on the belief that it did; ten other
+     controllers never did and were guarded all along. A listing coming back is that belief coming back. Comments are blanked, so a module comment
+     explaining the history does not trip this. */
+  it('lists SameOriginPostGuard in no module', () => {
+    const offenders = files.filter((f) => f.rel.endsWith('.module.ts') && /\bSameOriginPostGuard\b/.test(f.source)).map((f) => f.rel);
+    expect(offenders).toEqual([]);
+  });
+
+  /* #593 — `agents/` is the dashboard-calling module, not a library: nothing outside it imports from it but the closed list below, each entry with
+     its reason. The fix for a red here is to move the helper out of `agents/` (a util at the server root, or the module that owns its data), never
+     to widen this list. */
+  it('nothing outside agents/ imports from agents/ but the allowlist', () => {
+    const ALLOWED = new Set([
+      // The root module composes every feature module; importing `AgentsModule` is what it exists for, not a reach for a helper.
+      `app.module.ts -> ${join('agents', 'agents.module')}`,
+      // `readAgentsConfig` — the watchdog's state service lives in `orchestrator/` and reads `BM_AGENTS` to know whether the sweeper is on at all.
+      `${join('orchestrator', 'watchdog-state.service.ts')} -> ${join('agents', 'config.util')}`,
+    ]);
+    const offenders = allEdges
+      .filter((e) => !e.file.startsWith('agents/'))
+      .map((e) => ({ e, target: resolveSpec(e) }))
+      .filter(({ target }) => target !== null && target.startsWith('agents/'))
+      .map(({ e, target }) => `${e.file} -> ${target}`)
+      .filter((edge) => !ALLOWED.has(edge));
+    expect(offenders).toEqual([]);
+  });
 });
+
+/* A relative spec resolved against the importing file's directory, as a path under `server/src` with no extension; `null` for a package spec. */
+function resolveSpec(e: Edge): string | null {
+  if (!e.spec.startsWith('.')) return null;
+  return normalize(join(dirname(e.file), e.spec));
+}

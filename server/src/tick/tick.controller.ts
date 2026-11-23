@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 import { isAbsolute } from 'node:path';
 
-import { SameOriginPostGuard } from '../agents/origin.guard';
+import { SameOriginPostGuard } from '../origin.guard';
 import { TickFileUnreadable } from './tick-breaker.util';
 import { TickService, type TickConfigPatch } from './tick.service';
 import type { TicksPayload } from '../../../shared/types';
