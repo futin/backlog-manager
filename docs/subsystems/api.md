@@ -72,7 +72,8 @@ Ten POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin
 | `review`    | `project, id, inReview`                                   | adds (`true`) or removes (`false`) `in-review` (execute `pr` mode, decision 9); `queue`'s twin — a literal boolean or a 400, a removal's 404 is SUCCESS | 201 `{ id, inReview }` |
 | `plan-review` | `project, id, planReview`                               | adds (`true`) or removes (`false`) `plan-review` (backlog-tick); `review`'s twin — a literal boolean or a 400, a removal's 404 is SUCCESS. `create` and `body` carry the same mark as an optional `planReview`, so it lands in the same write as the plan | 201 `{ id, planReview }` |
 
-Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `agents/` — these create and close issues with a credential the browser never sees, which is
+Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `server/src/origin.guard.ts` — these create and close issues with a credential
+the browser never sees, which is
 a larger consequence than the dispatch route the guard was written for. A JSON POST with no `Origin` still passes, because `backlog.mjs` in API mode is exactly
 that caller.
 

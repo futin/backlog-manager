@@ -163,7 +163,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   every finished turn, not only its first; a full 50-row list proves nothing about an absent session, which stays live for the backstop. A `starting` entry is
   never judged, and a verdict applies only to its own `(key, sessionId)`. Then C5: an ENDED link whose row is `working` or `question` again is re-attached — its
   own entry re-opened, the 8-hour clock restarted — so history does not grow. The edge runs agents → jira and never back: `jira/` imports nothing from `agents/`
-  except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in `agents/` while the store does not. Why:
+  (the guard it shares is `server/src/origin.guard.ts`, at the server root), which is why the dispatch, the stop and the reconciler live in `agents/` while
+  the store does not. Why:
   [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-a-persisted-link-and-stop-a-quiet-dashboard-or-the-8-hour-backstop-each-end-it)
 - **`review` is a third built-in action, and it is built from the GitLab cache, never from the request's spelling.** `parseJiraAction` / `parseJiraActionParam`
   (`shared/types.ts`) accept `'review'`; `resolveJiraActionOrThrow` refuses a bare one (400 `review needs mr and half`), because a review is composed only with
