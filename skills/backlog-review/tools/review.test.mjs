@@ -853,6 +853,35 @@ test('an unreadable --previous exits 1 and writes no manifest', () => {
   }
 });
 
+// #589: a previous round that parses but is the wrong shape is refused the same way, never read as a round with fewer findings.
+test('a --previous manifest or findings file of the wrong shape exits 1 and writes no manifest', () => {
+  const repo = repoWith({}, { 'x.mjs': 'x\n' });
+  const first = scope(repo, ['--mode', 'full']);
+  const dropKey = (key) => ({ ...first.manifest, groups: first.manifest.groups.map(({ [key]: _, ...grp }) => grp) });
+  const manifests = [
+    ['no hex to', { ...first.manifest, to: 'HEAD' }],
+    ['no to', (({ to: _, ...m }) => m)(first.manifest)],
+    ['group without label', dropKey('label')],
+    ['group without model', dropKey('model')],
+    ['group without effort', dropKey('effort')],
+  ];
+  const cases = [
+    ...manifests.map(([name, manifest]) => [name, manifest, [], 'is not a scope manifest']),
+    ['findings an object', first.manifest, {}, 'is not an array of findings'],
+    ['findings not findings', first.manifest, [{ id: 'F1' }], 'is not an array of findings'],
+  ];
+  for (const [name, manifest, findings, needle] of cases) {
+    const file = path.join(fs.mkdtempSync(path.join(root, `prev${counter++}-`)), 'manifest.json');
+    writeJson(file, manifest);
+    writeJson(`${file}.findings.json`, findings);
+    const r = scope(repo, ['--previous', file]);
+    assert.equal(r.status, 1, name);
+    assert.ok(r.stderr.includes(needle), `${name}: ${r.stderr}`);
+    assert.equal(r.manifest, null, name);
+    assert.equal(r.stdout, '', name);
+  }
+});
+
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 // merge. Manifests and group reports are hand-written in a temp dir; the one case that needs a real `scope` says so.
 
@@ -1324,7 +1353,7 @@ test('--previous hands on only the findings the check left standing', () => {
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 // Minor kinds and the carry (#531). A Minor carries a kind — bug, test, docs, trivial — that `merge` counts and renders per kind, and an incremental review
-// carries earlier rounds' open Minors forward through the state instead of dropping them.
+// and a `--previous` fix-loop round (#589) carry earlier rounds' open Minors forward through the state instead of dropping them.
 
 const ZERO_CARRY = { minorCarried: 0, minorUntouched: 0, minorResolved: 0 };
 // What a merge run without `--checks` adds to the summary after the Minor counts (#558).
@@ -1390,7 +1419,8 @@ test('an unrequested: Minor is an ordinary bug Minor to merge, its tag kept in t
 });
 
 test('no Minor of any kind, fresh or earlier and open, makes fix', () => {
-  const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [minorFinding('M1', 'a.mjs', 'bug')] }] });
+  // M1 sits on a line no fresh Minor names: a fresh one at an open earlier Minor's `path:line` is that Minor re-found, and merges into it (#589).
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [minorFinding('M1', 'a.mjs', 'bug', { line: 9 })] }] });
   const minor = ['- a.mjs:1 — [bug] b', '- a.mjs:2 — [test] t', '- a.mjs:3 — [docs] d', '- a.mjs:4 — [trivial] v'];
   const r = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor, earlier: ['M1 — open — still there'] })]);
   assert.deepEqual([r.summary.verdict, r.summary.stillOpen, r.summary.minor, r.lines], ['approve', 0, 5, []]);
@@ -1463,21 +1493,70 @@ test('scope hands a carried Minor to the group owning its changed file, and carr
   assert.equal(only.stdout, `${JSON.stringify({ mode: 'incremental', files: 1, review: 0, skip: 1, groups: 0 })}\n`);
 });
 
-test('a full review, a fallback to full and --previous carry no Minors', () => {
+const noMinor = (m) => m.groups.flatMap((grp) => grp.earlier).filter((f) => f.severity === 'Minor');
+
+test('a full review and a fallback to full carry no Minors', () => {
   const { repo, state, first } = reviewed({ 'x.mjs': 'x\n', 'y.mjs': 'y\n' });
   writeJson(state, stateFrom(first.manifest, { minor: [minorFinding('M1', 'x.mjs', 'bug'), minorFinding('M2', 'y.mjs', 'docs')] }));
   write(repo, 'x.mjs', 'x changed\n');
   commitAll(repo, 'second');
-  const noMinor = (m) => m.groups.flatMap((grp) => grp.earlier).filter((f) => f.severity === 'Minor');
   const full = scope(repo, ['--state', state, '--mode', 'full']);
   assert.deepEqual([full.manifest.mode, full.manifest.carriedMinor, full.manifest.droppedMinor, noMinor(full.manifest)], ['full', [], [], []]);
   writeJson(state, stateFrom(first.manifest, { base: 'develop', minor: [minorFinding('M1', 'x.mjs', 'bug'), minorFinding('M2', 'y.mjs', 'docs')] }));
   const fallback = scope(repo, ['--state', state]);
   assert.deepEqual([fallback.manifest.mode, fallback.manifest.carriedMinor, noMinor(fallback.manifest)], ['full', [], []]);
+});
+
+// #589: a fix-loop round used to carry nothing, so the state its merge wrote held only that round's fresh Minors and every earlier one was gone for good.
+// The branch's state after the previous round holds exactly that round's open Minors; `--previous` splits them by what the fix commit did to their file.
+// `gone.mjs` is new on the branch, so its deletion leaves no trace in the full diff — only the increment since the previous snapshot shows it.
+function previousWithMinors() {
+  const { repo, state, first } = reviewed({ 'x.mjs': 'x\n', 'y.mjs': 'y\n', 'gone.mjs': 'gone\n' });
+  const minor = [
+    minorFinding('M1', 'x.mjs', 'bug'),
+    minorFinding('M2', 'y.mjs', 'docs'),
+    minorFinding('M3', 'gone.mjs', 'test'),
+    minorFinding('M4', null, 'trivial'),
+  ];
+  writeJson(state, stateFrom(first.manifest, { minor }));
   writeJson(`${first.out}.findings.json`, []);
-  const previous = scope(repo, ['--state', state, '--previous', first.out]);
-  assert.equal(previous.status, 0, previous.stderr);
-  assert.deepEqual([previous.manifest.carriedMinor, noMinor(previous.manifest)], [[], []]);
+  write(repo, 'x.mjs', 'x fixed\n');
+  fs.rmSync(path.join(repo, 'gone.mjs'));
+  commitAll(repo, 'fix');
+  return { repo, state, first, minor };
+}
+
+test('--previous carries the open Minors the previous round left: re-checked where the fix touched them, dropped where it deleted them', () => {
+  const { repo, state, first, minor } = previousWithMinors();
+  const r = scope(repo, ['--state', state, '--previous', first.out]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(earlierIds(r.manifest), [['M1']]);
+  assert.deepEqual(r.manifest.carriedMinor.map((m) => m.id), ['M2', 'M4']);
+  assert.deepEqual(r.manifest.droppedMinor.map((m) => m.id), ['M3']);
+
+  // A state that is not the previous round's — another snapshot recorded there — says nothing about this loop's Minors, so nothing is carried from it.
+  writeJson(state, stateFrom(first.manifest, { to: 'f'.repeat(40), minor }));
+  const other = scope(repo, ['--state', state, '--previous', first.out]);
+  assert.equal(other.status, 0, other.stderr);
+  assert.deepEqual([other.manifest.carriedMinor, other.manifest.droppedMinor, noMinor(other.manifest)], [[], [], []]);
+});
+
+test('the state a --previous round writes still holds the earlier open Minors, once each', () => {
+  const { repo, state, first } = previousWithMinors();
+  const r = scope(repo, ['--state', state, '--previous', first.out]);
+  assert.equal(r.status, 0, r.stderr);
+  const dir = path.dirname(r.out);
+  const fx = { dir, manifestPath: r.out, out: path.join(dir, 'task-1-2.md'), state };
+  // The reviewer re-reads group 1's whole files, so it re-reports M1 and M2 at their own lines beside one Minor that really is new.
+  const g1 = reportFile(dir, 'task-1-2.g1.md', {
+    coverage: clean('x.mjs', 'y.mjs'),
+    minor: ['- x.mjs:1 — [bug] M1 again', '- y.mjs:1 — [docs] M2 again', '- y.mjs:2 — [bug] new'],
+    earlier: ['M1 — open — still there'],
+  });
+  const m = merge(fx, ['--reports', g1]);
+  assert.equal(m.status, 0, m.stderr);
+  assert.deepEqual(minorOf(fx).map((f) => f.id).sort(), ['M1', 'M2', 'M4', 'M5']);
+  assert.deepEqual([m.summary.minor, m.summary.minorCarried, m.summary.minorUntouched, m.summary.minorResolved], [4, 3, 2, 1]);
 });
 
 test('merge folds carried and re-checked earlier Minors in with the fresh ones', () => {
