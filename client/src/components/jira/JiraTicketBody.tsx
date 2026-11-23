@@ -14,7 +14,6 @@ import {
   failureOf,
   fetchJiraWorktrees,
   modalTree,
-  repoBasename,
   stopJira,
   ticketWorktrees,
   typeTone,
@@ -24,6 +23,7 @@ import {
 import { childSessions } from '../../lib/jira-deck';
 import { ticketSessions } from '../../lib/jira-sessions';
 import { stripAgent, stripDelivery } from '../../lib/jira-strip';
+import { projectLabel } from '../../lib/project-label';
 import type { GitlabMr, JiraAction, JiraIssue, JiraIssueDetail, JiraWorktreesPayload, ReviewHalf } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
@@ -256,9 +256,9 @@ export function JiraTicketBody({
     starting !== null
       ? 'starting'
       : newest !== null
-        ? [newest.name, repoBasename(newest.repo), elapsedSince(newest.startedAt, now)].filter((p) => p !== null).join(' · ')
+        ? [newest.name, projectLabel(newest.repo), elapsedSince(newest.startedAt, now)].filter((p) => p !== null).join(' · ')
         : sessions === null && reserved !== null
-          ? [reserved.name, repoBasename(reserved.repo), elapsedSince(reserved.startedAt, now)].filter((p) => p !== null).join(' · ')
+          ? [reserved.name, projectLabel(reserved.repo), elapsedSince(reserved.startedAt, now)].filter((p) => p !== null).join(' · ')
           : '—';
 
   // The Worktrees fold (spec §4.6), drawn by whichever tab is its home for this ticket; keyed by the key so its open state resets with the ticket.

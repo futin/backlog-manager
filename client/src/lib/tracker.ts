@@ -44,6 +44,15 @@ export function pollAge(polledAt: string | null, now: number): string | null {
 }
 
 /**
+ * The age half of a poll sentence: `polled 12 s ago`, or `not polled yet`. `last` is Setup's off-board wording, where the poll is history. One home for
+ * its readers — the Jira band, Setup, the Jira chip and the GitLab band — so a board's age is worded once across all of them.
+ */
+export function polledPhrase(polledAt: string | null, now: number, last = false): string {
+  const age = pollAge(polledAt, now);
+  return age === null ? 'not polled yet' : `${last ? 'last polled' : 'polled'} ${age} ago`;
+}
+
+/**
  * One poll cycle as the client measures it: the server's `TRACKER_POLL_MS` (15 s, `server/src/tracker/poller.service.ts`) plus the measured length of a
  * tick (a sweep makes two requests per repo, so the stamp lands a little after the interval fires). It equals `TRACKER_POLL_WINDOW_MS` in
  * `skills/backlog-orchestrate/tools/orchestrate.mjs`, which asks the same question — "how long until a poll must have happened" — from the driver's side.

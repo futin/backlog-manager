@@ -17,6 +17,7 @@ import {
   JIRA_CUSTOM_QUERY,
   JIRA_QUERY_PRESETS,
   dispatchJira,
+  fetchJiraProjects,
   fetchJiraPrompt,
   fetchJiraRefs,
   fetchJiraWorktrees,
@@ -1644,6 +1645,32 @@ describe('the branch choice wire', () => {
     await expect(fetchJiraWorktrees()).rejects.toThrow('malformed response');
   });
 
+  describe('fetchJiraProjects', () => {
+    it('reads the list in order from /api/jira/projects', async () => {
+      const f = answer(200, [{ key: 'PAY', name: 'Payments' }, { key: 'OPS', name: 'Platform' }]);
+      await expect(fetchJiraProjects()).resolves.toEqual([{ key: 'PAY', name: 'Payments' }, { key: 'OPS', name: 'Platform' }]);
+      expect(f.mock.calls[0][0]).toBe('/api/jira/projects');
+    });
+    it('drops a row without a string key and name, and keeps the rest', async () => {
+      answer(200, [{ key: 'PAY', name: 'Payments' }, { key: 7, name: 'x' }, null, { key: 'OPS' }]);
+      await expect(fetchJiraProjects()).resolves.toEqual([{ key: 'PAY', name: 'Payments' }]);
+    });
+    it('rejects a body that is not a list as malformed', async () => {
+      answer(200, { projects: [] });
+      await expect(fetchJiraProjects()).rejects.toThrow('the project list could not be read — malformed response');
+    });
+    it('rejects with the server’s sentence, else the HTTP status', async () => {
+      answer(502, { error: 'Jira refused: forbidden' });
+      await expect(fetchJiraProjects()).rejects.toThrow('Jira refused: forbidden');
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.reject(new SyntaxError('Unexpected token <')) });
+      await expect(fetchJiraProjects()).rejects.toThrow('the project list could not be read (HTTP 500)');
+    });
+    it('says the server did not answer when fetch itself rejects', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+      await expect(fetchJiraProjects()).rejects.toThrow('the project list could not be read — the server did not answer');
+    });
+  });
+
   it('saveRepoDefaults always sends both keys, null when unset', async () => {
     const f = answer(200, { path: '/r', base: null, namePattern: 'x{key}' });
     await expect(saveRepoDefaults('/r', null, 'x{key}')).resolves.toEqual({ path: '/r', base: null, namePattern: 'x{key}' });
@@ -2311,10 +2338,14 @@ describe('launchFootLine', () => {
   });
 });
 
-// `lib/jira.ts` keeps its own copy of the Delivery filter values (DELIVERY_VALUES) because importing them from `lib/delivery.ts` would close an import
-// cycle. This pins the copy to the labels table, the list the UI draws: a value added there and not here would be clamped to `all` on every read.
+// `clampJiraPanelFilters` reads its accepted Delivery values from the labels table, the list the UI draws (#600 broke the import cycle that once forced a
+// hand-kept copy in `lib/jira.ts`). The first case pins the two together; the second names the five values outright, so a key dropped from the table —
+// which the first would follow silently — goes red here instead of clamping a stored pick to `all`.
 describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers', () => {
   it.each(Object.keys(DELIVERY_FILTER_LABELS))('keeps `%s`', (value) => {
+    expect(clampJiraPanelFilters({ ...NO_JIRA_PANEL_FILTERS, delivery: value }).delivery).toBe(value);
+  });
+  it.each(['all', 'has-mr', 'failing', 'done-not-merged', 'review-open'])('keeps `%s` by name', (value) => {
     expect(clampJiraPanelFilters({ ...NO_JIRA_PANEL_FILTERS, delivery: value }).delivery).toBe(value);
   });
   it('keeps `review-open` by name', () => {

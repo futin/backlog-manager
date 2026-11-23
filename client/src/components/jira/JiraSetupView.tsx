@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
-import { JIRA_BOARD_FILTER_FROM, JIRA_BOARD_KEY, boardRowLine, boardsForSetup } from '../../lib/jira';
+import { JIRA_BOARD_FILTER_FROM, JIRA_BOARD_KEY, boardRowLine, boardsForSetup, fetchJiraProjects } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraBoard, JiraBoardStatus, JiraProjectRef } from '../../../../shared/types';
+import type { JiraBoard, JiraBoardStatus } from '../../../../shared/types';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { Pill } from '../ui/Pill';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
-import { errorOf } from '../../lib/http';
 import { JiraBoardSheet, type JiraProjectList } from './JiraBoardSheet';
 import { JiraConnectionGroup } from './JiraConnectionGroup';
 import { JiraReposGroup } from './JiraReposGroup';
@@ -90,27 +90,18 @@ export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage
   );
 }
 
-/** `GET /api/jira/projects`, once per mount of this page. A failure is kept as the server's sentence, so the `Select` that needs it can say why it is empty. */
+/**
+ * `GET /api/jira/projects`, once per mount of this page. A failure is kept as the server's sentence, so the `Select` that needs it can say why it is empty.
+ * The stale-answer guard is `useFetched`'s and the payload check `fetchJiraProjects`'s; this only maps the read onto the shape the sheet and the
+ * Repositories card take.
+ */
 function useProjectsOnce(): JiraProjectList {
-  const [state, setState] = useState<JiraProjectList>({ list: null, error: null });
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const res = await fetch('/api/jira/projects');
-        const body: unknown = await res.json().catch(() => null);
-        if (!live) return;
-        if (res.ok && Array.isArray(body)) setState({ list: body as JiraProjectRef[], error: null });
-        else setState({ list: null, error: errorOf(body, `the project list could not be read (HTTP ${res.status})`) });
-      } catch {
-        if (live) setState({ list: null, error: 'the project list could not be read — the server did not answer' });
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
-  return state;
+  const read = useFetched(fetchJiraProjects, []);
+  if (read.status === 'ok') return { list: read.value, error: null };
+  if (read.status === 'failed') {
+    return { list: null, error: read.error instanceof Error ? read.error.message : 'the project list could not be read — the server did not answer' };
+  }
+  return { list: null, error: null };
 }
 
 function BoardsGroup({

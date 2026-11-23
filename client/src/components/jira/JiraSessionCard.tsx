@@ -6,7 +6,7 @@ import { useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useNarrow } from '../../hooks/useNarrow';
 import { elapsedSince } from '../../lib/item-age';
-import { openDesktopJira, repoBasename } from '../../lib/jira';
+import { openDesktopJira } from '../../lib/jira';
 import {
   linkedHow,
   openButtons,
@@ -17,6 +17,7 @@ import {
   surfaceWord,
   type SessionLink
 } from '../../lib/jira-sessions';
+import { projectLabel } from '../../lib/project-label';
 import { formatZonedClock } from '../../lib/time-zone';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
@@ -123,7 +124,7 @@ export function JiraSessionCard({
               <Meter label="used" value={`${Math.round(pct)}%`} fraction={pct / 100} tone={pct >= 90 ? 'red' : pct >= 70 ? 'amber' : 'green'} width={104} />
             </Row>
           )}
-          <Row label="Repo">{repoBasename(link.repo)}</Row>
+          <Row label="Repo">{projectLabel(link.repo)}</Row>
           {link.branch !== null && <Row label="Branch"><span className="jira-sess-mono">{link.branch}</span></Row>}
           <Row label="Started">{startedLine}</Row>
           <Row label="Session">
@@ -203,7 +204,7 @@ export function JiraStartingCard({ session, now }: { session: JiraLiveSession; n
       <div className="jira-sess-face">
         <dl className="jira-sess-facts">
           <Row label="Run">{session.name}</Row>
-          <Row label="Repo">{repoBasename(session.repo)}</Row>
+          <Row label="Repo">{projectLabel(session.repo)}</Row>
         </dl>
       </div>
     </article>

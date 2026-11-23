@@ -1,6 +1,6 @@
 import { needsYou } from '../../../shared/jira-sessions';
 import { JIRA_BUILTIN_LABELS, type JiraIssue, type JiraLiveSession, type JiraSessionsPayload, type JiraSkillGroup } from '../../../shared/types';
-import { repoBasename } from './jira';
+import { projectLabel } from './project-label';
 import { deckGroup, deckOrder, type DeckGroup } from './jira-deck';
 import { MONTHS, elapsedSince } from './item-age';
 import { sessionDuration, type SessionLink } from './jira-sessions';
@@ -261,7 +261,7 @@ export function applyListFilters(
   skills: readonly { id: string; name: string; group: JiraSkillGroup }[],
   now: number
 ): ListView {
-  const repos = [...new Set(rows.map((r) => repoBasename(r.repo)))].sort((a, b) => a.localeCompare(b));
+  const repos = [...new Set(rows.map((r) => projectLabel(r.repo)))].sort((a, b) => a.localeCompare(b));
   const runValues = [...new Set(rows.map(runKey).filter((k): k is string => k !== null))];
   const runs = runValues.map((value) => ({ value, label: runOptionLabel(value, skills) })).sort((a, b) => a.label.localeCompare(b.label));
   const filters: ListFilters = {
@@ -273,11 +273,11 @@ export function applyListFilters(
   const needle = search.trim().toLowerCase();
   const span = LIST_WINDOWS.find((w) => w.value === filters.window)?.ms ?? null;
   const kept = rows.filter((r) => {
-    if (filters.repo !== null && repoBasename(r.repo) !== filters.repo) return false;
+    if (filters.repo !== null && projectLabel(r.repo) !== filters.repo) return false;
     if (filters.run !== null && runKey(r) !== filters.run) return false;
     if (r.ended && span !== null && now - endedAtOf(r) > span) return false;
     if (needle === '') return true;
-    return [r.key, r.issue.summary, r.repo, repoBasename(r.repo), r.branch ?? ''].some((f) => f.toLowerCase().includes(needle));
+    return [r.key, r.issue.summary, r.repo, projectLabel(r.repo), r.branch ?? ''].some((f) => f.toLowerCase().includes(needle));
   });
 
   const isNeeds = (r: ListRow): boolean => !r.ended && needsYou(r.state);

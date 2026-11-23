@@ -1,5 +1,5 @@
 import { deliveryLook, targetRowId, type DeliveryTarget, type DeliveryTone } from './delivery';
-import { repoBasename } from './jira';
+import { projectLabel } from './project-label';
 import type { SessionLink } from './jira-sessions';
 import { pollAge } from './tracker';
 import { needsYou, STATE_LABEL, type JiraSessionState } from '../../../shared/jira-sessions';
@@ -44,7 +44,7 @@ export function stripDelivery(
 ): { pills: StripPill[]; more: { count: number; tone: DeliveryTone } | null } {
   const all = targets
     .map((t): StripPill => {
-      const where = multiProject ? `${repoBasename(t.project)} → ${t.target}` : t.target;
+      const where = multiProject ? `${projectLabel(t.project)} → ${t.target}` : t.target;
       const look = deliveryLook(t.lead, now);
       return { key: targetRowId(t), label: `${where} · ${look.word}`, tone: look.tone };
     })

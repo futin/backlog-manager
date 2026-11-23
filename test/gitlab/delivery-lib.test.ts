@@ -17,7 +17,7 @@ import {
 import type { DeliveryFilter, DeliveryLook, DeliveryNext, TicketDelivery, TrackStep } from '../../client/src/lib/delivery';
 import type { IgnoreEntry } from '../../client/src/lib/ignored-steps';
 import { reviewStepWord } from '../../client/src/lib/review-copy';
-import { polledPhrase } from '../../client/src/lib/jira';
+import { polledPhrase } from '../../client/src/lib/tracker';
 import type { GitlabMr, GitlabPayload, GitlabReview, GitlabPipeline, GitlabProjectView, GitlabStatus, JiraIssue } from '../../shared/types';
 
 /**

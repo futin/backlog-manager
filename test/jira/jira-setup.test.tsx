@@ -801,6 +801,17 @@ describe('the Repositories card', () => {
     expect(repoHints()).toEqual(expect.arrayContaining(['~/pay']));
   });
 
+  // #600: the payload check is `fetchJiraProjects`'s now — a 200 that is not a list is a failed read, said under the picker, never an empty picker.
+  it('says the project list is malformed when a 200 body is not a list, and disables the Select', async () => {
+    const real = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/jira/projects' ? answer({}, 200) : real(input, init)
+    ) as unknown as typeof fetch;
+    await renderSetup();
+    await within(reposCard()).findByText('the project list could not be read — malformed response');
+    expect(within(reposCard()).getByRole('combobox', { name: 'Jira project' })).toBeDisabled();
+  });
+
   it('fetches /api/jira/projects once per Setup mount, and not again when the status reloads', async () => {
     statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
     await renderSetup();
