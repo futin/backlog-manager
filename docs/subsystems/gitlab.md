@@ -29,7 +29,8 @@ PAT limited to the projects it may write to, read from the macOS keychain item `
 | `review.util.ts`        | `foldReview` — discussions into `GitlabReview` facts; `isTrigger`, `parseSeverity`, `countAddedCommits`. Pure, no clock                 |
 | `mapping.util.ts`       | `resolveGitlabProjects` (Jira repos → GitLab projects via `origin`, and per Jira key the checkouts that did: `repos`), `mrKeys`, `foldPipeline`, `foldMrState` |
 | `poller.service.ts`     | `GitlabPollerService` — the MR cache, the identity, the state, the 429 window, `payload()`, `sweepNow()`, `findMr`, `reposFor`             |
-| `gitlab.controller.ts`  | `GET /api/gitlab`, `POST /api/gitlab/sweep`                                                                                             |
+| `sync-config.util.ts`   | `gitlabSyncFile`, `readGitlabInterval`, `writeGitlabInterval`, `GitlabSyncUnreadableError` — `settings/gitlab-sync.json`, the sweep cadence |
+| `gitlab.controller.ts`  | `GET /api/gitlab`, `POST /api/gitlab/sweep`, `POST /api/gitlab/sync`                                                                   |
 | `gitlab.module.ts`      | imports `JiraModule` for `JiraLiveService`'s `onReposChanged` listener list                                                             |
 
 ## Mapping
@@ -103,11 +104,14 @@ click, so a review is decided on the age of the last read and the sheet's half i
 ## Routes
 
 - **`GET /api/gitlab`** → `GitlabPayload { status, jiraProjects, mrs }`, built from memory. `status` is `GitlabStatus` (state, site, user, `armed`,
-  `retryAt`, `mappedRepos`, `foundHosts`, `problems`); `jiraProjects` maps each Jira key to its `GitlabProjectView`s (`path`, `repo`, `polledAt`,
+  `retryAt`, `mappedRepos`, `foundHosts`, `problems`, `interval`); `jiraProjects` maps each Jira key to its `GitlabProjectView`s (`path`, `repo`, `polledAt`,
   `capped`, `failed`, `repos` — the review candidates); `mrs` is every cached `GitlabMr` with its `keys` and `review`.
 - **`POST /api/gitlab/sweep`** (`SameOriginPostGuard`) → `arm()`, then `sweepNow()`: 200 `{ ok: true }`, 409 when not armed, 429 with `retryAt` inside the
   window. It waits for the sweep up to `GITLAB_SWEEP_WAIT_MS`, then answers 200 and lets the sweep finish behind it. The Sources row's Read again calls it
   beside the GitHub and Jira sweeps (`lib/sweep.ts`).
+- **`POST /api/gitlab/sync`** `{ interval }` (`SameOriginPostGuard`) → writes `gitlab-sync.json` and calls `reschedule()`, answering 200 `{ interval }` read
+  back from the file: 400 for a body that is not an object or an interval outside `SYNC_INTERVALS`, 409 for a file that exists but does not parse (left
+  untouched). Allowed while GitLab is unconfigured. [The poller](#the-poller) has the cadence rules.
 
 ## The client half
 
@@ -134,3 +138,10 @@ pass-through; `delivery-lib` covers `lib/delivery.ts` and `review-copy` `lib/rev
 `jira-delivery-surfaces`, `jira-list` and
 `jira-board` cover the client. `test/helpers/gitlab.ts` builds payloads, and `test/helpers/no-gitlab.tsx` hands a pending answer through the raw context, for
 suites that mount `SettingsView` (whose Sources card needs the provider) without stubbing `/api/gitlab`.
+
+<!-- docs-sync:
+  sources:
+    - server/src/gitlab
+  kind: subsystem
+  verified: eb9940783be8b1731d3a383b463654ad76976cc9
+-->

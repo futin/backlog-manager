@@ -1,6 +1,6 @@
 # Tick session review — three fixes
 
-Date: 2026-11-14. Status: draft for review. Spans two repos: backlog-manager (this one) and claude-agents-dashboard (the routine runner).
+Date: 2026-11-14. Status: this repo's half shipped in #566 (merged 2026-11-18). Spans two repos: backlog-manager (this one) and claude-agents-dashboard (the routine runner).
 
 ## Intent
 

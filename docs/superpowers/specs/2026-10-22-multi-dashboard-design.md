@@ -1,6 +1,6 @@
 # Multi-dashboard: one board, several machines to run on
 
-Date: 2026-10-22. Status: draft, awaiting approval.
+Date: 2026-10-22. Status: shipped in #334 (merged 2026-10-23).
 
 ## Why
 

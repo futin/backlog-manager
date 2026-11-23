@@ -1,6 +1,6 @@
 # CLAUDE.md floor: cross-cutting rules only — design
 
-Date: 2026-11-02. Status: draft, awaiting approval.
+Date: 2026-11-02. Status: shipped in #444 (merged 2026-11-02).
 
 ## Intent
 
