@@ -3791,7 +3791,7 @@ reader is what a later edit deletes as dead. Task-48 gave `comments()` its secon
 cached comments on every `GET /api/orchestrator/runs` and keeps no cache of its own — this stays the one tracker cache.
 
 **Rate limits are a state, not an exception.** Nothing in `github.client.ts` throws on an HTTP status: every response — including a transport failure, which
-surfaces as `status: 0` — comes back as a value the poller turns into `access` and `detail`, because every one of them is something the board renders rather
+surfaces as `status: 0`, and a call past its 10 s `GITHUB_TIMEOUT_MS` deadline (#584), which is one — comes back as a value the poller turns into `access` and `detail`, because every one of them is something the board renders rather
 than something a request handler should make a 500 out of. A `403`/`429` with `remaining: 0` or a `Retry-After` puts that repo to sleep until the reset and
 records the reset TIME (not a duration, which goes stale the moment it is drawn); a secondary limit backs off sixty seconds. While asleep the repo gets no
 request at all, not even a conditional one: a `304` is free against the budget but a `403` is not, and asking again before the reset is how an app earns a

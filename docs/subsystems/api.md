@@ -133,7 +133,8 @@ Answers `{ id, released: true, stopped }`. The dispatch record is `DispatchRecor
 The second of four outbound-calling modules (`jira/` is the third, `gitlab/` the fourth): `github.client.ts` is a thin client over `fetch`, no Nest
 decorators — one constant host
 (`api.github.com`), rate-limit headers recorded from every response including a `304`, and no throw on any status: every failure is a value the poller turns
-into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
+into an `access` state. Every call is bounded at `GITHUB_TIMEOUT_MS`, the same 10 s the Jira and GitLab clients use (#584), so a stalled request ends as a
+`status: 0` transport failure instead of waiting out undici's 300 s defaults with the sweep, a board Sync and the item's write chain behind it. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
 `BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo, each paginated to the end and
 each with its OWN high-water mark — sharing one mark was a task-46 defect that hid every claim older than the newest issue — the second had no reader at all in
 phase 2 and is what the claim protocol maps from since task-46), paginates the first sync to the end, upserts by issue number against an inclusive `since` sent five minutes behind each mark (`SINCE_OVERLAP_MS` — the

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { rmSync } from 'node:fs';
 
-import { GithubClient } from '../../server/src/tracker/github.client';
+import { GITHUB_TIMEOUT_MS, GithubClient } from '../../server/src/tracker/github.client';
 import { IDENTITY_RETRY_MS, SECONDARY_BACKOFF_MS, TrackerPollerService } from '../../server/src/tracker/poller.service';
 import { TRACKER_LABELS } from '../../server/src/tracker/labels';
 import { GITHUB_TOKEN_ENV } from '../../server/src/tracker/token.util';
@@ -387,6 +387,32 @@ describe('syncing', () => {
     // call with no reader is exactly the kind of thing a later edit drops as
     // dead, and phase 3's claim watching depends on it already being paid for.
     expect(calls.filter((c) => c.url.includes('/issues/comments')).length).toBe(2);
+    p.disarm();
+  });
+});
+
+describe('a GitHub that never answers (#584)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('ends the tick within the client deadline and records the sweep as failed, not hanging on undici\'s 300 s', async () => {
+    jest.useFakeTimers();
+    // Labels answer, so the bootstrap is not what is under test; every other request — the issues read first among them — never settles.
+    const impl = (url: string): Promise<Response> =>
+      url.includes('/labels') ? Promise.resolve(new Response(JSON.stringify(LABELS_PRESENT.body), { status: 200 })) : new Promise<Response>(() => undefined);
+    const p = new TrackerPollerService(registryOf(githubProject()), new GithubClient(impl as unknown as typeof fetch));
+    let settled = false;
+    const tick = p.tick().then(() => {
+      settled = true;
+    });
+    // A handful of deadlines, not 300 s: the tick makes a few calls in sequence and each one is bounded on its own.
+    for (let i = 0; i < 5 && !settled; i++) await jest.advanceTimersByTimeAsync(GITHUB_TIMEOUT_MS);
+    expect(settled).toBe(true);
+    await tick;
+    const summary = p.summary('futin/x');
+    expect(summary.access).toBe('error');
+    expect(summary.detail).toBe(`timed out after ${GITHUB_TIMEOUT_MS} ms`);
     p.disarm();
   });
 });

@@ -9,7 +9,7 @@ import type { MergeMethod } from '../../../shared/types';
  * limits, a 304), and those are exactly the ones a live-network test can never
  * schedule.
  *
- * Three rules this file holds and its callers therefore do not have to:
+ * Four rules this file holds and its callers therefore do not have to:
  *
  * 1. **One constant host.** `API` below is the only host any request here can
  *    reach; nothing in a request shape names a host, and `repo` is validated
@@ -26,12 +26,23 @@ import type { MergeMethod } from '../../../shared/types';
  *    value the caller branches on, because every one of them is a state the
  *    board renders (`forbidden`, `not-found`, `rate-limited`) rather than an
  *    exception a request handler should turn into a 500. A transport failure —
- *    DNS, a dropped socket — is the one exception and it is caught here too,
- *    surfacing as `status: 0` with the message in `error`.
+ *    DNS, a dropped socket, a deadline (rule 4) — is the one exception and it
+ *    is caught here too, surfacing as `status: 0` with the message in `error`.
+ * 4. **Every call carries a deadline** (#584) — `GITHUB_TIMEOUT_MS`, a
+ *    `setTimeout` plus an `AbortController` raced against the call and its
+ *    body read, the Jira and GitLab clients' shape and for their reason: not
+ *    `AbortSignal.timeout`, whose timer fake timers never advance and whose
+ *    message is its own. Without it a stalled request waited out undici's
+ *    300 s defaults, and the poller's sweep, a board Sync and every write
+ *    queued behind it on that issue's chain waited with it.
  */
 
 /** The one host this client can reach. Not configurable on purpose (spec §11). */
 export const API = 'https://api.github.com';
+
+/** The bound on every call, the same ten seconds `runGit`, `JiraClient` and `GitlabClient` use: a GitHub that does not answer in that time is a transport
+ *  failure, `status: 0`, which the poller already records as `access: 'error'` and retries next tick. */
+export const GITHUB_TIMEOUT_MS = 10_000;
 
 /** `owner/name`, each side GitHub's own allowed character set. Validated
  *  before interpolation, never after: a repo string reaches this process from
@@ -128,7 +139,7 @@ export class GithubClient {
    * review decision. Repo-agnostic on purpose — the query builders in `pulls.query.ts` take the repo and refuse a malformed one with `isRepo` before
    * splitting it, and the repo travels as a VARIABLE, never interpolated into the query text, so this file's one-host rule needs no second guard here.
    *
-   * Keeps this file's three rules. The host is `API`; the response's headers are recorded into the GraphQL pool (`graphqlRate`) and handed back as THIS
+   * Keeps this file's four rules. The host is `API`; the response's headers are recorded into the GraphQL pool (`graphqlRate`) and handed back as THIS
    * answer's `rate`, so `failureVerdict` reads GraphQL's own remaining/reset; nothing throws. A non-200 (a secondary limit's 403, a 502) is normalised by
    * `request()` exactly as REST's is, so `retryAfter` and `secondary` arrive as values. A 200 whose body carries `errors` sets `error` to their messages
    * joined, restates the first typed error `GRAPHQL_STATUS` knows as that status, and keeps `data` AS GITHUB DELIVERED IT — `null` when the whole answer
@@ -225,7 +236,7 @@ export class GithubClient {
   /* ---------------------------------------------------------------------
    * The write half (task-46, spec §6.2).
    *
-   * Nine methods, each one request, each keeping this file's three rules: the
+   * Nine methods, each one request, each keeping this file's four rules: the
    * one constant host, the rate headers recorded from every response, and
    * nothing thrown on a status. That last rule is what the writer seam above
    * this file depends on — every refusal it reports (`not-found`, `conflict`,
@@ -391,8 +402,6 @@ export class GithubClient {
     url: string,
     opts: { token: string; etag?: string | null; body?: unknown; pool?: Pool }
   ): Promise<GithubResponse<T>> {
-    const pool: Pool = opts.pool ?? 'rest';
-    const rate = (): RateLimit => (pool === 'graphql' ? this.graphqlRate : this.rate);
     const headers: Record<string, string> = {
       accept: 'application/vnd.github+json',
       authorization: `Bearer ${opts.token}`,
@@ -405,27 +414,53 @@ export class GithubClient {
     if (opts.etag) headers['if-none-match'] = opts.etag;
     if (opts.body !== undefined) headers['content-type'] = 'application/json';
 
+    // Rule 4. The deadline is a promise both awaits below are RACED against,
+    // so a `fetch` (or a body) that never looks at its signal still ends;
+    // aborting the signal as well is what lets a real `fetch` release its
+    // socket. One timer covers the headers and the body together, cleared in
+    // the `finally` however the call ends.
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`timed out after ${GITHUB_TIMEOUT_MS} ms`));
+      }, GITHUB_TIMEOUT_MS);
+    });
+    try {
+      const init = { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), signal: controller.signal };
+      return await this.exchange<T>(url, init, opts.pool ?? 'rest', deadline);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** The request itself, under `request`'s deadline: `fetch`, the rate headers, the body. Split out only so the deadline's `finally` wraps every exit. */
+  private async exchange<T>(url: string, init: RequestInit & { signal: AbortSignal }, pool: Pool, deadline: Promise<never>): Promise<GithubResponse<T>> {
+    const rate = (): RateLimit => (pool === 'graphql' ? this.graphqlRate : this.rate);
+    // A transport failure is a state, not an exception: the poller records
+    // `access: 'error'` with this message and tries again on the next tick,
+    // exactly as it would for a 500. Nothing above this needs a try/catch.
+    const transport = (e: unknown): GithubResponse<T> => ({
+      status: 0,
+      data: null,
+      etag: null,
+      next: null,
+      retryAfter: null,
+      secondary: false,
+      error: e instanceof Error ? e.message : String(e),
+      rate: rate()
+    });
+
     let res: Response;
     try {
-      res = await this.fetchImpl(url, {
-        method,
-        headers,
-        body: opts.body === undefined ? undefined : JSON.stringify(opts.body)
-      });
+      const call = this.fetchImpl(url, init);
+      // If the deadline wins, the call may still reject later (the abort);
+      // that rejection has no reader and must not surface as an unhandled one.
+      call.catch(() => undefined);
+      res = await Promise.race([call, deadline]);
     } catch (e) {
-      // A transport failure is a state, not an exception: the poller records
-      // `access: 'error'` with this message and tries again on the next tick,
-      // exactly as it would for a 500. Nothing above this needs a try/catch.
-      return {
-        status: 0,
-        data: null,
-        etag: null,
-        next: null,
-        retryAfter: null,
-        secondary: false,
-        error: e instanceof Error ? e.message : String(e),
-        rate: rate()
-      };
+      return transport(e);
     }
 
     // Recorded BEFORE any status branch, so a 304, a 403 and a 200 all keep
@@ -446,8 +481,20 @@ export class GithubClient {
     // A body is read for every other status, including the failures: GitHub's
     // error bodies carry the sentence the Sources card shows, and the
     // secondary-limit bit can only be read from the message.
+    let text: string;
     try {
-      const text = await res.text();
+      const read = res.text();
+      read.catch(() => undefined);
+      text = await Promise.race([read, deadline]);
+    } catch (e) {
+      // Out of time mid-body is the request not completing, so it reads as
+      // the transport failure a stalled `fetch` is — never as a `200` with no
+      // data, which a caller would have to tell apart from a garbled body.
+      // Any other body-read failure keeps the status, as it always has.
+      if (init.signal.aborted) return transport(e);
+      return { status: res.status, data: null, etag, next, retryAfter, secondary: false, error: e instanceof Error ? e.message : String(e), rate: rate() };
+    }
+    try {
       const parsed = text === '' ? null : (JSON.parse(text) as unknown);
       if (res.ok) {
         data = parsed as T;
