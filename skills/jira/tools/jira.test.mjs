@@ -1180,6 +1180,25 @@ test("thread maps the server's refusals: a 404 is 2 with its sentence, a stack t
   }
 })
 
+test('thread: a 200 whose body has no comments array is exit 3 with the unreadable sentence, never a crash or a blank print', async () => {
+  for (const body of [{ key: 'PAY-1', total: 0, truncated: false }, { key: 'PAY-1', comments: 'none' }, null]) {
+    const { out } = await cli(threadRoute({ body }), 'thread', 'PAY-1')
+    assert.equal(out.status, 3, JSON.stringify(body))
+    assert.equal(out.stderr.trim(), 'the API answered 200 with a body jira.mjs cannot read', JSON.stringify(body))
+    assert.equal(out.stdout, '', JSON.stringify(body))
+  }
+})
+
+test('thread: a comment with no author prints Someone, and an empty comments list prints nothing but its newline', async () => {
+  const anonymous = { ...threadComment('1', 'Ada', '2026-11-01T10:00:00.000Z', 'who wrote this'), author: null }
+  const { out } = await cli(threadRoute({ body: { key: 'PAY-1', total: 1, truncated: false, comments: [anonymous] } }), 'thread', 'PAY-1')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout, 'Someone — 2026-11-01T10:00:00.000Z\nwho wrote this\n')
+  const empty = await cli(threadRoute({ body: { key: 'PAY-1', total: 0, truncated: false, comments: [] } }), 'thread', 'PAY-1')
+  assert.equal(empty.out.status, 0, empty.out.stderr)
+  assert.equal(empty.out.stdout, '\n')
+})
+
 test('draft posts the key, this session id and the stdin text verbatim to the board route, and says a person posts it', async () => {
   const { out, requests } = await draftAs(SESSION, 'hello\n\nworld', draftRoute({ body: { configured: true } }), 'draft', 'pay-1')
   assert.equal(out.status, 0, out.stderr)

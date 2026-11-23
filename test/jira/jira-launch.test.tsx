@@ -14,6 +14,7 @@ import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { daysAgoStamp } from '../helpers/dates';
+import { JIRA_PROMPT_MAX } from '../../shared/types';
 import type {
   AgentsStatus,
   GitlabMr,
@@ -471,6 +472,15 @@ describe('JiraLaunchSheet — the editable prompt', () => {
     edit(text);
     expect(startButton()).toBeDisabled();
     expect(startButton()).toHaveAttribute('title', reason);
+  });
+
+  it('an edit of exactly JIRA_PROMPT_MAX characters is not over the cap: Start stays enabled', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    edit('x'.repeat(JIRA_PROMPT_MAX));
+    expect(promptBox().value).toHaveLength(4000);
+    expect(startButton()).toBeEnabled();
+    expect(startButton()).not.toHaveAttribute('title', 'prompt too long');
   });
 });
 
