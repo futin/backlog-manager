@@ -717,6 +717,26 @@ test('gh failure caps execute but not groom', async (t) => {
   }
 });
 
+// #586: a `gh` that never answers. Before the fix `decide` waited on it without bound; now it is killed at the bound and reads as a count it cannot trust.
+// node:test's timeout turns a regression into a red case rather than a hung suite.
+test('a gh that hangs is killed at its bound and caps execute, as a failed one does', { timeout: 20_000 }, async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  item(fx, 'bug-4', BUG_RAW);
+  commitAll(fx.root);
+  // `exec` so the timeout's SIGTERM reaches the sleep itself rather than only the shell around it.
+  fs.writeFileSync(path.join(fx.ghDir, 'gh'), '#!/bin/sh\nexec sleep 60\n');
+  fs.chmodSync(path.join(fx.ghDir, 'gh'), 0o755);
+  process.env.BM_GH_TIMEOUT_MS = '300';
+  t.after(() => delete process.env.BM_GH_TIMEOUT_MS);
+
+  const v = await decide(fx, ['--dry-run']);
+  assert.equal(v.verdict, 'groom');
+  assert.equal(v.id, 'bug-4');
+  assert.match(v.reason, /cannot count open PRs/);
+  assert.equal(v.caps.openPrs, null);
+});
+
 // --- groom ---------------------------------------------------------------
 
 test('ungroomed bug before refactor; a refactor alone is promoted', async (t) => {

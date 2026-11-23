@@ -727,7 +727,8 @@ function writeSourceMarker(backlog, repo) {
 //   * **The token is never here.** It lives in the server process (`BM_GITHUB_TOKEN`) and no response carries it. A skill therefore needs no credential of its
 //     own, on any machine, which is the whole point of routing writes through the API rather than calling GitHub from here.
 //   * **The stack must be running.** There is no offline fallback and there deliberately is not one: a queued write would be a second source of truth for an
-//     item's state, on one laptop, invisible to every other machine. A refused connection is exit `5` with the two commands that start the stack named.
+//     item's state, on one laptop, invisible to every other machine. A refused connection is exit `5` with the two commands that start the stack named;
+//     an API that takes the request and never answers is exit `6` after `API_TIMEOUT_MS` (#586).
 //   * **Nothing is cached.** Every command makes its calls fresh, the same posture the server takes toward the registry and the marker.
 //
 // `BM_API_PORT` is the same variable compose reads, so a stack on a non-default port needs no second setting for the skills.
@@ -751,6 +752,33 @@ const API_DOWN_CODE = 5
 // `claim`.
 const CLAIM_STALE_MS = 15 * 60 * 1000
 
+// Exit 6 (#586): the API took the request and did not answer within `API_TIMEOUT_MS`. Its own code, not 5, because the fix is not "start the stack" —
+// something IS listening — and not 1, because nothing refused: for a write the honest answer is "unknown", since the server may have reached GitHub before
+// it stalled. Before this, `fetch` had no bound at all, and a wedged server held a groom or execute session's Bash call for as long as the hang lasted.
+//
+// 90 s is past any answer the API gives in health — its slowest write is a GitHub round trip bounded far tighter on the server's side — and well inside the
+// two-minute default Bash timeout a session runs this under, so the session reads this sentence rather than its own tool's kill. `BM_API_TIMEOUT_MS` exists
+// for the tests alone, so a case can prove the bound in milliseconds; it is read per call and ignored unless it is a positive integer.
+const API_TIMEOUT_CODE = 6
+const API_TIMEOUT_MS = 90_000
+
+function apiTimeoutMs() {
+  const raw = Number(process.env.BM_API_TIMEOUT_MS)
+  return Number.isInteger(raw) && raw > 0 ? raw : API_TIMEOUT_MS
+}
+
+// The sentence splits on the method, because what the caller should do next does: a GET wrote nothing and can simply be retried, while a POST may have
+// landed and must be re-read first — the item's own id when the request carried one, so the command can be pasted as it stands.
+function apiTimeoutMessage(method, path, body) {
+  const head = `the backlog-manager API did not answer ${method} ${path} within ${Math.round(apiTimeoutMs() / 1000)} s — `
+  if (method === 'GET') return `${head}nothing was written`
+  const id = body && (typeof body.id === 'string' || typeof body.id === 'number') ? body.id : '<id>'
+  return `${head}the write may have landed; run \`show ${id} --json\` before retrying`
+}
+
+// `AbortSignal.timeout` rejects with a DOMException named `TimeoutError`; anything else reaching a catch below is a transport failure.
+const isAbortTimeout = (e) => e !== null && typeof e === 'object' && e.name === 'TimeoutError'
+
 function apiDownMessage() {
   return `the backlog-manager API is not running on ${apiBase().replace('http://', '')} — start it with \`pnpm run dev\` or \`pnpm run docker:up\`; a tracker project needs the stack up for every command`
 }
@@ -763,22 +791,34 @@ function apiDownMessage() {
 // No `Origin` header at all, deliberately. `SameOriginPostGuard` allows an absent origin — a non-browser caller cannot forge its way past a check a browser
 // enforces — and sending a made-up one would be this file claiming to be a page it is not.
 //
-// A transport failure is exit 5 and is the ONLY failure translated here; every HTTP status is handed back as a value for the caller to read, the same posture
-// `GithubClient` takes on the server side.
+// A transport failure is exit 5 and a timeout exit 6, and those are the ONLY failures translated here; every HTTP status is handed back as a value for the
+// caller to read, the same posture `GithubClient` takes on the server side.
+//
+// One signal bounds the whole exchange, body included, so a server that sends headers and then stalls the body is held to the same clock as one that never
+// answers. `AbortSignal.timeout`'s timer is unref'd, so it cannot hold the event loop open after the call either — the entry guard's one requirement.
 async function apiRequest(method, path, body) {
+  const signal = AbortSignal.timeout(apiTimeoutMs())
   let res
   try {
     res = await fetch(`${apiBase()}${path}`, {
       method,
+      signal,
       headers: body === undefined ? { connection: 'close' } : { 'content-type': 'application/json', connection: 'close' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-  } catch {
-    // Every transport failure reads the same: ECONNREFUSED for nothing listening, a `TypeError` from `fetch` for a malformed base, EHOSTUNREACH for a
+  } catch (e) {
+    if (isAbortTimeout(e)) throw new BacklogError(apiTimeoutMessage(method, path, body), API_TIMEOUT_CODE)
+    // Every other transport failure reads the same: ECONNREFUSED for nothing listening, a `TypeError` from `fetch` for a malformed base, EHOSTUNREACH for a
     // half-configured port. All three mean "there is no API here", which is one thing to fix.
     throw new BacklogError(apiDownMessage(), API_DOWN_CODE)
   }
-  const text = await res.text()
+  let text
+  try {
+    text = await res.text()
+  } catch (e) {
+    if (isAbortTimeout(e)) throw new BacklogError(apiTimeoutMessage(method, path, body), API_TIMEOUT_CODE)
+    throw e
+  }
   let payload = null
   try {
     payload = text === '' ? null : JSON.parse(text)
@@ -3820,7 +3860,9 @@ function isMain(url) {
 // hand check passed. Safe for THIS file specifically because nothing in it
 // holds the event loop open: every read is synchronous `fs`, its one child
 // process (`connect`'s `git remote get-url`) is a `spawnSync` that is reaped
-// before the call returns, and there is no timer and no server anywhere in it.
+// before the call returns, and there is no server anywhere in it. Its one
+// timer is each API request's `AbortSignal.timeout` (#586), which Node unrefs,
+// so it bounds a hung request without holding the loop open once main returns.
 // A future edit that adds one must close its handle rather than restore
 // `process.exit()`, which would bring the truncation back with it.
 //

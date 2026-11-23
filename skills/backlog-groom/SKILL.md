@@ -92,7 +92,8 @@ body changed since you read it. Your own `start` and `heartbeat` move the issue'
 means re-read and re-apply** — `show --json` again, redo your edit against the body you get back, and call `body` again with the new stamp. Never work around it.
 **Run `body` as a command of its own, and run `stop` only after `body` exits `0`** — never chain `stop` after it with `;`, which runs `stop` even when `body`
 is refused. A refused `body` must leave the claim in place for the retry; releasing it means the retry needs a second `start`, and that leaves a second claim
-comment on the issue that is never deleted.
+comment on the issue that is never deleted. **A `body` that exits `6`** — the API took the write and did not answer within 90 s — may have landed: run
+`show <id> --json`, and call `body` again only if the body you get back is not yours, with the stamp it carries. Do not run `stop` until the body is.
 
 **`body` pins the issue's body to your live claim** — which is why it runs before `stop` — and that pin is what vets an item filed from outside the repo
 (`"unvetted":true` in `show --json`): no execute gate runs one until a groom of ours has pinned it. Without a live claim of this session's the write still

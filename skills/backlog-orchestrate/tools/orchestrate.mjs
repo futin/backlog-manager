@@ -108,6 +108,13 @@ const API_CALL = fileURLToPath(new URL('./api-call.mjs', import.meta.url));
 // vocabularies.
 const HELPER_EXIT_NON_2XX = 3;
 const HELPER_EXIT_NO_API = 5;
+const HELPER_EXIT_TIMEOUT = 6;
+
+// The helper bounds its own request at `API_CALL_TIMEOUT_MS` in `api-call.mjs` (30 s) and exits `6`; this is the backstop for a child that cannot reach
+// its own timer — a node that hangs before `fetch` is even made — so no `apiCall` can hold this synchronous process past it (#586). It sits five seconds
+// above the helper's bound so the helper's own sentence, which names the request, is what a person reads in the ordinary case.
+const API_CALL_TIMEOUT_MS = 30_000;
+const API_CALL_SPAWN_TIMEOUT_MS = API_CALL_TIMEOUT_MS + 5_000;
 
 // One request. `{ ok, status, data }` for a 2xx and for an ordinary refusal
 // alike — a 409's body is what the caller needs in order to skip an item
@@ -128,11 +135,22 @@ function apiCall(method, requestPath, body) {
   const res = spawnSync(process.execPath, [API_CALL, method, requestPath, body === undefined ? undefined : '-'].filter((a) => a !== undefined), {
     encoding: 'utf8',
     input: body === undefined ? undefined : JSON.stringify(body),
-    maxBuffer: GIT_BLOB_MAX_BUFFER
+    maxBuffer: GIT_BLOB_MAX_BUFFER,
+    timeout: API_CALL_SPAWN_TIMEOUT_MS
   });
 
   if (res.status === HELPER_EXIT_NO_API) {
     throw new OrchestrateError((res.stderr || '').trim() || 'the backlog-manager API is not running', EXIT_API_DOWN);
+  }
+  // An API that did not answer in time is a refusal the command cannot absorb, not the stack being down: something is listening, and a write may have
+  // landed, so the reaction is the one `9` already asks for — a park and a re-read — never `8`'s "start the stack". The helper's timeout and this spawn's
+  // backstop read the same.
+  if (res.status === HELPER_EXIT_TIMEOUT || res.error?.code === 'ETIMEDOUT') {
+    const said = (res.stderr || '').trim();
+    throw new OrchestrateError(
+      said || `the backlog-manager API did not answer ${method} ${requestPath} within ${API_CALL_SPAWN_TIMEOUT_MS / 1000} s — a write may have landed; re-read before retrying`,
+      EXIT_API_REFUSED
+    );
   }
   // A child that could not be spawned at all, or died on a signal. Neither is
   // an API answer, and treating it as one would let a broken node install read
@@ -3169,11 +3187,44 @@ function pullBaseAtInit(projectRoot, base) {
   const tree = treeHoldingBranch(projectRoot, base);
   if (tree === null) return;
 
-  const pulled = spawnSync('git', ['-C', tree, 'pull', '--ff-only', 'origin', base], { encoding: 'utf8' });
-  if (pulled.status === 0) return;
-  throw new OrchestrateError(
+  const { args, options } = pullBaseArgs(tree, base);
+  const failure = pullFailure(tree, base, spawnSync('git', args, options));
+  if (failure !== null) throw failure;
+}
+
+// The pull's bound (#586). Before it, the pull had none: an `origin` that wanted credentials prompted on the terminal of a headless run that has no
+// terminal, and a stalled network held `init` for git's own connect timeout, which over ssh can be minutes. 60 s is four times `LS_REMOTE_TIMEOUT_MS`
+// because this call moves objects rather than listing refs, and a pull of a busy `main` on a slow link is legitimately slower than a ref listing.
+const PULL_TIMEOUT_MS = 60_000;
+
+/**
+ * The init pull as `spawnSync` arguments — split out, as `runBranchLsRemote` is, so a unit case can pin the `timeout` and the prompt switch without a
+ * network. `GIT_TERMINAL_PROMPT=0` makes an `origin` that wants credentials fail at once instead of prompting a terminal no one is at.
+ */
+export function pullBaseArgs(tree, base) {
+  return {
+    args: ['-C', tree, 'pull', '--ff-only', 'origin', base],
+    options: { encoding: 'utf8', timeout: PULL_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
+  };
+}
+
+/**
+ * What a finished pull means for `init`: `null` for a pull that landed, else the `OrchestrateError` (exit `1`, nothing written) to refuse with. A pull
+ * that `spawnSync` killed — the timeout, or any signal — is its own sentence, because "cannot fast-forward" would send a person looking for a diverged
+ * branch that is not there. Exported for its unit case.
+ */
+export function pullFailure(tree, base, result) {
+  if (result.error?.code === 'ETIMEDOUT' || result.signal) {
+    return new OrchestrateError(
+      `git pull --ff-only origin ${base} in ${tree} did not finish within ${PULL_TIMEOUT_MS / 1000} s — the network or origin is stalled. ` +
+        'Nothing was written; run init again once origin answers.',
+      1
+    );
+  }
+  if (result.status === 0) return null;
+  return new OrchestrateError(
     `git pull --ff-only origin ${base} failed in ${tree} — another machine has pushed something this tree cannot fast-forward onto. ` +
-      `Nothing was written. git said: ${(pulled.stderr || pulled.stdout || '').trim()}`,
+      `Nothing was written. git said: ${(result.stderr || result.stdout || '').trim()}`,
     1
   );
 }
@@ -5847,7 +5898,11 @@ function cmdWatch(argv) {
   findQueueItem(readRun(dir), itemId);
 
   let sessionId = null;
-  let elapsed = 0;
+  // The budget is wall time, not a count of intervals slept (#586). Each tick does real work between sleeps — a jsonl scan, a run-file write and, on a
+  // tracker project, an `apiCall` heartbeat that can take up to `API_CALL_TIMEOUT_MS` against a stuck server — so summing `intervalMs` undercounted the
+  // budget by every tick's own cost, and a `watch --budget-ms 480000` whose heartbeat hung could hold the driver's Bash call far past the eight minutes it
+  // was promised. Reading the clock each pass makes the promise hold whatever a tick costs.
+  const startedAt = Date.now();
   let checks = 0;
   for (;;) {
     const jsonlExists = fs.existsSync(jsonlFile);
@@ -5961,10 +6016,10 @@ function cmdWatch(argv) {
 
     if (!pidAlive(pid)) return 0;
 
-    elapsed += intervalMs;
-    if (elapsed >= budgetMs) return 3;
+    const left = budgetMs - (Date.now() - startedAt);
+    if (left <= 0) return 3;
 
-    sleepSync(intervalMs);
+    sleepSync(Math.min(intervalMs, left));
   }
 }
 

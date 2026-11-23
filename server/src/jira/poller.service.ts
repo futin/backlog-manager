@@ -186,7 +186,10 @@ export type SweepNowResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 
 
 /** The base tick, the GitHub poller's. Every `SyncInterval` is a whole number of these, so the tick is the resolution and no board needs its own timer. */
 export const JIRA_POLL_MS = 15_000;
-/** The longest a board save waits for its own sweep; past it the route answers and the sweep finishes on its own. */
+/**
+ * The longest a board save waits for its own sweep — and the longest the site-wide `Sync now` and the Mentions page's check now wait for theirs (#586); past
+ * it the route answers and the sweep finishes on its own.
+ */
 export const JIRA_SAVE_SWEEP_WAIT_MS = 20_000;
 /** Issues kept per saved query. Silent: spec §3 ties `truncated` to the board cap alone (`JIRA_BOARD_CAP`, `shared/types.ts`), which the band names. */
 export const JIRA_QUERY_CAP = 200;
@@ -405,18 +408,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       if (this.inFlight !== null) await this.inFlight.catch(() => undefined);
       // `tick()` is `sweep()`, which clears the pending link on entry — the one place that is done.
       await this.tick();
-    })().catch(() => undefined);
-
-    let cap: NodeJS.Timeout | undefined;
-    const capped = new Promise<void>((resolve) => {
-      cap = setTimeout(resolve, JIRA_SAVE_SWEEP_WAIT_MS);
-      cap.unref?.();
-    });
-    try {
-      await Promise.race([swept, capped]);
-    } finally {
-      clearTimeout(cap);
-    }
+    })();
+    await this.bounded(swept);
   }
 
   /**
@@ -426,7 +419,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * `boards/sweep` is not refused in one — this button alone is); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`, no call; else
    * force every non-`off` board (the `boardSaved` mechanism, so a 401 or a window opening mid-sweep leaves them owed), force a mentions check
    * (`mentionsForced`), and sweep once. An `off` board is left to its own per-row icon. With the arming widened (header), `not-armed` is now only an
-   * unconfigured or `unsupported` site: a site with every board `off` keeps a chain for mentions, so the press checks them and answers `done`.
+   * unconfigured or `unsupported` site: a site with every board `off` keeps a chain for mentions, so the press checks them and answers `done`. The join and
+   * the fresh sweep are both bounded by `JIRA_SAVE_SWEEP_WAIT_MS`: past it the route answers `done` anyway and the sweep finishes behind it (the GitLab
+   * sweep route's precedent) — a stalled Jira holds one press for that long and no longer, where it used to hold the request until Jira answered (#586).
    */
   async sweepNow(): Promise<SweepNowResult> {
     const now = Date.now();
@@ -434,13 +429,13 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     this.expireWindow(now);
     if (this.inWindow(now)) return { kind: 'wait', retryAt: this.boot.retryAt! };
     if (this.inFlight !== null) {
-      await this.inFlight.catch(() => undefined);
+      await this.bounded(this.inFlight);
       return { kind: 'done' };
     }
     if (this.lastSweepEndAt !== null && now - this.lastSweepEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
     for (const board of readJiraConfig().boards) if (board.interval !== 'off') this.forced.set(board.id, ++this.forceSeq);
     this.mentionsForced = true;
-    await this.tick().catch(() => undefined);
+    await this.bounded(this.tick());
     return { kind: 'done' };
   }
 
@@ -449,7 +444,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * await. Order: mentions not armed (unconfigured, `unsupported`) → `not-armed`; a 429 window → `wait` with the STORED end, no call; a check running
    * (tick-borne or another press) → join it; one ended under `SWEEP_FLOOR_MS` ago → `done`, no call; the boot not whole (no `cloudId`, or a 401 reset
    * `me`, which the JQL is built from) → `done`, no call — the status says why, and the boot retry on the chain is what fixes it; else one check, outside
-   * the tick (header), then `wake()`. Never rejects: `checkMentions` turns a throw into the mentions `detail`.
+   * the tick (header), then `wake()`. Never rejects: `checkMentions` turns a throw into the mentions `detail`. The join and the fresh check are bounded by
+   * `JIRA_SAVE_SWEEP_WAIT_MS`, as `sweepNow`'s are: past it the route answers `done` and the check finishes behind it. The bound wraps the check AND its
+   * `wake()`, so the chain is re-armed when the check really ends — not when the route stopped waiting for it (#586).
    */
   async mentionsSweepNow(): Promise<SweepNowResult> {
     const now = Date.now();
@@ -457,15 +454,32 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     this.expireWindow(now);
     if (this.inWindow(now)) return { kind: 'wait', retryAt: this.boot.retryAt! };
     if (this.mentionsInFlight !== null) {
-      await this.mentionsInFlight;
+      await this.bounded(this.mentionsInFlight);
       return { kind: 'done' };
     }
     if (this.mentionsEndAt !== null && now - this.mentionsEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
     const gate = this.gate();
     if ('refused' in gate || !this.boot.answered()) return { kind: 'done' };
-    await this.checkMentions(gate.auth, true);
-    this.wake();
+    await this.bounded(this.checkMentions(gate.auth, true).then(() => this.wake()));
     return { kind: 'done' };
+  }
+
+  /**
+   * Wait for `p`, at most `JIRA_SAVE_SWEEP_WAIT_MS`; answers whether it settled in time. Either settlement counts as finished, so a rejected sweep never
+   * rejects a route. The bound's timer is unref'd and cleared either way — the GitLab poller's `bounded`, the shape every one of this file's three waiting
+   * routes (`boardSaved`, `sweepNow`, `mentionsSweepNow`) now shares.
+   */
+  private async bounded(p: Promise<unknown>): Promise<boolean> {
+    let timer: NodeJS.Timeout | undefined;
+    const bound = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), JIRA_SAVE_SWEEP_WAIT_MS);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([p.then(() => true as const, () => true as const), bound]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** A board was deleted: its cache goes now, not at the next sweep's hygiene pass — a board re-created under the same id must start cold. */

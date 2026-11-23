@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { JIRA_MENTIONS_ISSUE_CAP, JIRA_MENTIONS_POLL_MS, JIRA_MENTIONS_WINDOW_DAYS, JIRA_THREAD_MAX, type JiraBoard } from '../../shared/types';
 import { JiraClient } from '../../server/src/jira/jira.client';
 import { MENTION_SEARCH_FIELDS, mentionsJql } from '../../server/src/jira/mentions.util';
-import { JIRA_POLL_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
+import { JIRA_POLL_MS, JIRA_SAVE_SWEEP_WAIT_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
 import { FakeJira, makeRawIssue, type SeededComment } from '../helpers/jira';
 
 /**
@@ -499,5 +499,93 @@ describe('a posted reply (R7: answeredAt, applied on read)', () => {
     now = T0 + JIRA_MENTIONS_WINDOW_DAYS * 24 * 60 * MIN + MIN;
     await poller.tick();
     expect(answeredAt().size).toBe(0);
+  });
+});
+
+/**
+ * The two site-wide "now" routes answer within `JIRA_SAVE_SWEEP_WAIT_MS` however long Jira takes (#586) — `boardSaved`'s bound, the GitLab sweep route's
+ * shape. Every Jira call already carries `JIRA_TIMEOUT_MS` (10 s), so what stalls a press is a sweep of many slow calls, not one hung call; the cases stand
+ * that in with a sweep (`tick`) or a check (`checkMentions`) that settles only when released. Fake timers (Date left to the suite's own mock) step the bound
+ * without waiting it out, and a route that still awaited the sweep bare would never answer.
+ */
+describe('the site-wide sweeps are bounded (#586)', () => {
+  beforeEach(() => jest.useFakeTimers({ doNotFake: ['Date'] }));
+  afterEach(() => jest.useRealTimers());
+
+  type Inner = { inFlight: Promise<void> | null; checkMentions: (...args: unknown[]) => Promise<void>; wake: () => void };
+  const inner = () => poller as unknown as Inner;
+
+  /** A promise that settles only when the returned `release` is called. */
+  function held(): { promise: Promise<void>; release: () => void } {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { promise, release };
+  }
+
+  /** Settles `p` into a flag, so a case can ask "has it answered yet" without awaiting it. */
+  function watch<T>(p: Promise<T>): { done: () => boolean; value: () => T | undefined } {
+    let settled = false;
+    let out: T | undefined;
+    void p.then((v) => {
+      settled = true;
+      out = v;
+    });
+    return { done: () => settled, value: () => out };
+  }
+
+  it('sweepNow answers done at the bound while its fresh sweep is still out', async () => {
+    await poller.tick();
+    now += SWEEP_FLOOR_MS + 1_000;
+    const sweep = held();
+    jest.spyOn(poller, 'tick').mockReturnValue(sweep.promise);
+    const press = watch(poller.sweepNow());
+    await jest.advanceTimersByTimeAsync(JIRA_SAVE_SWEEP_WAIT_MS - 1);
+    expect(press.done()).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(press.value()).toEqual({ kind: 'done' });
+    sweep.release();
+  });
+
+  it('sweepNow joining a sweep that never settles answers done at the bound, and the sweep stays in flight', async () => {
+    await poller.tick();
+    const sweep = held();
+    inner().inFlight = sweep.promise;
+    const press = watch(poller.sweepNow());
+    await jest.advanceTimersByTimeAsync(JIRA_SAVE_SWEEP_WAIT_MS);
+    expect(press.value()).toEqual({ kind: 'done' });
+    expect(inner().inFlight).toBe(sweep.promise);
+    sweep.release();
+    inner().inFlight = null;
+  });
+
+  it('mentionsSweepNow answers done at the bound, and wakes the chain once, when the check really ends', async () => {
+    await poller.tick();
+    now += SWEEP_FLOOR_MS + 1_000;
+    const check = held();
+    jest.spyOn(inner(), 'checkMentions').mockReturnValue(check.promise);
+    const wake = jest.spyOn(inner(), 'wake');
+    const press = watch(poller.mentionsSweepNow());
+    await jest.advanceTimersByTimeAsync(JIRA_SAVE_SWEEP_WAIT_MS - 1);
+    expect(press.done()).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(press.value()).toEqual({ kind: 'done' });
+    expect(wake).not.toHaveBeenCalled();
+    check.release();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(wake).toHaveBeenCalledTimes(1);
+  });
+
+  it('mentionsSweepNow joining a check that never settles answers done at the bound', async () => {
+    await poller.tick();
+    now += SWEEP_FLOOR_MS + 1_000;
+    const check = held();
+    (poller as unknown as { mentionsInFlight: Promise<void> | null }).mentionsInFlight = check.promise;
+    const press = watch(poller.mentionsSweepNow());
+    await jest.advanceTimersByTimeAsync(JIRA_SAVE_SWEEP_WAIT_MS);
+    expect(press.value()).toEqual({ kind: 'done' });
+    check.release();
+    (poller as unknown as { mentionsInFlight: Promise<void> | null }).mentionsInFlight = null;
   });
 });

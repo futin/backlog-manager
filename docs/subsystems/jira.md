@@ -417,7 +417,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   the page has gone.
 - **`POST /api/jira/sweep` is site-wide only** — it takes no `{ boardId }` (a deviation from spec §5/§8): the per-board `now` already exists as `boards/sweep`, which
   reuses `boardSaved`, sweeps an `off` board and is not refused inside a 429 window. `JiraPollerService.sweepNow` decides everything before its first await, so two
-  presses in one tick share one sweep.
+  presses in one tick share one sweep. It waits for that sweep and the mentions check behind it at most `JIRA_SAVE_SWEEP_WAIT_MS` and then answers the status as
+  it stands, the sweep running on — so a Jira that stalls between requests never holds the press open (#586).
 - **The chip and the Sources card's Jira row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` —
   the strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
   330 px `Popover` with a `Sync now` head button (`POST /api/jira/sweep`, site-wide — a spec §5 deviation from the per-board sweep), a `Jira setup ↗` link and a

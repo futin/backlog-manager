@@ -11,6 +11,7 @@ import { readAgentsConfig } from '../../server/src/agents/config.util';
 import { mainCheckoutOf } from '../../server/src/agents/worktree-main.util';
 import type { JiraIssue } from '../../shared/types';
 import {
+  JIRA_DETECT_RETRY_MS,
   JIRA_LIVE_GRACE_MS,
   JIRA_QUIET_MS,
   JIRA_RECONCILE_FAST_MS,
@@ -845,16 +846,32 @@ describe('branch detection (Jira sessions §5)', () => {
     expect(reads).toEqual(['PAY-151']);
   });
 
-  it('a 429 (or any other failure) leaves nothing and is read again next tick, then links', async () => {
+  it('a 429 (or any other failure) leaves nothing, is not re-read inside JIRA_DETECT_RETRY_MS, then is read again and links', async () => {
     issueAnswers.set('PAY-151', failure(429));
     rows(row('s1', 'PAY-151-x', main));
     await reconciler.tick();
     expect(live.links()).toEqual([]);
     expect(live.isNeverLink('PAY-151', 's1')).toBe(false);
     issueAnswers.delete('PAY-151');
+    jest.setSystemTime(T0 + JIRA_DETECT_RETRY_MS - 1);
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151']);
+    jest.setSystemTime(T0 + JIRA_DETECT_RETRY_MS);
     await reconciler.tick();
     expect(reads).toEqual(['PAY-151', 'PAY-151']);
     expect(linkOf('PAY-151', 's1')).toBeDefined();
+  });
+
+  it('five pairs failing with 500 do not starve the sixth: the next tick reads it without re-reading the five (#586)', async () => {
+    for (const n of [1, 2, 3, 4, 5]) issueAnswers.set(`PAY-${100 + n}`, failure(500));
+    rows(...[1, 2, 3, 4, 5, 6].map((n) => row(`s${n}`, `PAY-${100 + n}-x`, main)));
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-101', 'PAY-102', 'PAY-103', 'PAY-104', 'PAY-105']);
+    expect(live.links()).toEqual([]);
+    await reconciler.tick();
+    expect(reads.slice(5)).toEqual(['PAY-106']);
+    expect(linkOf('PAY-106', 's6')).toMatchObject({ how: 'branch' });
+    for (const n of [1, 2, 3, 4, 5]) expect(live.isNeverLink(`PAY-${100 + n}`, `s${n}`)).toBe(false);
   });
 
   it('a person-unlinked (suppressed) pair is not read, and an ended pair is left to re-attach', async () => {

@@ -41,8 +41,9 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
   session and ends with `record`, which releases it. Busy is any of: a `running` or `paused` orchestrator run, a board-started run with no run file yet (read
   through the API, so skipped with the stack down), a `started:` marker on any open item in the main checkout or a linked worktree (the orchestrator's
   `.worktrees/<id>`, execute's `.worktrees/execute-<id>` and a PR-mode groom's `.worktrees/groom-<id>` trees skipped), a live claim, or a fresh remote run.
-  Execute is capped by the open PRs whose head starts `execute/` (`gh pr list --state open --limit 500`; no `gh`, a failure, unparseable output or 500 results
-  is `cannot count open PRs`) and groom by the items carrying `plan-review`, each cap the flag, else `tick.json`'s `maxPrs`/`maxPlans`, else 2/3; a groom only plans an ungroomed bug or promotes a refactor, and skips an item whose
+  Execute is capped by the open PRs whose head starts `execute/` (`gh pr list --state open --limit 500`; no `gh`, a failure,
+  a `gh` still running after 15 s, unparseable output or 500 results is `cannot count open PRs`) and groom by the items carrying `plan-review`, each cap the
+  flag, else `tick.json`'s `maxPrs`/`maxPlans`, else 2/3; a groom only plans an ungroomed bug or promotes a refactor, and skips an item whose
   `groom/<id>` branch or `.worktrees/groom-<id>` tree exists (`groomTaken`). The mark is the label on a tracker project and a `plan-review: true`
   frontmatter line on a files project, written in the SAME write as the plan — `backlog.mjs body|new --plan-review`, or the frontmatter groom prints — so no
   moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
@@ -78,7 +79,8 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
 - **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `jira.mjs worktree`.**
   The marker decides the mode — absent or `{"kind":"files"}` runs today's synchronous code byte for byte and makes no HTTP request on any verb;
   `{"kind":"github"}` with a valid repo routes every command through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming
-  the marker, NEVER a fallback to files. There is no offline queue on purpose: a parked write would be a second source of truth on one laptop. Ids are `31` /
+  the marker, NEVER a fallback to files. There is no offline queue on purpose: a parked write would be a second source of truth on one laptop.
+  An API that takes a request and never answers is exit `6` after 90 s, its sentence saying whether the write may have landed. Ids are `31` /
   `#31` / this project's own URN; a file-shaped id and another repo's URN are each refused with their own sentence. `review <id> on|off` is the opposite —
   tracker-only, through `POST /api/items/review`, exit `1` in a files project. `jira.mjs` has no files mode at all: every command but
   `worktree` is an
