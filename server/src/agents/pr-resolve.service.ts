@@ -6,13 +6,10 @@ import { AgentsService } from './agents.service';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { dashboardSessionRow } from './dashboard-sessions.util';
 import { JIRA_LIVE_GRACE_MS } from './jira-live.service';
-import { RECLAIMABLE_ID, fileKey, parseFileKey, parseResolveBody, prResolveHome, readLock, readOutcome, resolveTrigger } from './pr-resolve.util';
+import { PR_RESOLVE_LOCK_TTL_MS, RECLAIMABLE_ID, fileKey, parseFileKey, parseResolveBody, prResolveHome, readLock, readOutcome, resolveTrigger } from './pr-resolve.util';
 import { PullRequestsService } from '../tracker/pulls.service';
 import { projectDispatchGate } from '../../../shared/agent';
-import type { PrResolveOutcome, PrResolvePayload, PrResolveState } from '../../../shared/types';
-
-/** A lock with no session id (an unset-env resolve) cannot be asked about, so it is judged by age alone — the tool's own `--lock-ttl` default. */
-const NULL_LOCK_TTL_MS = 3 * 60 * 60 * 1000;
+import type { AgentDispatchResult, PrResolveOutcome, PrResolvePayload, PrResolveState } from '../../../shared/types';
 
 /** One resolve this server started: `sessionId` is `null` from the reservation until the spawn answers. */
 interface Entry {
@@ -50,7 +47,7 @@ export class PrResolveService {
    * check-and-set in the method — no `await` between reading the map and writing the entry — so of two clicks that both cleared rung 5, one passes. Every
    * refusal after it, and a failed spawn, drops the reservation first.
    */
-  async dispatch(body: unknown): Promise<{ sessionId: string }> {
+  async dispatch(body: unknown): Promise<AgentDispatchResult> {
     const req = parseResolveBody(body);
     if (req === null) return refuse('body must be { repo: "owner/name", number }', 400);
     const { repo, number } = req;
@@ -113,8 +110,9 @@ export class PrResolveService {
     const age = Date.now() - lock.at;
     // An id a prompt may not carry is treated as no id at all: nothing can be reclaimed by name, so the lock is honoured for the same 3 hours the tool honours
     // it and then ignored, rather than refusing forever on a file only the tool's own TTL would ever clear.
+    // A lock with no session id (an unset-env resolve) cannot be asked about, so it is judged by age alone — against the tool's own lock TTL.
     if (lock.sessionId === null || !RECLAIMABLE_ID.test(lock.sessionId))
-      return age < NULL_LOCK_TTL_MS ? refuse(running, 409) : resolveTrigger(repo, number, null);
+      return age < PR_RESOLVE_LOCK_TTL_MS ? refuse(running, 409) : resolveTrigger(repo, number, null);
     if (age < JIRA_LIVE_GRACE_MS) return refuse(running, 409);
     let row: Awaited<ReturnType<typeof dashboardSessionRow>>;
     try {

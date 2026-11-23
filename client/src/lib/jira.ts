@@ -7,7 +7,7 @@ import { serviceTone } from './service-status';
 import type { StateTone } from './tones';
 import { runBlockPhrase, runYields } from '../../../shared/jira-sessions';
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
-import { JIRA_PROMPT_MAX, SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
+import { JIRA_BOARD_CAP, JIRA_PROMPT_MAX, SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
   ReviewHalf,
   JiraAccess,
@@ -694,7 +694,8 @@ export function bandSub(
   const parents = counts !== null && counts.parents > 0 ? count(counts.parents, 'parent') : null;
   const polled = polledPhrase(board.polledAt, now);
   const failure = failurePhrase(board.failures);
-  const cap = board.truncated ? 'first 500 shown' : null;
+  // The server's own cap, read from `shared/` so the band can never name a number the poller no longer keeps.
+  const cap = board.truncated ? `first ${JIRA_BOARD_CAP} shown` : null;
 
   const sentence = [site, `${issues}${sourceList.length > 0 ? ` from ${sourceList.join(' and ')}` : ''}`, parents, polled, failure, cap];
   const facts = [issues, parents, ...sourceList, cap].filter((s): s is string => s !== null);

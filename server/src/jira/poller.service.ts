@@ -4,6 +4,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
 import {
+  JIRA_BOARD_CAP,
   JIRA_MENTIONS_POLL_MS,
   JIRA_MENTIONS_WINDOW_DAYS,
   JIRA_THREAD_MAX,
@@ -187,12 +188,10 @@ export type SweepNowResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 
 export const JIRA_POLL_MS = 15_000;
 /** The longest a board save waits for its own sweep; past it the route answers and the sweep finishes on its own. */
 export const JIRA_SAVE_SWEEP_WAIT_MS = 20_000;
-/** Issues kept per saved query. Silent: spec §3 ties `truncated` to the board cap alone, and the band's copy says `first 500 shown`. */
+/** Issues kept per saved query. Silent: spec §3 ties `truncated` to the board cap alone (`JIRA_BOARD_CAP`, `shared/types.ts`), which the band names. */
 export const JIRA_QUERY_CAP = 200;
 /** Issues kept per root walk, the root itself counting as the first. Silent, for the same reason. */
 export const JIRA_ROOT_CAP = 200;
-/** Issues kept per board, after dedupe; the one cap `truncated` reports. */
-export const JIRA_BOARD_CAP = 500;
 /** `parent in` rounds below a root: epic → story → subtask. An initiative-level root reaches its epics and stories, not their subtasks (§3). */
 export const JIRA_DESCENDANT_ROUNDS = 2;
 /** The roots picker's result count. */

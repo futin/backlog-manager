@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common
 
 import { SameOriginPostGuard } from '../origin.guard';
 import { PrResolveService } from './pr-resolve.service';
-import type { PrResolvePayload } from '../../../shared/types';
+import type { AgentDispatchResult, PrResolvePayload } from '../../../shared/types';
 
 /**
  * The board's PR conflict resolve (spec 2026-11-17-pr-conflict-resolve-design.md). Its own controller under the `api/agents` prefix, like the Jira routes:
@@ -19,7 +19,7 @@ export class PrResolveController {
   @UseGuards(SameOriginPostGuard)
   @Post('dispatch-pr-resolve')
   @HttpCode(201)
-  dispatch(@Body() body: unknown): Promise<{ sessionId: string }> {
+  dispatch(@Body() body: unknown): Promise<AgentDispatchResult> {
     return this.resolves.dispatch(body);
   }
 

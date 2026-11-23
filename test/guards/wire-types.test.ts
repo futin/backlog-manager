@@ -108,3 +108,26 @@ describe('cross-boundary wire types are declared once, in shared/ (#375, #591)',
     expect(declarations('export type UncommittedItems<T> = T;', 'UncommittedItems')).toBe(1);
   });
 });
+
+/**
+ * #599: `POST /api/agents/dispatch-pr-resolve` answers `AgentDispatchResult`, the 201 body of every headless launch, on all three sides that name it. Each
+ * used to spell it inline as `{ sessionId: string }`, which the derived list above cannot see — an inline object type has no name to find a copy by — so this
+ * case reads for the inline spelling itself. The service's `Entry.sessionId: string | null` is a different shape and must not match.
+ */
+describe('dispatch-pr-resolve answers the shared AgentDispatchResult', () => {
+  const INLINE = /\{\s*sessionId\s*:\s*string\s*\}/;
+  const SIDES = [
+    join('server', 'src', 'agents', 'pr-resolve.controller.ts'),
+    join('server', 'src', 'agents', 'pr-resolve.service.ts'),
+    join('client', 'src', 'lib', 'prs-api.ts')
+  ];
+
+  it.each(SIDES)('%s carries no inline { sessionId: string } type', (file) => {
+    expect(readFileSync(join(ROOT, file), 'utf8')).not.toMatch(INLINE);
+  });
+
+  it('matches the inline type and not the nullable entry field', () => {
+    expect('Promise<{ sessionId: string }>').toMatch(INLINE);
+    expect('interface Entry {\n  startedAt: number;\n  sessionId: string | null;\n}').not.toMatch(INLINE);
+  });
+});

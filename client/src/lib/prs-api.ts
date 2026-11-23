@@ -1,5 +1,6 @@
 import { errorOf, postJson } from './http';
 import type {
+  AgentDispatchResult,
   PrAutoMergeRequest,
   PrMergeRequest,
   PrResolvePayload,
@@ -81,7 +82,7 @@ export async function fetchPrResolves(): Promise<PrResolvePayload> {
 }
 
 /** Starts a headless resolve of one PR. A refusal (sync off, fork, already running, …) rejects with the server's own `error` sentence, like the PR writes. */
-export async function dispatchPrResolve(req: PrResolveRequest): Promise<{ sessionId: string }> {
+export async function dispatchPrResolve(req: PrResolveRequest): Promise<AgentDispatchResult> {
   const res = await postJson('/api/agents/dispatch-pr-resolve', req);
   const sessionId = (res.body as { sessionId?: unknown } | null)?.sessionId;
   if (!res.ok || typeof sessionId !== 'string') throw new Error(errorOf(res.body, `resolve failed (${res.status})`));
