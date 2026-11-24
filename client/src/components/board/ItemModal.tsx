@@ -9,6 +9,7 @@ import { Modal } from '../ui/Modal';
 import { ClaimRelease } from './ClaimRelease';
 import { DispatchButton } from './DispatchButton';
 import { PlanApprove } from './PlanApprove';
+import { ReviewLift } from './ReviewLift';
 import { useFetched } from '../../hooks/useFetched';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
@@ -34,9 +35,11 @@ const NO_REMOTE_HOSTS: ReadonlySet<string> = new Set();
  * 700 px shape; this file owns what goes in the two slots. It never edits an
  * item — every write to an item file belongs to the skills. The two writes it
  * can start are a TRACKER claim's release (#225, `ClaimRelease`), through the
- * server's guarded abort route, and a TRACKER plan's approval (#367,
- * `PlanApprove`), through the guarded plan-review route — never a file. A
- * files item awaiting review gets a prompt to copy instead.
+ * server's guarded abort route, a TRACKER plan's approval (#367,
+ * `PlanApprove`), through the guarded plan-review route, and a TRACKER item's
+ * stale `in-review` label (`ReviewLift`, the in-review-without-PR spec),
+ * through the guarded review route — never a file. A files item awaiting
+ * review gets a prompt to copy instead.
  *
  * It was `ItemDrawer`, a panel pinned to the right edge, until task-40. The
  * facts it drew as one run-on meta line are a facts COLUMN now, one labelled
@@ -62,6 +65,7 @@ export function ItemModal({
   trackerLine,
   onReleased,
   onApproved,
+  onLifted,
   remoteHosts = NO_REMOTE_HOSTS
 }: {
   item: BacklogItem;
@@ -108,6 +112,9 @@ export function ItemModal({
   /** #367 — the board's re-read after `PlanApprove` lifted this item's plan-review mark, so the dispatch chip stops reading `Review plan`. Like
    *  `onReleased`, its presence is what draws the control, so a render site with no payload to re-read offers no write. */
   onApproved?: () => void;
+  /** The board's re-read after `ReviewLift` removed an `in-review` label no open PR answered for, so the dispatch chip enables. Like `onApproved`, its
+   *  presence is what draws the control. */
+  onLifted?: () => void;
   /** Multi-dashboard task 10 — the hosts the configured remotes own, for the claim control: a claim held on one offers Stop & release. Absent means no
    *  remotes. */
   remoteHosts?: ReadonlySet<string>;
@@ -230,6 +237,7 @@ export function ItemModal({
           <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />
         </div>
       )}
+      {onLifted && <ReviewLift item={item} onLifted={onLifted} />}
       {onApproved && <PlanApprove item={item} onApproved={onApproved} />}
       {onReleased && <ClaimRelease item={item} onReleased={onReleased} remoteHosts={remoteHosts} />}
     </div>

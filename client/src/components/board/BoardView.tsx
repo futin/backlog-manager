@@ -797,6 +797,8 @@ export default function BoardView({ source, onOpenRuns }: { source: SourceSectio
           onReleased={refetch}
           // #367 — an approved plan reads on the next payload, and `openItem` hands the modal that fresh copy.
           onApproved={refetch}
+          // A lifted in-review label reads on the next payload, the same way.
+          onLifted={refetch}
           remoteHosts={remoteHosts}
         />
       )}
