@@ -54,20 +54,20 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * Dismiss and Restore are the hook's, which never reject — a refusal lands in `error` and the band says it in red — and replace the payload on success, so
  * the row leaves (or comes back) from the answer itself, not from a guess made here.
  *
- * **The mention modal's WALK is held here** (Task 10; the dialog itself is drawn by `MentionModalHost`, which the board reuses), because its prev/next walks the
- * order THIS page draws: the List's rows (one per mention, the search applied) or the Cards' cards (one per ticket, `mentionCards` over the same search), Show
- * dismissed applied to both. `opened` is the stop the reader is on —
- * a ticket and a mention — and its place in the order is recomputed on every render (`mentionStepIndex`: by comment id in the List, by key in the Cards), so
- * a poll that reorders or recounts the page moves `Mention i of N` and never the dialog. A stop that LEFT the order (answered, dismissed with Show dismissed
- * off, filtered out) stays on screen with no position; its neighbours are then the ones around the last place it held (`lastAt`), so Previous is the row
- * that was before it and Next the one that took its place. The ticket's state for the footer is the host's read of the same answer: in `issues`, in
- * `dismissed`, or in neither.
+ * The mention modal's WALK is held here** (Task 10; the dialog itself is drawn by `MentionModalHost`, which the board reuses), because its prev/next
+ * walks the order THIS page draws: the List's rows (one per mention, the search applied) or the Cards' cards (one per ticket, `mentionCards` over the
+ * same search), Show dismissed applied to both. `opened` is the stop the reader is on — a ticket and a mention — and its place in the order is
+ * recomputed on every render (`mentionStepIndex`: by comment id in the List, by key in the Cards), so a poll that reorders or recounts the page moves
+ * `Mention i of N` and never the dialog. A stop that LEFT the order (answered, dismissed with Show dismissed off, filtered out) stays on screen with no
+ * position; its neighbours are then the ones around the last place it held (`lastAt`), so Previous is the row that was before it and Next the one that
+ * took its place. The ticket's state for the footer is the host's read of the same answer: in `issues`, in `dismissed`, or in neither.
  *
- * **The reply's writes are wired in `MentionModalHost`** (phase 2, Task 8; lifted from here by the board link's Task 4), so the modal stays a view of props:
- * `Draft a reply` and `Redraft` are `dispatchReply` with the launch defaults from Settings, `Stop` is `stopJira`, and each re-reads this page's hook AND the shell's sessions context on success, because the
- * modal's state is the two answers together (`issue.session` from the mentions store, the `(key, sessionId)` link that Open session needs from the
- * sessions poll). Discard and Post reply are the hook's own writes, whose answers replace the payload. The repo picker's list is `replyRepos` over the shell
- * status's `repos` — the ticket's project first — and a `Draft ready` marker on the List row and the card is the List's and the Cards' own (`draft !== null`).
+ * **The reply's writes are wired in `MentionModalHost`** (phase 2, Task 8; lifted from here by the board link's Task 4), so the modal stays a view of
+ * props: `Draft a reply` and `Redraft` are `dispatchReply` with the launch defaults from Settings, `Stop` is `stopJira`, and each re-reads this page's
+ * hook AND the shell's sessions context on success, because the modal's state is the two answers together (`issue.session` from the mentions store, the
+ * `(key, sessionId)` link that Open session needs from the sessions poll). Discard and Post reply are the hook's own writes, whose answers replace the
+ * payload. The repo picker's list is `replyRepos` over the shell status's `repos` — the ticket's project first — and a `Draft ready` marker on the List
+ * row and the card is the List's and the Cards' own (`draft !== null`).
  */
 export function JiraMentionsView({ onOpenJiraPage, onOpenPage }: { onOpenJiraPage: (p: JiraPage) => void; onOpenPage: (key: string) => void }) {
   const { data, loading, error, checking, sweep, dismiss, restore } = useJiraMentionsContext();
