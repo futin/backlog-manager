@@ -86,6 +86,7 @@ the board through a small open-context, so the marker needs no prop threading.
 **Interfaces:**
 - Consumes: `useJiraMentions({ enabled })` (Task 1).
 - Produces:
+  - `JiraMentionsContext` (the exported context object, as `JiraSessionsContext.tsx` exports its own) — tests mount stub values through it.
   - `JiraMentionsProvider({ enabled, children }: { enabled: boolean; children: ReactNode })`
   - `useJiraMentionsContext(): JiraMentionsState` — default value: `data: null`, `loading: false`, `error: null`, `checking: false`, `reload`/`sweep` no-ops,
     every write resolving `{ ok: false, message: 'mentions unavailable' }`; never fetches.
@@ -143,19 +144,19 @@ the board through a small open-context, so the marker needs no prop threading.
   test/guards` and add hits. `pnpm run typecheck`.
 - [ ] **Step 5:** commit `feat(ui): warn chip variant and the mention mark`.
 
-### Task 4: `MentionModalHost`, `JiraView`'s mention slot, and the board walk
+### Task 4: `MentionModalHost`, the open-context and the mark connector
 
 **Files:**
 - Create: `client/src/components/jira/MentionModalHost.tsx`, `client/src/components/jira/JiraMentionMarkFor.tsx`,
   `client/src/components/jira/MentionOpenContext.tsx` (the open-context's ONLY home — not `JiraView.tsx`, which would close an import cycle
   `JiraView → JiraBoardView → JiraLaneBoard → JiraCard → JiraMentionMarkFor → JiraView`)
 - Modify: `client/src/components/jira/JiraMentionsView.tsx` (render the host instead of its inline `JiraMentionModal` wiring, :221 on; its own walk —
-  `opened`, `lastAt`, `byTicket`, `mentionStepIndex` — stays), `client/src/components/jira/JiraView.tsx` (slot, open-context, header paragraph)
+  `opened`, `lastAt`, `byTicket`, `mentionStepIndex` — stays). `JiraView.tsx` is Task 5's.
 - Test: Create `test/jira/jira-mention-host.test.tsx`; existing `test/jira/jira-mentions-page.test.tsx` and `jira-mention-modal.test.tsx` must stay green.
   The `JiraView`-level cases (open from a card, the walk, Dismiss, the Detail swap) are Task 5's, once a real home draws the mark.
 
 **Interfaces:**
-- Consumes: `useJiraMentionsContext`, `useMentionIndex` (Task 2), `MentionMark` (Task 3), `useJiraSessionsContext`.
+- Consumes: `JiraMentionsContext`, `useJiraMentionsContext`, `useMentionIndex` (Task 2), `MentionMark` (Task 3), `useJiraSessionsContext`.
 - Produces:
   - `MentionModalHost(props: { issue: JiraMentionIssue; mention: JiraMention; position: { at: number; of: number } | null; onPrev: (() => void) | null;
     onNext: (() => void) | null; onClose: () => void; onOpenPage: ((key: string) => void) | null })` — derives `state` (`open` if the key is in
@@ -176,29 +177,24 @@ the board through a small open-context, so the marker needs no prop threading.
     `"PAY-3"` → nothing; no `MentionOpenContext` provider → nothing.
   - the Mentions page still opens its modal from a row and walks rows in List order (existing page suites cover this; they must pass unchanged).
 - [ ] **Step 2:** run the new suite — FAIL.
-- [ ] **Step 3: Implement.** `JiraView` holds `mentionOpen: { issue: JiraMentionIssue; mention: JiraMention } | null`, reset on page change with `walk` and
-  `launch`. The provided opener for a key: look the key up in the index; if found, `setWalk([])` and set the slot to `{ issue, mention: issue.mentions[0] }`
-  in the same handler. The board walk per spec §4: order = the live entry's `mentions` (newest first), position from the shown mention's `commentId` in it,
-  no position/neighbours when absent. Render `MentionModalHost` after the Detail and before the launch sheet; its `onOpenPage` is Task 6's rule (pass
-  `null` for now). Move `JiraMentionsView`'s modal wiring into the host without changing the page's walk. Headers: `JiraView`'s (the paragraphs at ~:78
-  and ~:84-85 that name its modal slots — add the mention slot, the swap, why never stacked) and `JiraMentionsView`'s walk paragraph (~:56-68: the modal is
-  now drawn by `MentionModalHost`; the walk stays here).
+- [ ] **Step 3: Implement** the three files. Move `JiraMentionsView`'s modal wiring into the host without changing the page's walk; update
+  `JiraMentionsView`'s walk paragraph (~:56-68: the modal is now drawn by `MentionModalHost`; the walk stays here).
 - [ ] **Step 4:** `pnpm exec jest test/jira/jira-mention-host.test.tsx test/jira/jira-mentions-page.test.tsx test/jira/jira-mention-modal.test.tsx
-  test/jira/jira-detail.test.tsx test/jira/jira-ticket-page.test.tsx test/ui/ui-modal.test.tsx` — pass. `grep -rl "JiraMentionModal\|JiraView" test/` and
-  add hits. `pnpm run typecheck`.
-- [ ] **Step 5:** commit `feat(jira): open the mention modal over the board`.
+  test/ui/ui-modal.test.tsx` — pass. `grep -rl "JiraMentionModal\|JiraMentionsView" test/` and add hits. `pnpm run typecheck`.
+- [ ] **Step 5:** commit `feat(jira): a mention modal host and the mark connector`.
 
-### Task 5: The marker's four homes
+### Task 5: The marker's four homes and `JiraView`'s mention slot
 
 **Files:**
-- Modify: `client/src/components/jira/JiraCard.tsx` (in `.jira-card-head` after `.jira-card-key`, before the crumb), `JiraLaneHeader.tsx` (the
+- Modify: `client/src/components/jira/JiraView.tsx` (the mention slot, the opener provided through `MentionOpenContext`, the board walk, the Detail
+  swap, header paragraphs), `client/src/components/jira/JiraCard.tsx` (in `.jira-card-head` after `.jira-card-key`, before the crumb), `JiraLaneHeader.tsx` (the
   `data-kind="board"` head, beside its key, ~:150), `JiraIssueList.tsx` (`IssueRow` and the board-header row: summary cell after the title, before
   `jira-issues-under`; NOT the `none`/`off` lane rows), `JiraTicketStrip.tsx` (a last `Cell label="Mentions"` after `Agent`, only when the key has an entry)
 - Test: `test/jira/jira-board.test.tsx`, `test/jira/jira-list.test.tsx`, `test/jira/jira-ticket-body.test.tsx` (strip); Create
   `test/jira/jira-mention-board.test.tsx` (the `JiraView`-level cases)
 
 **Interfaces:**
-- Consumes: `JiraMentionMarkFor` (Task 4). Each home renders `<JiraMentionMarkFor issueKey={…} />` with its ticket's key (the strip's is `src.key`); the strip wraps it in its `Cell` only when the
+- Consumes: `JiraMentionsContext`, `useMentionIndex` (Task 2); `MentionModalHost`, `MentionOpenContext`, `JiraMentionMarkFor` (Task 4). Each home renders `<JiraMentionMarkFor issueKey={…} />` with its ticket's key (the strip's is `src.key`); the strip wraps it in its `Cell` only when the
   index has the key (read `useMentionIndex` there too, so an empty cell never draws).
 
 - [ ] **Step 1: Write failing tests** (each suite wraps its mount in the mentions provider/context with a stubbed payload, plus an opener spy via
@@ -221,10 +217,16 @@ the board through a small open-context, so the marker needs no prop threading.
       document, and it is the mention modal; Escape → zero dialogs.
     - switching the Jira page (e.g. to Sessions) clears the slot: no mention dialog.
 - [ ] **Step 2:** run those suites — FAIL.
-- [ ] **Step 3: Implement** the four placements.
+- [ ] **Step 3: Implement** the four placements, then `JiraView`: it holds `mentionOpen: { issue: JiraMentionIssue; mention: JiraMention } | null`,
+  reset on page change with `walk` and `launch`, and provides `MentionOpenContext` around its pages and Detail. The opener for a key: look the key up in
+  the index; if found, `setWalk([])` and set the slot to `{ issue, mention: issue.mentions[0] }` in the same handler. The board walk per spec §4: order =
+  the live entry's `mentions` (newest first), position from the shown mention's `commentId` in it, no position/neighbours when absent. Render
+  `MentionModalHost` after the Detail and before the launch sheet; its `onOpenPage` is Task 6's rule (pass `null` for now). Headers: `JiraView`'s
+  paragraphs at ~:78 and ~:84-85 that name its modal slots — add the mention slot, the swap, why never stacked.
 - [ ] **Step 4:** run the suites above plus `test/jira/jira-mention-host.test.tsx`, `test/jira/jira-strip-css.test.ts` and
   `test/guards/design-guards.test.ts`; `grep -rl
-  "JiraCard\|JiraLaneHeader\|JiraIssueList\|JiraTicketStrip" test/` and add hits. `pnpm run typecheck`.
+  "JiraCard\|JiraLaneHeader\|JiraIssueList\|JiraTicketStrip\|JiraView" test/` and add hits (include `test/jira/jira-detail.test.tsx` and
+  `test/jira/jira-ticket-page.test.tsx`). `pnpm run typecheck`.
 - [ ] **Step 5:** commit `feat(jira): mark tickets with open mentions on the board`.
 
 ### Task 6: `Open ticket page` from the Mentions page and the modal
