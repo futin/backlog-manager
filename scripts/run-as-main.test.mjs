@@ -33,7 +33,8 @@ const ROWS = [
   { script: 'skills/backlog-orchestrate/tools/api-call.mjs', args: [], status: 3, output: 'usage: api-call.mjs' },
   { script: 'scripts/ci-scope.mjs', args: ['--dry-run', '--files', 'README.md'], status: 0, output: 'ci-scope: docs-only' },
   { script: 'scripts/test-tmpdir.mjs', args: [PROBE], status: 0, output: 'probe-through-a-link' },
-  { script: 'skills/pr-resolve/tools/pr-resolve.mjs', args: ['zzz-nope'], status: 2, output: 'unknown subcommand' }
+  { script: 'skills/pr-resolve/tools/pr-resolve.mjs', args: ['zzz-nope'], status: 2, output: 'unknown subcommand' },
+  { script: 'skills/backlog-execute/tools/low-risk.mjs', args: [], status: 2, output: 'usage: low-risk.mjs' }
 ]
 
 const ELEVEN = [...ROWS.map((row) => row.script), 'scripts/sync-plugin.mjs'].sort()
