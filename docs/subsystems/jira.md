@@ -400,7 +400,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   (`JiraSessionCard`) come newest first: a state strip with its age (`pollAge`, never a
   clock of the component's own), the linked-how tag, the short id; `Unlink` only on a `branch` link and `Stop` only when the row carries a `stopState`, both
   through the dialog's `sessionWrite`, which reloads the sessions, the status and the board. The waiting question's text is never drawn, only its state
-  label. Under them the history timeline (`<how> · ended <age> ago`, `Reopen`), then `Run ▾`. A `starting` reservation is drawn from `GET /api/jira`'s
+  label. With agents on, a card also carries the `Subagents` disclosure (`ui/SubagentList.tsx`, #611), closed by default and polling the session's
+  subagents every 10 s only while open. Under them the history timeline (`<how> · ended <age> ago`, `Reopen`), then `Run ▾`. A `starting` reservation is drawn from `GET /api/jira`'s
   `live[key]`, never from the sessions payload. `Run ▾` is disabled only while a live `run` link exists or a reservation does: `runChipState` is the UNION of a
   live `run` link in
   the sessions payload and any `status.live` entry (every live `run` link plus the `starting` reservations, never a `branch` or `manual` link), so a Start that

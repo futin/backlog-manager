@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { runDetailModel } from '../../client/src/lib/run-detail';
+import { rowsFromArchive, rowsFromLive, runDetailModel } from '../../client/src/lib/run-detail';
 import type { RunDetailLive } from '../../client/src/lib/run-detail';
 import { mergeModeLabel } from '../../client/src/lib/run-stage';
 import { formatTurns, formatUsd } from '../../client/src/lib/run-stats';
@@ -318,6 +318,16 @@ describe('runDetailModel — the head and the facts strip', () => {
     expect(m.clock).not.toBeNull();
     expect(m.clock as number).toBeLessThan(NOW);
     expect(m.runLive).toBe(false);
+  });
+});
+
+describe('rows — the session id each item carries (#611)', () => {
+  it('1. rowsFromLive and rowsFromArchive pass the item’s sessionId through, null when it is null or the key is absent', () => {
+    expect(rowsFromLive([liveItem('a', 'merged', { sessionId: 'abc' }), liveItem('b', 'pending')]).map((r) => r.sessionId)).toEqual(['abc', null]);
+    expect(rowsFromArchive([archiveItem('a', 'merged', { sessionId: 'abc' }), archiveItem('b', 'pending')]).map((r) => r.sessionId)).toEqual(['abc', null]);
+    // An archived run file written by a hand or an older tool may carry no key at all — the row must read null, never undefined.
+    const { sessionId: _dropped, ...noKey } = archiveItem('c', 'merged');
+    expect(rowsFromArchive([noKey as ArchiveQueueItem])[0].sessionId).toBeNull();
   });
 });
 

@@ -1067,6 +1067,7 @@ export default function RunsView({ onOpenWatchdogSettings }: { onOpenWatchdogSet
                         pickAuthority([selectedRow.live], selectedRow.run),
                         projectSources.get(selectedRow.run.project)
                       )}
+                      agentsOn={agents !== null && agents.enabled}
                       gate={resumeGate(agents, selectedRow.run.project)}
                       resuming={resuming.has(selectedRow.run.project)}
                       onChanged={(kind) => {

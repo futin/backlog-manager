@@ -25,6 +25,7 @@ import type { JiraLiveSession } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { LiveStrip } from '../ui/LiveStrip';
 import { Meter } from '../ui/Meter';
+import { SubagentDisclosure } from '../ui/SubagentList';
 import { OpenChip, SessionOpen } from './SessionOpen';
 
 /**
@@ -134,6 +135,9 @@ export function JiraSessionCard({
           </Row>
           <Row label="Linked">{linkedHow(link.how)}</Row>
         </dl>
+        {/* #611: the session's subagents (DESIGN.md §8.4.4 — the same disclosure a run's item row carries), under the facts and gated on the same
+            `agentsOn` as Stop: with agents off the route answers 409. Closed, it fetches nothing, so N cards cost nothing until one is opened. */}
+        {agentsOn && <SubagentDisclosure sessionId={sessionId} />}
         <div className="jira-sess-acts">
           {/* One split Open: the secondary Open, Unlink and Stop are its menu's rows, offered exactly where each was a chip before. */}
           <SessionOpen

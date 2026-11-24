@@ -14,7 +14,10 @@ import type {
   ReviewEffort,
   ReviewModel,
   RunQueueItem,
-  RunStage
+  RunStage,
+  SubagentDetail,
+  SubagentJob,
+  SubagentState
 } from './types';
 
 /**
@@ -1175,3 +1178,61 @@ export function reviewerLabel(c: ReviewConfig | null | undefined): string {
 
 /** A prompt or argument string that carries a review flag. Lookbehind keeps `--reviewed` (no letter after `--review-`) and `--preview-x` out. */
 export const REVIEW_FLAG = /(?<![\w-])--review-[a-z]/;
+
+/**
+ * Subagent visibility (#611, docs/superpowers/specs/2026-11-24-subagent-visibility-design.md, "Shared types and derivation"). A parent waiting on a subagent
+ * writes nothing to its own transcript, so the board cannot tell a healthy wait from a dead one by the parent alone; these derive what the dashboard's
+ * per-subagent facts mean. They live here rather than in `client/src/lib/` because the server proxies the facts and a later server-side reader (a
+ * notification, say) must not grow a second reading of them.
+ *
+ * Time since the subagent's transcript was last written, below which it is `working` — and below `SUBAGENT_STUCK_MS`, `quiet`. Fixed, not per type: a
+ * test-running subagent can be silent for minutes, and v1 accepts that `quiet` covers it (spec Non-goals).
+ */
+export const SUBAGENT_QUIET_MS = 5 * 60_000;
+/** Silent this long or longer, a running subagent is `stuck`. */
+export const SUBAGENT_STUCK_MS = 20 * 60_000;
+
+/** A finished run's end status that means it did not complete: the background notification said failed, killed or stopped. */
+function endedBadly(job: SubagentJob): boolean {
+  return job.endStatus === 'failed' || job.endStatus === 'killed' || job.endStatus === 'stopped';
+}
+
+/**
+ * One subagent's state, in the spec's order: a bad `endStatus` is `killed` whatever `status` says (the dashboard closes a "didn't finish" row but an older one
+ * may leave it running); `done` is `ended`; a running one with a `blockedReason` is `blocked`; then the since-write thresholds. **No `lastWriteAt` is
+ * `working`, never `startedAt` as a stand-in** — today's dashboard sends no `lastWriteAt`, and a long healthy subagent must not read `stuck` just because BM
+ * merged first. An unparseable stamp reads the same as an absent one.
+ */
+export function subagentState(job: SubagentJob, nowMs: number): SubagentState {
+  if (endedBadly(job)) return 'killed';
+  if (job.status === 'done') return 'ended';
+  if (job.blockedReason != null) return 'blocked';
+  const wrote = job.lastWriteAt == null ? NaN : Date.parse(job.lastWriteAt);
+  if (Number.isNaN(wrote)) return 'working';
+  const since = nowMs - wrote;
+  if (since < SUBAGENT_QUIET_MS) return 'working';
+  if (since < SUBAGENT_STUCK_MS) return 'quiet';
+  return 'stuck';
+}
+
+/**
+ * A running BACKGROUND subagent whose parent process is provably gone: nothing will wake that parent when it stops. Only `parentLive === false` proves it —
+ * `null` (the probe failed) and absent (an older dashboard) prove nothing. A foreground subagent is never one: it ran inside the parent's process and died
+ * with it, so there is nothing left to wake.
+ */
+export function isOrphan(job: SubagentJob, detail: SubagentDetail): boolean {
+  return !endedBadly(job) && job.status === 'running' && job.background === true && detail.parentLive === false;
+}
+
+/**
+ * The parent's badge: some running FOREGROUND subagent means the parent's turn is parked on that tool call, so a silent parent is waiting, not stuck —
+ * `waiting-blocked` when one of those foreground jobs is itself `blocked` (a blocked background job does not park the parent). A job with no `background` key
+ * (an older dashboard) never counts, so an older dashboard draws no badge rather than a false one. A dead parent (`parentLive === false`) is `null`: the
+ * dashboard closes a foreground row only on its tool_result, so a killed parent leaves the row `running` forever, and "waiting" on a dead session is false.
+ */
+export function waitingOnSubagent(detail: SubagentDetail): 'waiting' | 'waiting-blocked' | null {
+  if (detail.parentLive === false) return null;
+  const fg = detail.agents.filter((a) => a.status === 'running' && !endedBadly(a) && a.background === false);
+  if (fg.length === 0) return null;
+  return fg.some((a) => a.blockedReason != null) ? 'waiting-blocked' : 'waiting';
+}

@@ -9,6 +9,7 @@ import { GITLAB_CLIENT_POLL_MS, useGitlab } from '../../client/src/hooks/useGitl
 import { useOrchestratorArchive } from '../../client/src/hooks/useOrchestratorArchive';
 import { POLL_MS, useOrchestratorRuns } from '../../client/src/hooks/useOrchestratorRuns';
 import { useRefreshing } from '../../client/src/hooks/useRefreshing';
+import { SUBAGENTS_POLL_MS, useSubagents } from '../../client/src/hooks/useSubagents';
 import { TICKS_POLL_MS, useTicks } from '../../client/src/hooks/useTicks';
 import { useWatchdog, WATCHDOG_IDLE_POLL_MS, WATCHDOG_POLL_MS } from '../../client/src/hooks/useWatchdog';
 import rawFixture from '../fixtures/orchestrator-run.json';
@@ -144,6 +145,15 @@ const SUBJECTS: Subject[] = [
     perRequest: 1,
     mount: () => renderHook(() => useGitlab()),
     body: () => GITLAB
+  },
+  {
+    // #611: one session's subagents, mounted only inside an open `Subagents` disclosure, so the mount is the arming and `armed` is constant `true` — a
+    // POLLER with nothing in its answer that disarms it, so not GATED. Appended last for the same index reason.
+    name: 'useSubagents',
+    periodMs: SUBAGENTS_POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useSubagents('s-1')),
+    body: () => ({ agents: [], running: 0, finished: 0 })
   }
 ];
 const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
@@ -151,8 +161,8 @@ const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
 // idle sweeper re-arms it on `WATCHDOG_IDLE_POLL_MS` instead of clearing the timer — so its case 9 is the period switch in its own describe below. Not
 // `useTicks` either: nothing in its answer can disarm it (it polls while `live`, which is the caller's choice and not the server's), so its case 9 is the
 // `live: false` describe below. Not `useGitlab` either: it is armed constant `true` — the Sources row needs the status whatever GitLab answers — so there is no
-// world in which its answer stops the clock.
-const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog' && s.name !== 'useTicks' && s.name !== 'useGitlab');
+// world in which its answer stops the clock. Nor `useSubagents` (#611), armed constant `true` for the same reason: its mount is the open disclosure.
+const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog' && s.name !== 'useTicks' && s.name !== 'useGitlab' && s.name !== 'useSubagents');
 
 /** A `fetch` whose every call hangs until the test answers it. `answer` settles everything outstanding with the subject's body for `kind`. */
 function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind) => Promise<void>; fail: () => Promise<void> } {

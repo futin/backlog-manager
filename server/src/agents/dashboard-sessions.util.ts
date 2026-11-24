@@ -2,7 +2,7 @@ import { HttpException } from '@nestjs/common';
 
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
 import { CLAIM_STALE_MS } from '../../../shared/types';
-import type { DashboardRow } from '../../../shared/types';
+import type { DashboardRow, SubagentDetail, SubagentJob } from '../../../shared/types';
 
 /*
  * dashboard-sessions.util.ts — the dashboard's `/api/sessions` read, and the two claim refusals built on it: `staleClaimProbe` (#227) and `itemClaimBlock`,
@@ -16,6 +16,13 @@ import type { DashboardRow } from '../../../shared/types';
 
 /** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
 const SESSIONS_TIMEOUT_MS = 15_000;
+
+/**
+ * One session's detail (`GET /api/sessions/:id`, #611) is an incremental read of ONE transcript and its subagents' files, far cheaper than the list scan, and
+ * the board polls it every 10 s while a disclosure is open — so a shorter budget than the list's: a dashboard that cannot answer one session in 8 s is not
+ * going to answer the next poll either, and the disclosure says so rather than holding a request for 15 s.
+ */
+const SESSION_DETAIL_TIMEOUT_MS = 8_000;
 
 /** The caps `dashboardSessionRows` asks with: the dashboard's own maxima, so the board sees as many sessions as one call can carry. */
 const ROW_LIMIT = 50;
@@ -149,4 +156,71 @@ export async function itemClaimBlock(id: string, holder: { session: string; host
   const beat = Date.parse(holder.heartbeat);
   if (!Number.isNaN(beat) && Date.now() - beat < CLAIM_STALE_MS) return `${id} is in progress — session ${holder.session} holds its claim`;
   return staleClaimProbe(holder);
+}
+
+/** The literal sets the detail's enum fields are checked against: a value outside one is dropped, never forwarded (spec, "Server route"). */
+const END_STATUSES: readonly NonNullable<SubagentJob['endStatus']>[] = ['completed', 'failed', 'killed', 'stopped'];
+const BLOCKED_REASONS: readonly NonNullable<SubagentJob['blockedReason']>[] = ['rate-limit', 'rejected', 'interrupted'];
+
+const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * One `AgentJob` normalised field by field into a `SubagentJob`, or `null` when it has no string `id` or no legal `status` — a row that cannot say what it
+ * is or whether it runs has nothing to draw. The ten base fields are always set (`''` / `null` for a missing or mistyped one, as the dashboard's own types
+ * allow); each optional field the dashboard item adds is set only when present AND of its type, an enum only when it is one of its literals, so an unknown
+ * key or a mistyped value never reaches the browser and an older dashboard's absent field stays absent rather than turning into a `null` that means "read,
+ * and nothing there".
+ */
+function toSubagentJob(a: Record<string, unknown>): SubagentJob | null {
+  if (typeof a?.id !== 'string' || (a.status !== 'running' && a.status !== 'done')) return null;
+  const job: SubagentJob = {
+    id: a.id,
+    type: typeof a.type === 'string' ? a.type : '',
+    description: typeof a.description === 'string' ? a.description : '',
+    status: a.status,
+    startedAt: strOrNull(a.startedAt),
+    endedAt: strOrNull(a.endedAt),
+    durationMs: numOrNull(a.durationMs),
+    tokens: numOrNull(a.tokens),
+    agentId: strOrNull(a.agentId),
+    toolUses: numOrNull(a.toolUses)
+  };
+  if (a.resumed === true) job.resumed = true;
+  if (typeof a.background === 'boolean') job.background = a.background;
+  for (const k of ['model', 'lastWriteAt', 'lastTool'] as const) if (typeof a[k] === 'string' || a[k] === null) job[k] = a[k] as string | null;
+  if (a.endStatus === null || END_STATUSES.includes(a.endStatus as never)) job.endStatus = a.endStatus as SubagentJob['endStatus'];
+  if (a.blockedReason === null || BLOCKED_REASONS.includes(a.blockedReason as never)) job.blockedReason = a.blockedReason as SubagentJob['blockedReason'];
+  return job;
+}
+
+/**
+ * One session's subagents from the dashboard's `GET /api/sessions/:id` (#611) — `null` for the dashboard's 404 (no transcript for the id), a 502 for every
+ * other failure, in `dashboardSessionRow`'s shape: a network failure or timeout through `dashboardError`, a non-2xx as `answered <status>`, and a 200 whose
+ * body carries `error: true` (the dashboard's "scan failed") or no `agents` array as `carried no agents` — never an empty list, which would read as "no
+ * subagents" when nothing was actually read. The body is rebuilt field by field (`toSubagentJob`), never forwarded raw; the detail's own `id` and `error`
+ * are dropped, and `parentLive` is kept only as `true`, `false` or `null`. No cache: the dashboard's read is incremental, and a cached copy here would be a
+ * sixth cache whose age is a rendered value. The caller validates `id` with `isSessionId` before this is reached.
+ */
+export async function dashboardSessionDetail(cfg: AgentsConfig, id: string): Promise<SubagentDetail | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.url}/api/sessions/${encodeURIComponent(id)}`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSION_DETAIL_TIMEOUT_MS) });
+  } catch (e) {
+    throw new HttpException({ error: dashboardError(e, 'the dashboard session detail', SESSION_DETAIL_TIMEOUT_MS) }, 502);
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) throw new HttpException({ error: `the dashboard session detail answered ${res.status}` }, 502);
+  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (typeof body !== 'object' || body === null || body.error === true || !Array.isArray(body.agents)) {
+    throw new HttpException({ error: 'the dashboard session detail carried no agents' }, 502);
+  }
+  const agents = (body.agents as Record<string, unknown>[]).map(toSubagentJob).filter((j): j is SubagentJob => j !== null);
+  const detail: SubagentDetail = {
+    agents,
+    running: numOrNull(body.running) ?? agents.filter((a) => a.status === 'running').length,
+    finished: numOrNull(body.finished) ?? agents.filter((a) => a.status === 'done').length
+  };
+  if (body.parentLive === true || body.parentLive === false || body.parentLive === null) detail.parentLive = body.parentLive;
+  return detail;
 }
