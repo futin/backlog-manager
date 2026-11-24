@@ -77,7 +77,8 @@ off`) that nothing on the board names. Two faults: the sentence is false wheneve
     pushed.`
 
 - **The `review` write absorbs its result (server).** `GithubSource.review` today writes the label and returns, so the poller cache — and every board read —
-  keeps the label until the next sync. It gains `planReview`'s tail: after a landed change, re-read the issue and `absorbIssue` it; a failed re-read is not a
+  keeps the label until the next sync. It gains `planReview`'s tail for a REMOVAL (an add would land the label in the cache before the next sync indexes
+  the PR §8 just opened, showing the new reason for one interval): after a landed removal, re-read the issue and `absorbIssue` it; a failed re-read is not a
   refusal (the label write landed, the next poll catches up). Without it the board's re-read after a Lift still shows the item blocked and the modal offers
   Lift again. `.claude/rules/items.md`'s `review` sentence and `GithubSource.review`'s comment ("Unlike `review` and `queue`") change with it.
 - **Lift, continued.** Accept is enabled in every state, pending included, and always does the same thing: `POST /api/items/review` `{ project, id, inReview: false }` → the note

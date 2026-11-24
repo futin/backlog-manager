@@ -73,8 +73,13 @@ gains `planReview`'s absorb tail so the board's re-read sees the lift at once.
   - false with no referencing PR at all.
   - false when the only referencing PR closed unmerged (`pr(362, 'Refs #266', null, 'closed')`).
   - false when the latest referencing PR merged into a feature base (`pull(362, 'feature/x')`).
-  - false for a referencing PR in the SAME number of another repo — copy the existing "another repo" case's fixture at ~309.
+  - false for an OPEN PR that references the same number in another repo: `pr(362, 'Closes other/repo#266', null)` beside `issue(266)`.
+  - per-issue, not per-repo: `issue(266)`, `issue(267)` and an open `pr(370, 'Refs #266', null)` → 266 true, 267 false.
+  - false when the only referencing PR merged but its base is not learned yet — the `/pulls/362` → 500 fixture of the case at ~334.
   - true for a repo that never synced.
+- [ ] **Step 1b: Failing end-to-end case** — extend `describe('end to end — the #266 shape through GithubSource.list')` (~472): an `in-review` issue with no
+  referencing PR lists with `inReviewNoPr: true`, and an `in-review` issue with an OPEN referencing PR lists without the key. This is what fails if a
+  `github.source.ts` caller forgets to pass the poller's answer (the default is "open").
 - [ ] **Step 2: Failing tests in `tracker-map.test.ts`** (beside the case at 183):
   - `in-review` label, `reviewLifted=false`, `reviewPullOpen=false` → `item.inReview === true` and `item.inReviewNoPr === true`.
   - same label, `reviewPullOpen=true` → `inReview === true`, `'inReviewNoPr' in item` is `false`.
@@ -121,19 +126,26 @@ gains `planReview`'s absorb tail so the board's re-read sees the lift at once.
 
 **Files:**
 - Modify: `server/src/items/sources/github.source.ts` (`review` at 1049; its doc comment; `planReview`'s comment line "Unlike `review` and `queue`" at ~1074)
+- Modify: `.claude/rules/items.md` (the `review` route sentences, ~29-31 and ~37) — read it first
 - Test: `test/tracker/tracker-write.test.ts` — `describe('review')` at 735 (its `post('review', …)` helper and `trackerPath` fixture).
 
-**Interfaces:** none new. Behaviour: after a landed change (200, or a removal's 404), re-read the issue with `this.client.issue(repo, number, { token })`
-and, on a 200 with data, `this.poller.absorbIssue(repo, reread.data)` — exactly `planReview`'s tail. A failed re-read is not a refusal.
+**Interfaces:** none new. Behaviour: after a landed REMOVAL (200, or the removal's 404), re-read the issue with `this.client.issue(repo, number, { token })`
+and, on a 200 with data, `this.poller.absorbIssue(repo, reread.data)` — `planReview`'s tail. A failed re-read is not a refusal. An ADD does not absorb:
+`absorbIssue` takes the issue only (`poller.service.ts` ~648), so absorbing the label before the next sync indexes the PR that `pr-mode.md` §8 just opened
+would show every normal pr-mode execute as "no open PR" with a Lift for one sync interval. The add stays as today: the label and the PR arrive in the same
+sync. Say this in `review`'s comment.
 
 - [ ] **Step 1: Failing tests** in that suite:
   - remove `in-review` from a labelled issue via the route → `GET /api/items` immediately (no poller tick) shows the item without `inReview`.
-  - removal when the label is already gone (GitHub 404) → 201 success as today (the existing case at ~760), and the item reads without `inReview`.
+  - removal when the label is already gone on GitHub but still cached: sync with the label on, delete it from the fake's `gh.issues` directly (no tick),
+    post the removal → 201 (the 404 path), and `GET /api/items` reads the item without `inReview`.
+  - an ADD (`inReview: true`) on an issue → 201, and `GET /api/items` before any tick still reads the item WITHOUT `inReview` (no absorb on add).
   - the re-read failing (fake answers the issue GET with 500 once) → the route still answers success.
 - [ ] **Step 2: Run; the first case fails.**
-- [ ] **Step 3: Implement**, and update both comments: `review`'s says it absorbs like `planReview`; `planReview`'s "Unlike `review` and `queue`" becomes
-  "Unlike `queue`".
-- [ ] **Step 4: Run; all pass.**
+- [ ] **Step 3: Implement**, and update both comments: `review`'s says a removal absorbs like `planReview` and why an add does not; `planReview`'s
+  "Unlike `review` and `queue`" becomes "Unlike `queue` (and `review`'s add)". Update `.claude/rules/items.md`'s `review` sentences (~29-31 and ~37) to say
+  a removal re-reads the issue into the cache.
+- [ ] **Step 4: Run; all pass**, plus `test/guards/claude-rules.test.ts`.
 - [ ] **Step 5: Commit** — `fix(tracker): absorb the issue after an in-review write`.
 
 ### Task 4: `GET /api/items/held`
@@ -152,7 +164,8 @@ and, on a 200 with data, `this.poller.absorbIssue(repo, reread.data)` — exactl
 - Produces: `export interface ItemHeld { branch: boolean | null; tree: boolean }` in `shared/types.ts`.
 - Produces: `localHold(projectPath: string, n: number): Promise<ItemHeld>` in `held.util.ts` — the two probes from Global Constraints, run per call.
 - Produces: `ItemsService.held(projectPath: string, id: string): Promise<ItemHeld>` — `writable(this.writerFor(projectPath))` (so unregistered 404, files 400
-  with `writable`'s sentence, unsupported 400); then `issueNumberFor(id, lookup.marker.repo)`; `null` → 400 `{ error: '<id> does not name an issue in <repo>' }`
+  with `writable`'s sentence, unsupported 400); then, when `lookup.marker.repo` fails `isRepo` (`server/src/tracker/github.client.ts:53`), 400
+  `{ error: 'backlog/source.json names no valid "repo" (expected "owner/name")' }` before any git; then `issueNumberFor(id, lookup.marker.repo)`; `null` → 400 `{ error: '<id> does not name an issue in <repo>' }`
   (the sentence `review` already uses); then `localHold(lookup.project.path, n)`.
 - Produces: `GET items/held` in `ItemsController` — blank `project` → 400 `project is required`, blank `id` → 400 `id is required`, as `claim` does. Doc comment
   in `claim`'s style: why unguarded, why per request, why it never decides (spec Non-goals), why `for-each-ref`.
@@ -165,6 +178,7 @@ and, on a 200 with data, `this.poller.absorbIssue(repo, reread.data)` — exactl
   - blank `project` → 400 `{ error: 'project is required' }`; blank `id` → 400 `{ error: 'id is required' }`.
   - unregistered path → 404; a files project → 400 with `this project's items are files — the skills write them directly`.
   - id `gh:other/repo#214` → 400 naming the id and the repo; id `abc` → 400.
+  - a tracker project whose `backlog/source.json` has `"repo": "not-a-repo"` → 400 with the source.json sentence.
   - a `POST` to the same path is not a route (404) — it is a read only.
 - [ ] **Step 2: Failing case in `git-run.test.ts`**: `localHold: branch null, never false` — `__setGitTimeoutMs(100)`, `fakeOn({ sleep: 3 })`, call
   `localHold(root, 1)` → `{ branch: null, tree: false }`.
@@ -192,7 +206,9 @@ and, on a 200 with data, `this.poller.absorbIssue(repo, reread.data)` — exactl
   through `unwrap`, doc comment in `approvePlan`'s style.
 - Produces: `ReviewLift({ item, onLifted }: { item: BacklogItem; onLifted: () => void })`; `ItemModal` prop `onLifted?: () => void`.
 
-Behaviour: rendered only when `onLifted` is passed, `item.status === 'open'`, `item.source === 'github'` and `item.inReviewNoPr === true`. Stages
+Behaviour: the `done` note is checked FIRST, before any condition on the item — the board hands the modal the re-read item, which no longer carries the
+flag (`PlanApprove.tsx:34-43` does the same, with its reason). Otherwise rendered only when `onLifted` is passed, `item.status === 'open'`,
+`item.source === 'github'` and `item.inReviewNoPr === true`. Stages
 `idle → confirm → done` with `useAction`, as `PlanApprove`. Chip (same `Chip` and `size` as `PlanApprove`, `data-testid="review-lift"`) → inline `ui/Confirm`
 (`testId="review-lift-confirm"`, `label="confirm lift review"`). Opening the confirm fires `readHeld` once (not again on re-render); the confirm's text is the
 Global Constraints copy for pending / held / not found / unknown. Accept posts `liftReview` once per click (double-click sends one), then shows the note
@@ -204,12 +220,12 @@ verbatim, brings the chip back, and does not call `onLifted`. `<n>` in the copy 
   - chip text `Lift review`, `title` `remove the in-review label so this item can be executed again`.
   - opening shows `Checking this machine for execute/214…` while the GET hangs, and Accept (`Lift review`) is enabled in that state.
   - GET `{branch:true,tree:false}` → `execute/214 still holds work for #214 on this machine — push it and open a PR instead. Lift anyway?`; same text for
-    `{branch:false,tree:true}`.
+    `{branch:false,tree:true}` and for `{branch:null,tree:true}` (a present tree wins over an unknown branch).
   - GET `{branch:false,tree:false}` → the not-found sentence, verbatim.
   - GET `{branch:null,tree:false}` → the unknown sentence; GET answering 500 → the unknown sentence.
   - exactly one GET per opening of the confirm.
   - Accept → one POST to `/api/items/review` with body `{ project: '/abs/alpha', id: '#214', inReview: false }` (match the fixture's `projectPath`), then
-    `review lifted` and `onLifted` called once.
+    `review lifted` and `onLifted` called once; then rerender with the same item minus `inReview` and `inReviewNoPr` → `review lifted` still shown.
   - double-click on Accept → one POST.
   - Dismiss (`Keep in review`) → chip back, no POST.
   - POST refused with `{ error: 'sync is off for futin/x' }` → that sentence printed, chip back, `onLifted` not called.
