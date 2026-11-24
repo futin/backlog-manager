@@ -2318,8 +2318,10 @@ the shell code the existing cases already cover. The page's row-level `Remove` s
 
 The mention modal makes it nine, and through `Modal` this time: `JiraMentionModal` composes it, its third composer after `ItemModal` and `JiraDetail`, so
 it joined the stack without a line of the hook changing. It is the Detail dialog's reasoning a second time — a ticket's comment thread and its facts, with
-no run's Pause or Resume to give a standing place to — so the rule that kept the run's detail out of a modal does not reach it either. It opens from the
-Mentions page and over nothing else, and the suite gains no case for it: it runs through the shell code the item modal's cases already cover.
+no run's Pause or Resume to give a standing place to — so the rule that kept the run's detail out of a modal does not reach it either. It opened
+from the Mentions page and over nothing else; since the board link it also opens from an `@ N` mark on the board (`MentionModalHost`, hosted by `JiraView`), but
+it reuses this same `JiraMentionModal`, so the count stays ten, and it never stacks: opening it from the ticket modal empties the Detail walk in the same handler,
+so the mark SWAPS one dialog for the other and Escape returns to the page. The suite gains no case for it: it runs through the shell code the item modal's cases already cover.
 
 The reply editor makes it ten: `JiraReplyEditor`, `Modal`'s fourth composer, portalled into `.shell` and mounted later than the mention modal it opens
 from, so Escape closes the editor and leaves the mention modal open under it. It is the mention modal's draft box opened large, Write beside Preview, and owns

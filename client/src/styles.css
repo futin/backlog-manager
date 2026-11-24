@@ -2186,7 +2186,6 @@ button.rail-count { cursor: pointer }
 /* The description's first lines: four at 13 px, then cut — the whole of it is one click away (`Open ticket in Jira`). */
 .jira-mention-desc { max-height: calc(4 * 1.45em); overflow: hidden; font-size: 13px; line-height: 1.45; color: var(--ink2); overflow-wrap: anywhere }
 .jira-mention-desc > * { margin: 0 }
-.jira-mention-note { padding: 10px 12px; border-radius: 10px; font-size: 12px; color: var(--ink2); background: var(--strip-hi) }
 /* Draft a reply (phase 2, mock `ModalDraft.dc.html`) — what the modal's footer becomes while a session drafts, once a draft is ready, and after it posts.
    The run card is the thread card's surface (`--strip`, 12 px radius) so the footer reads as part of the left column. The draft box is the mock's one
    bordered card: a head row (title and sub on one line, the head actions right) over a hairline, a borderless textarea, and a `--strip-hi` bar holding the

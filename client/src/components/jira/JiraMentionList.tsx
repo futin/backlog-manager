@@ -27,8 +27,8 @@ import { Pill } from '../ui/Pill';
  *
  * **Actions fade in on hover or focus**, the Run cell's rule: `Dismiss` (every open mention on the TICKET — the user answers a thread, not a comment) or, on
  * a dismissed row, `Restore`, then `Open ticket page` (a document icon chip, the board's full page for the ticket; the key button does the same on a Cmd-, Ctrl- or
- * middle-click, `wantsPage`, as a card or row on the Board does) and `Open in Jira`, a link to the focused comment in a new tab with no referrer. A dismissed row (Show dismissed on) is dimmed,
- * its actions always shown, since Restore is the only thing to do with it.
+ * middle-click, `wantsPage`, as a card or row on the Board does) and `Open in Jira`, a link to the focused comment in a new tab with no referrer. A dismissed
+ * row (Show dismissed on) is dimmed, its actions always shown, since Restore is the only thing to do with it.
  *
  * **The key and the excerpt open the mention modal on THIS row's mention** (`onOpen`, Task 10): each is a `.jira-mentions-open` button worn as the text it
  * replaces, so the keyboard reaches them and the cell keeps its ellipsis. Not the whole row — its Dismiss and Open in Jira sit in it, and a row-wide click
