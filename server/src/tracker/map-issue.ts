@@ -158,13 +158,17 @@ function isUnvetted(section: Section, issue: GithubIssue, claims: readonly Parse
  * `reviewLifted` is the poller's answer for this issue (#411, `TrackerPollerService.reviewLifted`): the work the `in-review` label guards has merged into
  * the default branch and no referencing PR is open. It overrides the label rather than removing it — this function writes nothing — and defaults to `false`
  * so a caller with no poller reads the label as it stands.
+ *
+ * `reviewPullOpen` is the poller's other answer (`TrackerPollerService.reviewPullOpen`): whether a PR referencing this issue is open. With the label held and
+ * no PR open, the item carries `inReviewNoPr`. It defaults to `true` — "a PR is open" — so a caller with no poller keeps today's sentence and draws no Lift.
  */
 export function mapIssue(
   issue: GithubIssue,
   repo: string,
   project: RegistryProject,
   claims: readonly ParsedClaim[],
-  reviewLifted = false
+  reviewLifted = false,
+  reviewPullOpen = true
 ): MappedIssue | null {
   if (issue.pull_request !== undefined && issue.pull_request !== null) return null;
 
@@ -189,6 +193,7 @@ export function mapIssue(
   // The label, unless the poller has seen its review end (#411): a `Refs #<n>` PR merged into the default branch closes nothing, so the label outlived it
   // and every gate read "a PR is open for this item" with none open. Still CONSUMED below either way — a lifted label is not a tag.
   const inReview = names.includes(IN_REVIEW_LABEL) && !reviewLifted;
+  const inReviewNoPr = inReview && !reviewPullOpen;
   const planReview = names.includes(PLAN_REVIEW_LABEL);
 
   // Every label that is not a type, a kind, the runner-fix marker, the
@@ -300,6 +305,8 @@ export function mapIssue(
     // The same spread (pr-mode spec, decision 9) — but unlike `queued`, gates read this one: the dispatch ladders, the orchestrator's queue and execute's
     // refusal. Still absent, never `false`, so `'inReview' in item` means what it says.
     ...(inReview ? { inReview: true as const } : {}),
+    // Only ever beside `inReview`: the label held while no referencing PR is open. Absent, never `false`, by the same rule.
+    ...(inReviewNoPr ? { inReviewNoPr: true as const } : {}),
     // The same spread (backlog-tick). `planReview` has a second writer, `scan.util.ts`, for a files item's `plan-review: true` line, so the absence is
     // arranged in both places and `'planReview' in item` means the same on either source.
     ...(planReview ? { planReview: true as const } : {}),
