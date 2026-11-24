@@ -116,6 +116,7 @@ export function JiraMentionModal({
   onDiscard,
   onPost,
   onHandover,
+  onOpenPage,
   onClose
 }: {
   issue: JiraMentionIssue;
@@ -141,6 +142,8 @@ export function JiraMentionModal({
   onPost: (text: string) => Promise<JiraReplyWrite>;
   /** The dashboard's hand-over to the Desktop app; its outcome goes through `write`, so a refusal is this dialog's alert line like any other write's. */
   onHandover: (sessionId: string) => Promise<JiraMentionsWrite>;
+  /** Opens the ticket's full page (`Open ticket page`, drawn in every detail state); `null` draws no chip. The dialog closes first. */
+  onOpenPage: (() => void) | null;
   onClose: () => void;
 }) {
   const mounted = useMountedRef();
@@ -380,7 +383,21 @@ export function JiraMentionModal({
             <TicketFacts detail={detail.value} now={now} />
           )}
         </div>
-        {noBoard && <div className="jira-mention-note">This ticket is on none of your boards, so the board cannot open it.</div>}
+        {/* Outside TicketFacts so it is there while the read is pending and after it fails: the page does its own read, and a ticket on no board still
+            has one. */}
+        {onOpenPage !== null && (
+          <div>
+            <Chip
+              size={28}
+              onClick={() => {
+                onClose();
+                onOpenPage();
+              }}
+            >
+              Open ticket page
+            </Chip>
+          </div>
+        )}
         {drafts && (
           <>
             <div className="jira-detail-lbl">Draft session</div>

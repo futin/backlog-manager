@@ -152,6 +152,8 @@ Outline icons, ~1.5 px stroke, 20 px box in nav and 20–22 px in tiles, rounded
 ## 7. Reusable patterns
 
 - **Metric card**: title (19/500) → subtitle (13/400 grey) → figure (30/700) → delta line (12 px, colored number + grey words) → visual.
+- **Warn chip**: `Chip variant="warn"` (`.ui-chip-warn`), the chip base — 12 px radius, 13/500 label — in `.ui-pill-warn`'s amber tint and ink, for the `@ N`
+  mention mark (§8.9.1, §8.9.7) so a thing that waits on you reads as the same amber the other "needs you" pills use.
 - **Filter chip**: 13/500 label + chevron, 12 px radius, 1 px `--border-strong`, white fill, sits top-right of the card it filters.
 - **Progress row**: name + `current / target` (target in grey), 10 px hatched bar over `--bg-track`, 11 px grey caption under.
 - **Two-tone amount**: spent value in `--text-primary`, ceiling in `--text-tertiary`, same size — used for limits and goals alike.
@@ -650,6 +652,14 @@ GitLab project: the MR chip (`MrChip`) on the card's foot after the worktree chi
 between the crumb and the meter; the band's GitLab half (`GitlabBandLine`) on the sub-line's row; and a `Delivery` section in the Filters panel, which the List
 draws again above the table as a `Segmented` — one stored filter, two controls.
 
+**The mention mark** (Jira mentions <-> board link, spec `2026-11-24-jira-mentions-board-link-design.md`; §7's `warn` chip, §8.9.7). A ticket with open
+mentions carries an amber `@ N` chip (`MentionMark`, a 28 px `Chip variant="warn"`, the count the ticket's open mentions) in the card's head after the key,
+beside the key on an on-board or off-board lane header (a parent on no board is still asked on, and the modal opens by key; the `No parent` header has no
+key and no mark), and after the title in a List row's Summary cell (a card row and an on-board header row; the `No parent` and off-board List rows have
+none). It draws nothing for a count of zero, and its press opens the mention modal (§8.9.7) and never Detail: the wrapper stops the
+click and Enter/Space that would open the card or row beneath it. Dismissed tickets carry none; the mark reads the shell's one mentions payload, so it is
+absent until a check has stamped.
+
 #### 8.9.2 Detail: the ticket body, the modal and the ticket page
 
 One ticket reading, two frames (Jira detail tabs spec §1, §2, §7; mocks `docs/superpowers/specs/2026-11-19-jira-detail-tabs-mockups/Main.dc.html` for the
@@ -1029,7 +1039,15 @@ loaded comment, a muted line takes the fold row's place at the top — `This men
 in the mock). The footer under it: `You have not commented since this mention.`, `Dismiss`
 and `Reply in Jira ↗` (primary); after Dismiss, `Dismissed. It comes back if someone mentions you on <KEY> again.` with `Undo`; a dismissed mention opens
 with `Restore` in Dismiss's place. Right, **Ticket**: status, assignee, reporter, priority, parent, updated, the description's first lines, `Open ticket in
-Jira ↗`, and the no-board note when it applies. Its data is a fresh read on open, never the list's cache, because the thread is the point.
+Jira ↗`, `Open ticket page` (a text `Chip` under them that closes the modal and goes to the ticket's full page, origin = the page it was opened from; always
+drawn where a caller hosts it, and on that ticket's own page it only closes the dialog). Its data is a fresh read on
+open, never the list's cache, because the thread is the point.
+
+**Where it opens from** (board link). The Mentions page's rows and cards, and the `@ N` mark (§8.9.1) on a board card, lane header or List row and in the
+Detail's summary strip, all through `MentionModalHost`; on the board it has no `Mention i of N` order beyond the ticket's own mentions (newest first). It
+never stacks on the ticket modal: the mark in the Detail strip swaps the Detail for it, and Escape returns to the page beneath. The Mentions page's List rows
+and Cards also carry an `Open ticket page` chip (a document icon in List, a text chip before `Reply in Jira` in Cards, dismissed rows and cards too); a Cmd-,
+Ctrl- or middle-click on a row's key does the same.
 
 **Draft a reply** (phase 2, `ModalDraft.dc.html`) lives inside the same modal, and only on an OPEN ticket; a dismissed one shows none of it
 until restored. Idle: `Draft a reply` (outline) joins the footer between Dismiss and Reply in Jira, disabled with `Map a repository in Jira › Setup first`

@@ -339,3 +339,18 @@ describe('Settings › Local › Opens on', () => {
     expect(pressed()).toEqual(['Jira']);
   });
 });
+
+describe('the shell-level mentions poll', () => {
+  const mentionGets = (): number =>
+    (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).startsWith('/api/jira/mentions')).length;
+
+  it('makes no mentions request off the Jira section, and exactly one on switching to it', async () => {
+    render(<App />);
+    await screen.findByText('board stub');
+    await flush();
+    expect(mentionGets()).toBe(0);
+    await userEvent.click(within(rail()).getByRole('button', { name: 'Jira' }));
+    await flush();
+    expect(mentionGets()).toBe(1);
+  });
+});

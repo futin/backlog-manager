@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 import { JiraTicketBody } from '../../client/src/components/jira/JiraTicketBody';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
+import { MentionWrap, mention, mentionIssue, mentionsPayload } from '../helpers/mention-stub';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { JIRA_DETAIL_TAB_KEY, setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
@@ -549,5 +550,35 @@ describe('JiraTicketBody — Children & comments tab', () => {
     fireEvent.click(summaryOf('Comments'));
     expect(within(foldOf('Comments')).getByText(/Comments stay in Jira — v1 neither reads nor writes them\./)).toBeInTheDocument();
     expect(within(foldOf('Comments')).getByRole('link', { name: 'PAY-12 in Jira ↗' })).toHaveAttribute('href', ISSUE.url);
+  });
+});
+
+describe('JiraTicketBody — the strip’s Mentions cell (Jira mentions <-> board link, Task 5)', () => {
+  const data = mentionsPayload({
+    issues: [mentionIssue(ISSUE.key, [mention('m2', 'Ivo', 'newer', ISSUE.key, 0.1), mention('m1', 'Mara', 'older', ISSUE.key, 0.2)])]
+  });
+
+  it('draws a Mentions cell holding @ 2 after the Agent cell, and a click calls the opener with the key', () => {
+    const open = jest.fn();
+    render(
+      <MentionWrap data={data} open={open}>
+        {tree()}
+      </MentionWrap>
+    );
+    const cells = Array.from(strip().querySelectorAll('dt')).map((d) => d.textContent);
+    expect(cells[cells.length - 2]).toBe('Agent');
+    expect(cells[cells.length - 1]).toBe('Mentions');
+    const mark = within(strip()).getByText('@ 2');
+    fireEvent.click(mark);
+    expect(open).toHaveBeenCalledWith(ISSUE.key);
+  });
+
+  it('draws no Mentions cell for a ticket the index lacks', () => {
+    render(
+      <MentionWrap data={mentionsPayload()} open={jest.fn()}>
+        {tree()}
+      </MentionWrap>
+    );
+    expect(within(strip()).queryByText('Mentions')).toBeNull();
   });
 });

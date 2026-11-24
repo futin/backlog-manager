@@ -10,6 +10,7 @@ import { IssueTypeTile } from '../ui/IssueTypeTile';
 import { PersonMark } from '../ui/PersonMark';
 import { PriorityPill } from '../ui/PriorityPill';
 import { SpreadBar } from '../ui/SpreadBar';
+import { JiraMentionMarkFor } from './JiraMentionMarkFor';
 import { EndedLine, IssueLinkOut, IssueMarks, SessionControl, SessionStateLine } from './JiraCard';
 
 /**
@@ -51,6 +52,11 @@ export function LaneChevron({ label, open, locked, onToggle }: { label: string; 
  * the failure sentence sits under it on this header alone. Drawing requests nothing.
  *
  * **No parent.** The label, the spread bar and the count.
+ *
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): beside the key on the on-board AND the off-board header — a parent
+ * off this board is still a ticket the user may be asked on, and the mark opens the mention modal by key, which needs no board entry. The `No parent` header
+ * has no key and so no mark. It is a `JiraMentionMarkFor` that draws only while the ticket has open mentions and a `MentionOpenContext` opener exists above;
+ * its press is stopped inside `MentionMark`, so it never also opens Detail or, on the off-board header, starts the parent read.
  *
  * The count and the bar are the view's — the matching issues of the lane's subtree (§3.2, §6.2) — so a folded lane still says what it holds. A header drawn
  * only because its own issue matches a filter has a count of 0 and draws neither: an empty bar and `0 issues` beside a header that plainly matched would
@@ -124,6 +130,7 @@ export function JiraLaneHeader({
           <div className="jira-lane-line">
             <IssueTypeTile type={stub?.type ?? null} />
             <span className="jira-card-key">{lane.key}</span>
+            <JiraMentionMarkFor issueKey={lane.key} />
             <button type="button" className="jira-lane-title" disabled={read.reading === lane.key} onClick={() => read.ask(lane.key)}>
               {stub === null || stub.summary === '' ? lane.key : stub.summary}
             </button>
@@ -154,6 +161,7 @@ export function JiraLaneHeader({
         <div className="jira-lane-line">
           <IssueTypeTile type={issue.type} />
           <span className="jira-card-key">{issue.key}</span>
+          <JiraMentionMarkFor issueKey={issue.key} />
           <button type="button" className="jira-lane-title" onClick={() => onOpenIssue(issue)}>
             {issue.summary}
           </button>

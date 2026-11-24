@@ -17,7 +17,7 @@ describe('Chip', () => {
   });
 
   it('lands each variant as its own class', () => {
-    for (const variant of ['outline', 'ink', 'flat', 'danger'] as const) {
+    for (const variant of ['outline', 'ink', 'flat', 'danger', 'warn'] as const) {
       const { unmount } = render(<Chip variant={variant}>x</Chip>);
       expect(screen.getByRole('button', { name: 'x' })).toHaveClass(`ui-chip-${variant}`);
       unmount();

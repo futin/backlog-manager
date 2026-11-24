@@ -2,6 +2,7 @@ import type { JiraMentionIssue } from '../../../../shared/types';
 import { elapsedSince } from '../../lib/item-age';
 import { initialsOf, statusTone, typeTone } from '../../lib/jira';
 import { excerptParts, mentionIssueType, type JiraMentionRow } from '../../lib/jira-mentions';
+import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
@@ -25,8 +26,9 @@ import { Pill } from '../ui/Pill';
  * comment put it (`excerptParts`). **Boards** names the boards holding the ticket, or a muted `none`.
  *
  * **Actions fade in on hover or focus**, the Run cell's rule: `Dismiss` (every open mention on the TICKET — the user answers a thread, not a comment) or, on
- * a dismissed row, `Restore`, then `Open in Jira`, a link to the focused comment in a new tab with no referrer. A dismissed row (Show dismissed on) is dimmed,
- * its actions always shown, since Restore is the only thing to do with it.
+ * a dismissed row, `Restore`, then `Open ticket page` (a document icon chip, the board's full page for the ticket; the key button does the same on a Cmd-,
+ * Ctrl- or middle-click, `wantsPage`, as a card or row on the Board does) and `Open in Jira`, a link to the focused comment in a new tab with no referrer. A
+ * dismissed row (Show dismissed on) is dimmed, its actions always shown, since Restore is the only thing to do with it.
  *
  * **The key and the excerpt open the mention modal on THIS row's mention** (`onOpen`, Task 10): each is a `.jira-mentions-open` button worn as the text it
  * replaces, so the keyboard reaches them and the cell keeps its ellipsis. Not the whole row — its Dismiss and Open in Jira sit in it, and a row-wide click
@@ -38,7 +40,8 @@ export function JiraMentionList({
   now,
   onDismiss,
   onRestore,
-  onOpen
+  onOpen,
+  onOpenPage
 }: {
   rows: readonly JiraMentionRow[];
   /** The user's Jira display name, for the `@` chip; `null` draws the excerpt plain. */
@@ -47,6 +50,8 @@ export function JiraMentionList({
   onDismiss: (issue: JiraMentionIssue) => void;
   onRestore: (issue: JiraMentionIssue) => void;
   onOpen: (row: JiraMentionRow) => void;
+  /** Opens the ticket's full page: the `Open ticket page` icon chip, and a Cmd-, Ctrl- or middle-click on the key (`wantsPage`). */
+  onOpenPage: (issue: JiraMentionIssue) => void;
 }) {
   return (
     <div className="jira-issues-frame">
@@ -66,7 +71,16 @@ export function JiraMentionList({
           </thead>
           <tbody>
             {rows.map((row) => (
-              <MentionRow key={row.mention.commentId} row={row} me={me} now={now} onDismiss={onDismiss} onRestore={onRestore} onOpen={onOpen} />
+              <MentionRow
+                key={row.mention.commentId}
+                row={row}
+                me={me}
+                now={now}
+                onDismiss={onDismiss}
+                onRestore={onRestore}
+                onOpen={onOpen}
+                onOpenPage={onOpenPage}
+              />
             ))}
           </tbody>
         </table>
@@ -81,7 +95,8 @@ function MentionRow({
   now,
   onDismiss,
   onRestore,
-  onOpen
+  onOpen,
+  onOpenPage
 }: {
   row: JiraMentionRow;
   me: string | null;
@@ -89,13 +104,23 @@ function MentionRow({
   onDismiss: (issue: JiraMentionIssue) => void;
   onRestore: (issue: JiraMentionIssue) => void;
   onOpen: (row: JiraMentionRow) => void;
+  /** Opens the ticket's full page: the `Open ticket page` icon chip, and a Cmd-, Ctrl- or middle-click on the key (`wantsPage`). */
+  onOpenPage: (issue: JiraMentionIssue) => void;
 }) {
   const { issue, mention, dismissed } = row;
   const type = mentionIssueType(issue.type);
   return (
     <tr className="jira-issues-row jira-mentions-row" data-key={issue.key} data-dismissed={dismissed ? '' : undefined}>
       <td className="jira-issues-key">
-        <button type="button" className="jira-mentions-open" onClick={() => onOpen(row)}>
+        <button
+          type="button"
+          className="jira-mentions-open"
+          title={fullPageTitle(browserPlatform())}
+          onClick={(e) => (wantsPage(e) ? onOpenPage(issue) : onOpen(row))}
+          onAuxClick={(e) => {
+            if (wantsPage(e)) onOpenPage(issue);
+          }}
+        >
           {issue.key}
         </button>
       </td>
@@ -157,6 +182,9 @@ function MentionRow({
               Dismiss
             </Chip>
           )}
+          <Chip size={28} icon={<Glyph name="document" />} aria-label="Open ticket page" title="Open ticket page" onClick={() => onOpenPage(issue)}>
+            {null}
+          </Chip>
           <Chip size={28} as="a" href={mention.url} icon={<Glyph name="external" />} aria-label="Open in Jira" title="Open in Jira">
             {null}
           </Chip>

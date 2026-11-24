@@ -28,6 +28,7 @@ import { FoldMark } from '../ui/FoldMark';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { LaneChevron } from './JiraLaneHeader';
+import { JiraMentionMarkFor } from './JiraMentionMarkFor';
 import { JiraRunMenu } from './JiraRunMenu';
 import { NotMergedChip } from './MrChip';
 
@@ -38,6 +39,11 @@ import { NotMergedChip } from './MrChip';
  * views cannot group or order one board two ways. Each lane is a **header row**, then one row per card in the lane (`sortForBoard` order across every
  * status: the Status column says the status, so a lane is not split in three), then its nested lanes, walked depth first. There is no cut (§4.1): a row is
  * one line, and a list that hides rows cannot be scanned by eye. Header rows sit on a tinted ground so the eye finds the groups before it reads a cell.
+ *
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): in a card row's and an on-board header row's Summary cell, after the
+ * title and before the `FoldMark` and the count. It is a `JiraMentionMarkFor` that draws only while the ticket has open mentions and a `MentionOpenContext`
+ * opener exists above; the `No parent` and off-board lane rows carry none (their key has no mentions entry of its own to open from here). Its press is
+ * stopped inside `MentionMark`, so it never also opens Detail.
  *
  * **Folds are the Board's** (§3.6): `folds` is the page's one `useLaneFolds`, handed to both views, so a lane folded here is folded on the Board and the
  * other way round. A folded lane draws its header row and skips its cards and every lane under it. Every header row, of all three kinds, carries the
@@ -416,6 +422,7 @@ function IssueRow({
         <span className="jira-issues-flex">
           {head?.chevron}
           {title}
+          <JiraMentionMarkFor issueKey={issue.key} />
           {head?.chip}
           {head?.count}
         </span>

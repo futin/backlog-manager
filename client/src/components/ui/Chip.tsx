@@ -1,7 +1,7 @@
 import { forwardRef } from 'react';
 import type { ReactNode } from 'react';
 
-export type ChipVariant = 'outline' | 'ink' | 'flat' | 'danger';
+export type ChipVariant = 'outline' | 'ink' | 'flat' | 'danger' | 'warn';
 export type ChipSize = 32 | 28;
 
 /**
@@ -13,6 +13,9 @@ export type ChipSize = 32 | 28;
  * control and `load more`, because they are one shape at four jobs: 13/500
  * label, 12 px radius, a 1 px `--hairline2` stroke on `--strip`. Four class
  * families for that would be four chances to disagree about a radius.
+ *
+ * `warn` is the amber `@ N` mention mark (§8.9.7): `.ui-pill-warn`'s tint and ink on the chip base, so a reply that waits on you reads as the same
+ * amber the board's other "needs you" pills use rather than a second yellow.
  *
  * `pressed` is `aria-pressed`, never a colour alone: a chip that is *on* is a
  * state, and §8's standing rule is that a raised control marks a state rather

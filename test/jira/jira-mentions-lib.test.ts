@@ -10,6 +10,7 @@ import {
   failureOfMentions,
   isJiraMentionsPayload,
   mentionCards,
+  mentionMarkText,
   mentionRows,
   mentionsBand,
   mentionsCheckGate,
@@ -299,5 +300,15 @@ describe('renderMarkdown breaks', () => {
 
   it('renders the converter’s hard break (two trailing spaces) as a <br> with breaks off, as a thread comment read back from Jira is rendered (#572)', () => {
     expect(renderMarkdown('a  \nb')).toContain('a<br>b');
+  });
+});
+
+describe('mentionMarkText', () => {
+  it('words one mention in the singular', () => {
+    expect(mentionMarkText(1)).toEqual({ label: '@ 1', title: '1 mention waits for your answer' });
+  });
+
+  it('words several mentions in the plural', () => {
+    expect(mentionMarkText(3)).toEqual({ label: '@ 3', title: '3 mentions wait for your answer' });
   });
 });

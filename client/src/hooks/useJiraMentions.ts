@@ -18,6 +18,13 @@ import { useWindowFocus } from './useWindowFocus';
  * - A failed read keeps `data`, raises `error` and retries at the floor.
  * - **While any ticket's reply-draft session is live** the same timer is shortened to `JIRA_REPLY_REREAD_MS` (phase 2), so a draft shows within 15 s.
  *
+ * - **`enabled` (default true)** gates all of the above: while false there is no read on mount, no timer, and focus is a no-op, but `data` is kept; the
+ *   false → true edge reads at once, and true → false clears the timer and retires reads in flight (a late answer neither writes nor re-arms). A write's
+ *   answer still lands in `data` and still re-reads the shell status. The hook's one caller is the shell-level provider (Jira mentions ↔ board link,
+ *   Task 2), which passes `jiraConfigured && section === 'jira'`.
+ * - **A newer status stamp re-reads**: when the shell status's `mentions.polledAt` is strictly later than this payload's, a check ran elsewhere (the chip's
+ *   Sync now), so `reload` runs once through the same newest-read-wins counter.
+ *
  * `error` is a `JiraMentionsFailure | null`, shared by reads and writes: `message`, and `retryAt` for a 429 sweep (the page's "Jira asked to wait until"
  * copy). `checking` is true while this hook's own sweep is out, or while the cache has never been stamped (`polledAt` null) and nothing blocks the check —
  * Jira reachable per the shell's status `access` (read through `useJiraContext`) and no `retryAt`; the page then says "checking", never "Nothing waiting".
@@ -64,7 +71,7 @@ function nextDelay(data: JiraMentionsPayload, now: number): number | null {
   return drafting ? Math.min(delay, JIRA_REPLY_REREAD_MS) : delay;
 }
 
-export function useJiraMentions(): JiraMentionsState {
+export function useJiraMentions({ enabled = true }: { enabled?: boolean } = {}): JiraMentionsState {
   const [state, setState] = useState<{ data: JiraMentionsPayload | null; loading: boolean; error: JiraMentionsFailure | null }>({
     data: null,
     loading: true,
@@ -82,6 +89,10 @@ export function useJiraMentions(): JiraMentionsState {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const latest = useRef(0);
+  // Read through a ref so `reload`, `landed` and the failure branch stay stable (their identities feed `useWindowFocus`'s subscription and the write
+  // callbacks) while still seeing the flag a late answer arrives under.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const clear = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
@@ -89,6 +100,8 @@ export function useJiraMentions(): JiraMentionsState {
   }, []);
 
   const reload = useCallback(() => {
+    // Disabled is "not our section": a no-op, so the focus listener, the status trigger and a stray caller cannot start a read the provider switched off.
+    if (!enabledRef.current) return;
     clear();
     const seq = ++latest.current;
     const current = (): boolean => mounted.current && seq === latest.current;
@@ -98,24 +111,48 @@ export function useJiraMentions(): JiraMentionsState {
         setState({ data, loading: false, error: null });
         const ms = nextDelay(data, Date.now());
         clear();
-        if (ms !== null) timer.current = setTimeout(reload, ms);
+        if (ms !== null && enabledRef.current) timer.current = setTimeout(reload, ms);
       })
       .catch((e: unknown) => {
         if (!current()) return;
         setState((prev) => ({ data: prev.data, loading: false, error: asMentionsFailure(e) }));
         clear();
-        timer.current = setTimeout(reload, JIRA_STATUS_FLOOR_MS);
+        if (enabledRef.current) timer.current = setTimeout(reload, JIRA_STATUS_FLOOR_MS);
       });
   }, [clear]);
 
   useEffect(() => {
     mounted.current = true;
-    reload();
     return () => {
       mounted.current = false;
       clear();
     };
-  }, [reload, clear]);
+  }, [clear]);
+
+  // The enabled edge. true: read at once (today's page mount, now the section's). false: stop the timer and retire any read still out — bumping the
+  // sequence is what makes a late GET write nothing and re-arm nothing. `data` is deliberately kept, so re-entering the section draws the old markers
+  // while the read refreshes them. On mount this is the first read when enabled, and a harmless no-op when not.
+  useEffect(() => {
+    if (enabled) {
+      reload();
+    } else {
+      clear();
+      latest.current += 1;
+    }
+  }, [enabled, reload, clear]);
+
+  // The status-newer trigger: a check started outside this hook (the Jira chip's Sync now / Mentions refresh) re-reads only the shell status, so the
+  // rail count moves at once while this hook would wait out its own timer. A strictly later `mentions.polledAt` in the status than in our payload means
+  // our copy is stale, so re-read through the same sequence-numbered `reload`. Deps are the two stamps only (not `enabled`): the enable edge already
+  // reads, and a second read there would just supersede the first. `reload` is itself a no-op while disabled.
+  const statusPolled = status.data?.mentions?.polledAt ?? null;
+  const ownPolled = state.data !== null && state.data.configured ? state.data.polledAt : null;
+  useEffect(() => {
+    if (statusPolled === null || ownPolled === null) return;
+    const theirs = Date.parse(statusPolled);
+    const mine = Date.parse(ownPolled);
+    if (!Number.isNaN(theirs) && !Number.isNaN(mine) && theirs > mine) reload();
+  }, [statusPolled, ownPolled, reload]);
 
   useWindowFocus(reload);
 
@@ -129,7 +166,8 @@ export function useJiraMentions(): JiraMentionsState {
       setState({ data, loading: false, error: null });
       clear();
       const ms = nextDelay(data, Date.now());
-      if (ms !== null) timer.current = setTimeout(reload, ms);
+      // A write answered after the hook was disabled still lands its data, but must not re-arm: nothing is polling.
+      if (ms !== null && enabledRef.current) timer.current = setTimeout(reload, ms);
       reloadStatus.current();
       return { ok: true };
     },

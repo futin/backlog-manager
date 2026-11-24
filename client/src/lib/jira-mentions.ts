@@ -521,3 +521,8 @@ export function replyTo(issue: JiraMentionIssue): { accountId: string; name: str
   const a = issue.mentions[0]?.author;
   return a === undefined ? null : { accountId: a.accountId, name: a.name };
 }
+
+/** The `@ N` mark's words (§8.9.7): the chip's label and the sentence a screen reader and the hover title both say, singular for one. */
+export function mentionMarkText(n: number): { label: string; title: string } {
+  return { label: `@ ${n}`, title: `${n} ${n === 1 ? 'mention waits' : 'mentions wait'} for your answer` };
+}

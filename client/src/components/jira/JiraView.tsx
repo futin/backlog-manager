@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useJiraMentionsContext, useMentionIndex } from '../../hooks/JiraMentionsContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { setJiraPage, useJiraPage } from '../../hooks/useJiraPage';
 import { setJiraTicketKey, useJiraTicketKey, useJiraTicketOrigin } from '../../hooks/useJiraTicketKey';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage, TicketOrigin } from '../../lib/jira-page';
-import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
+import type { GitlabMr, JiraAction, JiraIssue, JiraMention, JiraMentionIssue, ReviewHalf } from '../../../../shared/types';
 
 /**
  * What a review launch adds to the sheet's state: the half, the MR (its source branch is the sheet's locked branch) and the candidate repos — or, for a review
@@ -20,6 +21,8 @@ import { JiraBoardView } from './JiraBoardView';
 import { JiraDetail } from './JiraDetail';
 import { JiraLaunchSheet } from './JiraLaunchSheet';
 import { JiraMentionsView } from './JiraMentionsView';
+import { MentionModalHost } from './MentionModalHost';
+import { MentionOpenContext } from './MentionOpenContext';
 import { JiraSessionsView } from './JiraSessionsView';
 import { JiraSetupView } from './JiraSetupView';
 import { JiraTicketPage } from './JiraTicketPage';
@@ -31,7 +34,9 @@ import { JiraTicketPage } from './JiraTicketPage';
  * It decides one thing: which of the section's four pages (Board, Sessions, Mentions, Setup) is drawn, read from `useJiraPage` — the module store the rail's
  * tree writes. It draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and
  * the in-page links that also land on a page (`Open board` and Sessions' `Open Setup`, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own
- * navigation threaded down from `App`, handed to the pages as given.
+ * navigation threaded down from `App`, handed to the pages as given. The Mentions page's `Open ticket page` chips and the mention modal's are the ticket link
+ * instead: `openPage(key)` from wherever the dialog was opened (origin `mentions` from the page, `board` or `sessions` from a mark), or just a close when the
+ * ticket page already shows that key.
  *
  * Before a page can draw, the status has to have said `configured: true`, and until then this is where the section stands — `App` holds a stored `jira`
  * section through every answer that is not `configured: false` (spec §6.1's hold-and-fall), so these states are what that hold looks like:
@@ -81,8 +86,16 @@ import { JiraTicketPage } from './JiraTicketPage';
  * The origin is the key store's, beside the key (Jira ticket URL spec), not this component's memory: `App`'s popstate listener has to read it to send a
  * Back press to the page the ticket came from, and a reload re-reads it from the entry's state, so a ticket opened from Sessions says `← Sessions` after a
  * reload and a remount too. A pasted link carries no state and says `← Board`. The address (`?section=jira&ticket=<KEY>`) is `App`'s to load and to keep
- * in step with the screen; nothing here touches it except through the store. The page shares the launch sheet and `nudge` with the board pages and opens
- * no modal.
+ * in step with the screen; nothing here touches it except through the store. The page shares the launch sheet and `nudge` with the board pages and opens no
+ * modal of its own; the mention modal opens over it from its strip's `@ N` (below).
+ *
+ * **The mention modal's slot is HERE too** (Jira mentions <-> board link, §4; DESIGN.md §8.9.7). `mentionOpen` holds the opened snapshot `{ issue, mention }`,
+ * set by an `@ N` mark through `MentionOpenContext` (provided around the pages AND the Detail, so a marker in a card, a lane header, a list row or the Detail's
+ * strip all reach the same opener) and cleared with `walk` and `launch` on a page change. `MentionModalHost` draws it after the Detail and before the launch
+ * sheet. The board's walk is derived on every render from the live payload — the ticket's current `mentions` (newest first), the shown mention's place in it,
+ * and no position or neighbours once that mention has left it (a Dismiss, a posted reply) — so a poll never closes the dialog from under the reader. **It
+ * never opens over another modal**: every `Modal` paints on one tier and the reply editor already owns the next, so the opener empties the Detail walk in the
+ * same handler that sets the slot — the strip's mark SWAPS the ticket modal for the mention modal, and Escape then returns to the page beneath.
  */
 type OpenSlot = { issue: JiraIssue; childrenOf: JiraChildrenIndex | null };
 
@@ -115,6 +128,26 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   // The slot is JiraView's, and JiraView does not unmount on a page switch, so leaving the Board must clear it by hand — otherwise returning to Board would
   // redraw the modal for an issue the reader closed the page on.
   useEffect(() => setWalk([]), [page]);
+  // The mention modal's slot: the opened snapshot, never a live copy — `MentionModalHost` re-reads the entry from the payload on every render.
+  const [mentionOpen, setMentionOpen] = useState<{ issue: JiraMentionIssue; mention: JiraMention } | null>(null);
+  useEffect(() => setMentionOpen(null), [page]);
+  const mentionIndex = useMentionIndex();
+  const { data: mentionsData } = useJiraMentionsContext();
+  // An opener for a key with no open entry does nothing; otherwise the walk is emptied in the same handler (never two modals), and the newest mention is shown.
+  const openMention = (key: string): void => {
+    const entry = mentionIndex.get(key);
+    if (entry === undefined || entry.mentions.length === 0) return;
+    setWalk([]);
+    setMentionOpen({ issue: entry, mention: entry.mentions[0] });
+  };
+  const liveMentions =
+    mentionOpen === null || mentionsData === null || !mentionsData.configured
+      ? []
+      : (mentionsData.issues.find((i) => i.key === mentionOpen.issue.key)?.mentions ?? []);
+  const mentionAt = mentionOpen === null ? -1 : liveMentions.findIndex((x) => x.commentId === mentionOpen.mention.commentId);
+  const stepMention = (to: number): void => {
+    if (mentionOpen !== null && liveMentions[to] !== undefined) setMentionOpen({ issue: mentionOpen.issue, mention: liveMentions[to] });
+  };
   const [launch, setLaunch] = useState<{ issue: JiraIssue; action: JiraAction; review?: ReviewLaunch } | null>(null);
   useEffect(() => setLaunch(null), [page]);
   const [nudge, setNudge] = useState(0);
@@ -142,11 +175,11 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   ) : (
     // The sessions poll is the shell's (`App` hoists `JiraSessionsProvider` around the rail and this section): the card's `Run ▾`, the Detail dialog and the
     // rail badge read ONE payload, so none of them disagrees with another for a poll. This section being current is what `open` says there.
-    <>
+    <MentionOpenContext.Provider value={openMention}>
       {page === 'sessions' ? (
         <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onOpenPage={openPageOn} onRun={run} nudge={nudge} />
       ) : page === 'mentions' ? (
-        <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
+        <JiraMentionsView onOpenJiraPage={onOpenJiraPage} onOpenPage={openPage} />
       ) : page === 'ticket' && !noTicket ? (
         <JiraTicketPage
           origin={origin}
@@ -174,6 +207,22 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onClose={() => setWalk([])}
         />
       )}
+      {mentionOpen !== null && (
+        <MentionModalHost
+          issue={mentionOpen.issue}
+          mention={mentionOpen.mention}
+          position={mentionAt < 0 ? null : { at: mentionAt + 1, of: liveMentions.length }}
+          onPrev={mentionAt > 0 ? () => stepMention(mentionAt - 1) : null}
+          onNext={mentionAt >= 0 && mentionAt < liveMentions.length - 1 ? () => stepMention(mentionAt + 1) : null}
+          onClose={() => setMentionOpen(null)}
+          // The modal has already closed itself; the slot is emptied here too so the handler stands alone. On the ticket page of this very ticket there is
+          // nowhere to go, so closing is all it does.
+          onOpenPage={(key) => {
+            setMentionOpen(null);
+            if (page !== 'ticket' || ticketKey !== key) openPage(key);
+          }}
+        />
+      )}
       {/* Drawn after the modal; it ranks above it because it mounts later — see the header. Keyed by issue so a second launch never inherits the first's form. */}
       {launch !== null && (
         <JiraLaunchSheet
@@ -186,6 +235,6 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onWrote={landed}
         />
       )}
-    </>
+    </MentionOpenContext.Provider>
   );
 }
