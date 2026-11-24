@@ -57,7 +57,8 @@ minutes in the foreground for GitHub to land it and, under `--fix`, repairs a re
 `origin/<base>` into the PR's own branch. A non-merge outcome leaves auto-merge armed and says so; the skill never merges without `--auto`. The procedure is
 `skills/backlog-execute/references/auto-merge.md`, shared with groom, and the sheet's Auto-merge and Fix toggles are seeded from `prAutoMergeDefault` and
 `prFixDefault`.
-`--low-risk-auto-merge` is the opt-in form of both: legal only beside `--finish pr` (refused otherwise), redundant and ignored beside `--auto-merge`, and ignored
+`--low-risk-auto-merge` is the opt-in form of both: legal only beside `--finish pr` (refused otherwise), redundant and ignored beside `--auto-merge`, and
+ignored
 under an `[orchestrator-run` marker. After the PR is open execute runs `tools/low-risk.mjs --base <base>` once; a low-risk verdict (docs-only, tests-only or a
 small patch) proceeds exactly as `--auto-merge --fix`, anything else — including a classifier that was denied, failed or never ran for want of a PR — prints
 one `low-risk:` line above the PR URL and leaves the PR open. The sheet's "auto-merge if low-risk" toggle is seeded from `prLowRiskAutoMergeDefault`, and a
@@ -265,8 +266,10 @@ open), `groom <id>` (an ungroomed bug's fix, or a refactor promoted to a task, w
 older than `--lock-ttl` minutes was found and claimed), `busy` (the project is occupied — a `running` or `paused` run, a board-started run with no run file, a
 `started:` marker anywhere in the main checkout or a linked worktree, a live claim or a fresh remote run) or `idle` (nothing worth starting, or a tracker
 project whose stack is down — or whose tracker cache the tool cannot trust yet, #332). Execute wins over groom. An omitted `--max-prs` / `--max-plans` is
-`tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick, 1–10), else 2 / 3 — the flag always wins (#378). `tick.json`'s boolean `lowRiskAutoMerge`
-(default off, no CLI flag: it is a policy, not a cap) makes `decide` append `--low-risk-auto-merge` to an execute's args and print a `lowRiskAutoMerge` field on that verdict.
+`tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick, 1–10), else 2 / 3 — the flag always wins (#378). `tick.json`'s
+boolean `lowRiskAutoMerge`
+(default off, no CLI flag: it is a policy, not a cap) makes `decide` append `--low-risk-auto-merge` to an execute's args and print a `lowRiskAutoMerge` field on
+that verdict.
 
 **A tracker project's index is believed only once the poller has read its repo.** The server's cache is in memory and per repo, so after every restart
 `/api/items` lists no rows for a project until that repo's first sync lands — and an empty list read as it stands is `nothing to do`. So `decide` also reads

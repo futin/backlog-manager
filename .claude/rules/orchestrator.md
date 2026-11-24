@@ -50,7 +50,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `-u` and runs `gh pr create` only in a tree that holds that one item's work alone — execute in one it cut from local `<base>` as `.worktrees/execute-<id>` on
   `execute/<id>` (or a clean reused worktree with no commits beyond `<base>`), groom in `.worktrees/groom-<id>` on `groom/<id>`, `<id>` with no `#` — never to
   `<base>`, never with force, execute never under an `[orchestrator-run` marker and groom never under a `[backlog-tick]` one, and neither merges. With
-  `--auto-merge` either may then arm GitHub auto-merge on the PR it opened — and an execute with `--low-risk-auto-merge` (and no `--auto-merge`) may too, but only
+  `--auto-merge` either may then arm GitHub auto-merge on the PR it opened — and an execute with `--low-risk-auto-merge` (and no `--auto-merge`) may too, but
+  only
   after `skills/backlog-execute/tools/low-risk.mjs` calls its diff low-risk, run once, and then exactly as `--auto-merge --fix` would; any other outcome of the
   classifier arms nothing (`skills/backlog-execute/references/auto-merge.md`, the one procedure both read):
   `gh pr merge <pr> --auto --<method>`, never a `gh pr merge` without `--auto`, and only after the repo's `allow_auto_merge` is checked — at once only on a

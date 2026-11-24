@@ -316,9 +316,11 @@ A route lives in `agents/` when it calls a dashboard — spawn, stop, health, us
   carries `launchSurface` (`dashboard` | `desktop`) only while HOME's dashboard `/api/health` says `desktopAvailable: true`; its value is that answer's
   `launchSurfaceDefault`, `dashboard` when the dashboard sends none or one outside the two. Absent, the sheet draws no Dashboard | Desktop control.
 - `POST /api/agents/dispatch` — spawns the session in that dashboard. An execute or a home groom dispatch also takes `finish` (`in-place` | `pr`, absent
-  meaning in-place), `base` (a local branch, proved server-side, legal only with `pr` and required by it) and, only with `pr`, the booleans `autoMerge`, `fix` and, execute only, `lowRiskAutoMerge` (`fix` needs `autoMerge`; each a 400 otherwise, `autoMerge and fix apply only to finish pr` /
+  meaning in-place), `base` (a local branch, proved server-side, legal only with `pr` and required by it) and, only with `pr`, the booleans `autoMerge`, `fix`
+  and, execute only, `lowRiskAutoMerge` (`fix` needs `autoMerge`; each a 400 otherwise, `autoMerge and fix apply only to finish pr` /
   `fix requires autoMerge` / `lowRiskAutoMerge applies only to execute` / `lowRiskAutoMerge applies only to finish pr`); the server appends the finish
-  clause from those validated fields after the body, and a body that spells `--finish`, `--base`, `--auto-merge`, `--fix` or `--low-risk-auto-merge` is a 400. `finish` on a capture, or
+  clause from those validated fields after the body, and a body that spells `--finish`, `--base`, `--auto-merge`, `--fix` or `--low-risk-auto-merge` is a 400.
+  `finish` on a capture, or
   on a groom sent to a remote machine, is a 400. Both `dispatch` and `orchestrate` take an optional
   `machine`: absent or `home` is the launch above, byte for byte, and a remote's `name` sends it to that machine's dashboard — see "Launching on another
   machine".
@@ -517,11 +519,14 @@ error? }`
 first; `lastDecide` (#367) is `last-decide.json`'s `{ at, verdict, caps: { openPrs, maxPrs, planReview, maxPlans } }`, rebuilt field by field and absent when
 the file is missing or any field is the wrong shape — it rides on an errored row too, since it is a separate file; `error` is set, with `recent` empty, when
 `state.json` exists and cannot be read. `streak`, `halted` and `haltedSince` come from `streakOf` in
-`tick-breaker.util.ts`, the server's copy of the rule `tick.mjs decide` applies, and `config` is `{ haltAfter, maxPlans, maxPrs, lowRiskAutoMerge, source: 'file' | 'default' |
+`tick-breaker.util.ts`, the server's copy of the rule `tick.mjs decide` applies, and `config` is `{ haltAfter, maxPlans, maxPrs, lowRiskAutoMerge, source:
+'file' | 'default' |
 'unreadable', error? }` — `unreadable` reports `haltAfter` 3 and the caps 3 and 2 for display only. `tick/` is not an outbound-calling module: files only, no network.
 
 Two POSTs, both behind `SameOriginPostGuard` (content-type and origin, like every agents POST) and the only writes this module makes. `POST /api/ticks/config`
-takes any non-empty subset of `{ haltAfter, maxPlans, maxPrs, lowRiskAutoMerge }` — a present integer key that is not an integer, or `lowRiskAutoMerge` that is not a boolean, is a `400` naming it, a body naming none of them is
+takes any non-empty subset of `{ haltAfter, maxPlans, maxPrs, lowRiskAutoMerge }` — a present integer key that is not an integer, or
+`lowRiskAutoMerge` that is
+not a boolean, is a `400` naming it, a body naming none of them is
 `400 nothing to set`, unknown keys are ignored — clamps each to `TICK_HALT_LIMITS` / `TICK_CAP_LIMITS` (1–10), leaves the keys it was not sent as they are on
 file, and answers the new `TicksPayload`. `POST /api/ticks/reset` `{
 project }` is a `400` for anything but an absolute-path string, a `404` when the tick home has no directory for it, and otherwise stamps `resetAt[project] =

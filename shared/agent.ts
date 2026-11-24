@@ -942,8 +942,10 @@ export function oneLine(text: string): string {
 }
 
 /**
- * The `--finish` / `--base` / `--auto-merge` / `--fix` / `--low-risk-auto-merge` token, as one pattern. `AgentsService.dispatch` refuses an execute or groom body
- * containing it (rule 8: the sheet's pickers and checkboxes are the only channel for any of them), and `composePrompt` defuses it inside an item title with `defuseFinishFlags` — two
+ * The `--finish` / `--base` / `--auto-merge` / `--fix` / `--low-risk-auto-merge` token, as one pattern. `AgentsService.dispatch` refuses an execute or groom
+ * body
+ * containing it (rule 8: the sheet's pickers and checkboxes are the only channel for any of them), and `composePrompt` defuses it inside an item title with
+ * `defuseFinishFlags` — two
  * uses of one pattern, so what the refusal would match and what the defuser rewrites cannot drift. A word character or hyphen on either side means a longer
  * word (`--finished`, `--base-ref`, `--fix-up`, `--auto-merged`, `base64`), which is not a flag. Non-global on purpose: `.test` on a global regex carries
  * `lastIndex` between calls.
