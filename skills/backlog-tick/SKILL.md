@@ -38,7 +38,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" decide <the trig
 ```
 
 It prints ONE JSON line: `verdict`, `reason`, `root`, `caps`, `dryRun`, and for `execute` / `groom` also `id`, `skill` and `args`; for `recover` also `stop`,
-and `id` when a lock was readable. `root` is the project's main checkout (`null` when the cwd is not one); step 3 runs from it.
+and `id` when a lock was readable; an `execute` also carries `lowRiskAutoMerge` — `true` when `args` ends in `--low-risk-auto-merge` (the machine's setting is on and the
+lock TTL is at least 180 minutes), `false` when the setting is off, or `"off: lock TTL <n> min < 180"` when the setting was on but a shorter `--lock-ttl` vetoed it. `root` is the project's main checkout (`null` when the cwd is not one); step 3 runs from it.
 On `execute` and `groom` it has taken the lock; from here to step 3 the lock is held, and only `record` releases it.
 
 **`dryRun` is `true` — whatever the verdict, run nothing and record nothing:** no lock was taken and no `stop` is safe. The final message is the `verdict` and
@@ -104,4 +105,6 @@ A halted project is reset on the board (Runs › Ticks), not by `forget`, which 
 
 One short paragraph: what was done, the PR URL (execute) or the item groomed and that its plan awaits review (groom), or why nothing was done. A `failed` tick
 still ends as an ordinary result — the run log is the signal, and a push per failed night would be noise — so do not escalate it. A `record` that exited
-non-zero replaces the paragraph with its stderr line (see Rules).
+non-zero replaces the paragraph with its stderr line (see Rules). When the execute's final message carries `low-risk:` and `auto-merge:` lines (the flag was
+passed), copy them into this paragraph — never into `record`'s `--reason`: a PR that opened is `ok` whatever auto-merge did, so a repo that refuses auto-merge must not
+trip the breaker.

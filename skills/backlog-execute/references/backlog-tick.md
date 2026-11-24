@@ -6,7 +6,9 @@ file is read with the Read tool and never has `${CLAUDE_PLUGIN_ROOT}` filled in.
 ## Why it is not an orchestrator run
 
 `backlog-tick` starts one execute session per item, in the item's own worktree through `--finish pr`, and the arguments are exactly
-`<id> --finish pr [backlog-tick]` — or `<id> --finish pr --base <ref> [backlog-tick]` when the tick was given a base. Nothing wraps that session the way
+`<id> --finish pr [backlog-tick]` — or `<id> --finish pr --base <ref> [backlog-tick]` when the tick was given a base — with `--low-risk-auto-merge` added after
+the base (marker still last) when `tick.json` has it on and the job's lock TTL is at least 180 minutes. With that flag the session may stay up to 45 minutes
+after opening the PR, waiting for auto-merge to land; GitHub does the merge, never the tick, so "never merges" still holds. Nothing wraps that session the way
 `backlog-orchestrate` wraps its own: there is no driver to commit, review, push or close the item afterwards. So the three things an `[orchestrator-run` marker takes away — the git
 steps, the claim on a tracker item, the `## Outcome` path — all stay here. `pr-mode.md` runs as written, a tracker item is claimed and released by this session
 the way an interactive one is, and the `## Outcome` is written where it always is. What the marker takes away instead is the user: there is nobody to ask, so the

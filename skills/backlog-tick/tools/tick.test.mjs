@@ -307,6 +307,7 @@ test('files project decides with the stack down', async (t) => {
     id: 'bug-1',
     skill: 'backlog-execute',
     args: 'bug-1 --finish pr [backlog-tick]',
+    lowRiskAutoMerge: false,
     root: fx.root,
     caps: { openPrs: 0, maxPrs: 2, planReview: 0, maxPlans: 3 },
     dryRun: false,
@@ -1641,4 +1642,70 @@ test('R11: a files project records failed with a hash and never asks the API', a
   const rec = readJson(fx.stateFile).items['bug-1'];
   assert.equal(rec.outcome, 'failed');
   assert.equal(typeof rec.hash, 'string');
+});
+
+// --- lowRiskAutoMerge (execute verdicts only) -----------------------------
+
+// The setting rides `tick.json` (machine-wide) and reaches the execute unit's args as `--low-risk-auto-merge`, marker last. The 180-minute floor exists because
+// an armed execute holds the lock while it waits up to 45 minutes: a job with a shorter `--lock-ttl` would see that lock "recovered" under a live session.
+
+function lowRiskFixture(t, setting) {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  if (setting !== undefined) fs.writeFileSync(fx.tickFile, JSON.stringify({ lowRiskAutoMerge: setting }));
+  return fx;
+}
+
+test('lowRiskAutoMerge on: the flag precedes the marker and the line says true', async (t) => {
+  const fx = lowRiskFixture(t, true);
+  const v = await decide(fx, ['--dry-run']);
+  assert.equal(v.verdict, 'execute');
+  assert.equal(v.args, 'bug-1 --finish pr --low-risk-auto-merge [backlog-tick]');
+  assert.equal(v.lowRiskAutoMerge, true);
+  git(fx.root, 'branch', 'develop');
+  const withBase = await decide(fx, ['--dry-run', '--base', 'develop']);
+  assert.equal(withBase.args, 'bug-1 --finish pr --base develop --low-risk-auto-merge [backlog-tick]');
+});
+
+test('lowRiskAutoMerge off or absent: args unchanged, the field is false', async (t) => {
+  for (const setting of [undefined, false]) {
+    const v = await decide(lowRiskFixture(t, setting), ['--dry-run']);
+    assert.equal(v.args, 'bug-1 --finish pr [backlog-tick]');
+    assert.equal(v.lowRiskAutoMerge, false);
+  }
+});
+
+test('lowRiskAutoMerge on with a lock TTL under 180 min is vetoed and says so; 180 keeps it', async (t) => {
+  const fx = lowRiskFixture(t, true);
+  const short = await decide(fx, ['--dry-run', '--lock-ttl', '120']);
+  assert.equal(short.args, 'bug-1 --finish pr [backlog-tick]');
+  assert.equal(short.lowRiskAutoMerge, 'off: lock TTL 120 min < 180');
+  const floor = await decide(fx, ['--dry-run', '--lock-ttl', '180']);
+  assert.equal(floor.args, 'bug-1 --finish pr --low-risk-auto-merge [backlog-tick]');
+  assert.equal(floor.lowRiskAutoMerge, true);
+});
+
+test('lowRiskAutoMerge is absent from a groom and an idle verdict', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-4', BUG_RAW);
+  commitAll(fx.root);
+  fs.writeFileSync(fx.tickFile, JSON.stringify({ lowRiskAutoMerge: true }));
+  const groom = await decide(fx, ['--dry-run']);
+  assert.equal(groom.verdict, 'groom');
+  assert.equal('lowRiskAutoMerge' in groom, false);
+  const idle = await decide(project(t), ['--dry-run']);
+  assert.equal(idle.verdict, 'idle');
+  assert.equal('lowRiskAutoMerge' in idle, false);
+});
+
+test('lowRiskAutoMerge on: --dry-run and --peek print the field and take no lock', async (t) => {
+  const fx = lowRiskFixture(t, true);
+  const r = await peek(fx);
+  assert.equal(r.status, 0);
+  assert.equal(r.v.lowRiskAutoMerge, true);
+  assert.equal(r.v.args, 'bug-1 --finish pr --low-risk-auto-merge [backlog-tick]');
+  assert.equal(fs.existsSync(fx.lockFile), false);
+  assert.equal((await decide(fx, ['--dry-run'])).lowRiskAutoMerge, true);
+  assert.equal(fs.existsSync(fx.lockFile), false);
 });

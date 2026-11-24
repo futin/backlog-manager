@@ -76,17 +76,17 @@ function withFile(t, text) {
 
 test('readTickSettings — an absent file is the default', (t) => {
   const file = path.join(fixture(t), 'nope.json');
-  assert.deepEqual(readTickSettings(file), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'default' });
+  assert.deepEqual(readTickSettings(file), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'default' });
 });
 
 test('readTickSettings — a file is read, haltAfter clamped and non-integers read as 3', (t) => {
-  assert.deepEqual(readTickSettings(withFile(t, { haltAfter: 5 })), { ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
+  assert.deepEqual(readTickSettings(withFile(t, { haltAfter: 5 })), { ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'file' });
   assert.equal(readTickSettings(withFile(t, { haltAfter: 0 })).haltAfter, 1);
   assert.equal(readTickSettings(withFile(t, { haltAfter: 42 })).haltAfter, 10);
   assert.equal(readTickSettings(withFile(t, { haltAfter: '7' })).haltAfter, 3);
   assert.equal(readTickSettings(withFile(t, { haltAfter: 2.5 })).haltAfter, 3);
   // a file with no haltAfter at all is still a file
-  assert.deepEqual(readTickSettings(withFile(t, {})), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
+  assert.deepEqual(readTickSettings(withFile(t, {})), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'file' });
 });
 
 // PINNED: `test/tick/tick-breaker.test.ts` carries the same rows for the server's `readTickFile`, so the two readers cannot disagree about a hand-edited cap.
@@ -168,4 +168,14 @@ test('readTickSettings defaults its file to tickSettingsFile()', (t) => {
   });
   process.env.BM_TICK_FILE = file;
   assert.equal(readTickSettings().haltAfter, 4);
+});
+
+// The hand copy of `readTickFile`'s boolean (Task 5): only a literal `true` is on, so a hand-edited `"true"` or `1` never arms a merge by accident.
+test('readTickSettings — lowRiskAutoMerge is boolean-only: absent and non-booleans read false', (t) => {
+  assert.equal(readTickSettings(path.join(fixture(t), 'absent.json')).lowRiskAutoMerge, false);
+  assert.equal(readTickSettings(withFile(t, {})).lowRiskAutoMerge, false);
+  assert.equal(readTickSettings(withFile(t, { lowRiskAutoMerge: true })).lowRiskAutoMerge, true);
+  assert.equal(readTickSettings(withFile(t, { lowRiskAutoMerge: false })).lowRiskAutoMerge, false);
+  assert.equal(readTickSettings(withFile(t, { lowRiskAutoMerge: 'true' })).lowRiskAutoMerge, false);
+  assert.equal(readTickSettings(withFile(t, { lowRiskAutoMerge: 1 })).lowRiskAutoMerge, false);
 });
