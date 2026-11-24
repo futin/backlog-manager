@@ -3864,6 +3864,16 @@ export interface ItemPlanReviewResult {
   planReview: boolean;
 }
 
+/**
+ * `GET /api/items/held`'s answer: whether THIS machine still holds an in-place execute's leftovers for one tracker issue (the in-review-without-PR spec).
+ * `branch` is a local `execute/<n>` branch — `null` when git could not be asked (a timeout, not a repository), which the board words as "could not check",
+ * never as "nothing here". `tree` is a `.worktrees/execute-<n>` directory. Read per request and stored nowhere; it never gates anything.
+ */
+export interface ItemHeld {
+  branch: boolean | null;
+  tree: boolean;
+}
+
 /** What `claim`, `release` and `heartbeat` answer on success: the comment that
  *  IS the claim, and the record now inside it. */
 export interface ClaimResult {

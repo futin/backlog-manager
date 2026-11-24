@@ -11,6 +11,7 @@ import { AppModule } from '../../server/src/app.module';
 import { OrchestrateArgsService } from '../../server/src/agents/orchestrate-args.service';
 import { GIT_TIMEOUT_MS, __setGitTimeoutMs } from '../../server/src/git-run.util';
 import { resolveBaseBranch } from '../../server/src/items/base-branch.util';
+import { localHold } from '../../server/src/items/held.util';
 import { __gitSpawnCount, __resetGitDateMemo, lastCommitDates } from '../../server/src/items/git-dates.util';
 import { uncommittedItemPaths } from '../../server/src/items/uncommitted.util';
 import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
@@ -215,6 +216,14 @@ describe('a timeout lands in each call site’s existing failure branch', () => 
     __setGitTimeoutMs(100);
     fakeOn({ sleep: 3 });
     await expect(originRepo(root)).resolves.toBeNull();
+  });
+
+  it('localHold: branch null, never false', async () => {
+    // A timed-out probe is "could not check", which the Lift review confirmation words differently from "nothing here" — so `false` here would be the
+    // one wrong answer: it tells a person their unpushed work is gone when git merely did not answer.
+    __setGitTimeoutMs(100);
+    fakeOn({ sleep: 3 });
+    await expect(localHold(root, 1)).resolves.toEqual({ branch: null, tree: false });
   });
 
   it('OrchestrateArgsService.branches: an empty list', async () => {

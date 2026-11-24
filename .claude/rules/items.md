@@ -37,8 +37,9 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   so `show --json` sees the mark at once; a REMOVAL after the patch, checked (a 404 is success), then the issue re-read into the cache. Never `labels` in the
   PATCH, which replaces the set and would race the claim's and the queue's labels. The `plan-review` route re-reads and absorbs too.
   Its label is `PLAN_REVIEW_LABEL` (`tracker/labels.ts`), the eleventh.
-  The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
-  because `start` and `stop` are two processes. Why:
+  The two READS beside them are unguarded like every other GET: `GET /api/items/claim`, which exists because `start` and `stop` are two processes, and
+  `GET /api/items/held` (`localHold`, `items/held.util.ts`), which reports a local `execute/<n>` branch and `.worktrees/execute-<n>` for the Lift review
+  confirmation, behind `writable` and the repo and id checks, and decides nothing. Why:
   [invariants.md](docs/subsystems/invariants.md#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
   (`server/src/items/sources/resolve.util.ts`) reads `backlog/source.json` per request, caches nothing, and answers `missing` / `files` / `tracker` /
@@ -87,7 +88,7 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   the whole process could freeze, and async removes the freeze, so the bound now only says how long a request waits before the degraded answer. The call sites
   and what a `null` means to each: `lastCommitDates` → the empty map (falls back to `created`), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
   `resolveBaseBranch` → the same 400 a missing branch gets, `OrchestrateArgsService.branches` → an empty list, and `ReleasesService`'s four reads — `for-each-ref` → the
-  empty shape, `describe` → `current: null`, `remote get-url` → no `url`, `rev-parse` → the answer is not memoised. No call site grew a new branch for a timeout and none may:
+  empty shape, `describe` → `current: null`, `remote get-url` → no `url`, `rev-parse` → the answer is not memoised, `localHold`'s `for-each-ref` → `branch: null` (never `false`, which would read as "nothing here"). No call site grew a new branch for a timeout and none may:
   a caller with a reason a timeout should differ from a missing repo is a new decision, not a refactor. `stdout` only, stdin closed, stderr dropped.
   `test/server/git-run.test.ts` is the guard: a fake slow `git` on `PATH`, the timeout landing in each branch above, the sharing cases, a route case in which
   `/api/health` answers in tens of milliseconds while `/api/items` waits out a 1 s git, and a grep that fails on `execFileSync`, `spawnSync` or `execSync`

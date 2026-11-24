@@ -2,7 +2,7 @@ import { Controller, Get, HttpException, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { ItemsService } from './items.service';
-import type { ClaimResult, ItemsIndex, ProjectSummary, UncommittedItems } from '../../../shared/types';
+import type { ClaimResult, ItemHeld, ItemsIndex, ProjectSummary, UncommittedItems } from '../../../shared/types';
 
 /**
  * Everything lives under /api on purpose: dev-mode Vite proxies exactly one
@@ -103,6 +103,27 @@ export class ItemsController {
     if (trimmedProject === '') throw new HttpException({ error: 'project is required' }, 400);
     if (trimmedId === '') throw new HttpException({ error: 'id is required' }, 400);
     return this.items.readClaim(trimmedProject, trimmedId);
+  }
+
+  /**
+   * What this machine still holds for one tracker item — a local `execute/<n>` branch, a `.worktrees/execute-<n>` directory — the second READ beside the
+   * claim protocol's writes (the in-review-without-PR spec). The board's Lift review confirmation asks it before a person removes `in-review` from an issue no
+   * open PR references, so the dialog can say unpushed work may still be here.
+   *
+   * Unguarded for `claim`'s reason: a GET that starts nothing, takes no path the registry does not already hold, and tells a same-origin reader whether two
+   * names exist in a repository it can already list. Read per request because the answer is what the person is about to act on — a branch deleted a moment
+   * ago must read as gone. It never decides: Lift stays enabled whatever it says, and `POST /api/items/review` reads none of it. The branch probe is
+   * `for-each-ref`, never `show-ref --verify`, so "absent" and "git did not answer" stay two answers (`held.util.ts`).
+   *
+   * 400 for a blank parameter, then `ItemsService.held`'s gate — kept apart for the reason `uncommitted` gives.
+   */
+  @Get('items/held')
+  held(@Query('project') project: string | undefined, @Query('id') id: string | undefined): Promise<ItemHeld> {
+    const trimmedProject = typeof project === 'string' ? project.trim() : '';
+    const trimmedId = typeof id === 'string' ? id.trim() : '';
+    if (trimmedProject === '') throw new HttpException({ error: 'project is required' }, 400);
+    if (trimmedId === '') throw new HttpException({ error: 'id is required' }, 400);
+    return this.items.held(trimmedProject, trimmedId);
   }
 
   /**

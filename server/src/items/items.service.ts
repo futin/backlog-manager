@@ -3,12 +3,15 @@ import { HttpException, Inject, Injectable } from '@nestjs/common';
 import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
 import { resolveSource } from './sources/resolve.util';
 import type { ResolvedSource, SourceMarker } from './sources/resolve.util';
-import { parseUrn } from '../tracker/map-issue';
+import { issueNumberFor, parseUrn } from '../tracker/map-issue';
+import { isRepo } from '../tracker/github.client';
+import { localHold } from './held.util';
+import { writable } from './write-gate.util';
 import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } from './sources/source';
 import { uncommittedItemPaths } from './uncommitted.util';
 import { resolveBaseBranch } from './base-branch.util';
 import { answer } from './write-answer.util';
-import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts, SourceKind, UncommittedItems } from '../../../shared/types';
+import type { BacklogItem, ClaimResult, ItemHeld, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts, SourceKind, UncommittedItems } from '../../../shared/types';
 
 /**
  * All reads walk the registry and the stores per request, like guide-manager's
@@ -365,6 +368,25 @@ export class ItemsService {
     // Mapped by `answer`, the write routes' own mapping, rather than a local not-found-or-502: a missing token is a 503 and a rate limit a 429 with its
     // `resetAt` on this route exactly as on the ten writes, because the caller (`backlog.mjs stop`) acts on the status the same way (#270).
     return answer(await lookup.writer.readClaim(lookup.project, lookup.marker, id));
+  }
+
+  /**
+   * What this machine still holds for one tracker item under execute's names — `GET /api/items/held`'s whole implementation (the in-review-without-PR
+   * spec). Gated through `writable`, the write routes' own gate, because it is asked only on the way to one of them (the Lift review confirmation, ahead of
+   * `POST /api/items/review`), and a caller that could not lift should hear the same refusal here rather than a hold it cannot act on: 404 unregistered, 400
+   * for a files project in the writes' own sentence, 400 for an unsupported marker with its reason.
+   *
+   * The repo is checked before it shapes an id, and the id must name an issue in THAT repo — the same `issueNumberFor` the writes resolve through, so the
+   * three id shapes agree and a URN for another repo is refused rather than answered for a number that happens to match. Neither check reaches git; only a
+   * request that names a real issue of this project's repo does, and then only to read two exact names (`localHold`).
+   */
+  async held(projectPath: string, id: string): Promise<ItemHeld> {
+    const lookup = writable(this.writerFor(projectPath));
+    const repo = lookup.marker.repo;
+    if (!isRepo(repo)) throw new HttpException({ error: 'backlog/source.json names no valid "repo" (expected "owner/name")' }, 400);
+    const n = issueNumberFor(id, repo);
+    if (n === null) throw new HttpException({ error: `${id} does not name an issue in ${repo}` }, 400);
+    return localHold(lookup.project.path, n);
   }
 
   /**
