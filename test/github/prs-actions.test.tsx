@@ -719,13 +719,27 @@ describe('PrResolveLine', () => {
   const line = () => screen.queryByTestId('pr-resolve');
   const at = (over: Partial<PullRequestRow> = {}) => pr({ mergeable: 'conflicting', mergeState: 'dirty', ...over });
 
-  it('live with a session id: resolving…, a link to the session', () => {
+  it('live with a session id: resolving… as text, and a session ↗ link to the session', () => {
     render(<PrResolveLine pr={at()} state={state({ live: { sessionId: 's1' } })} />);
-    expect(line()).toHaveTextContent('resolving…');
-    const link = within(line()!).getByRole('link');
-    expect(link).toHaveTextContent('resolving…');
+    expect(line()).toHaveTextContent(/^resolving… session ↗$/);
+    const link = within(line()!).getByRole('link', { name: 'session ↗' });
     expect(link.getAttribute('href')).toMatch(/\?session=s1$/);
     expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+  });
+
+  it('no shape draws as a chip or a control: every status is text in the why-line look', () => {
+    const shapes = [
+      state({ live: { sessionId: null } }),
+      state({ live: { sessionId: 's1' } }),
+      state({ outcome: { outcome: 'pushed', reason: 'ok', fromSha: SHA5, headSha: SHA_PUSHED, sessionId: 's1' } })
+    ];
+    for (const s of shapes) {
+      const { unmount } = render(<PrResolveLine pr={at()} state={s} />);
+      expect(line()).toHaveClass('prs-why');
+      expect(line()!.querySelector('.ui-chip, label, button')).toBeNull();
+      unmount();
+    }
   });
 
   it('live while the spawn has not answered (sessionId null): resolving… and no link', () => {

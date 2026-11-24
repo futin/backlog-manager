@@ -4019,6 +4019,9 @@ button.rail-count { cursor: pointer }
 .prs-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
 .prs-line > .prs-chips, .prs-line > .prs-meta { display: contents }
 .prs-why { font-size: 12px; color: var(--ink2) }
+/* The resolve line's live and pushed shapes (`PrResolveLine`): the dot leads the words, centred on the first line, so a state reads as a dot and a word and
+   never as a chip under the Merge split (user report, 2026-11-24). `margin: 0` because it is a `<p>`, like the stopped note. */
+.prs-resolve-state { display: flex; align-items: center; gap: 6px; margin: 0 }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
