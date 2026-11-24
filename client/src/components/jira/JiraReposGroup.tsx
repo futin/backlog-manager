@@ -57,8 +57,9 @@ import { WorktreeRow } from './JiraWorktreeRow';
  * without the wait a second `×` or `Add` would build its list from the status drawn BEFORE the write and overwrite it on the server — resurrecting the path
  * just removed or dropping the one just added. Every control that issues a path write (each `×`, the project `Select`, the path field, `Add`, and Enter in
  * the field) is held while the context still holds the `data` object that was on screen when the write landed; a new object ends the hold, and so does a
- * failed status read, so a dead reload cannot lock the card for good. A path's defaults `Save` is not held: it posts that one path's two values, never a
- * derived list, so it has nothing stale to send.
+ * failed status read, so a dead reload cannot lock the card for good — unless the status was ALREADY unreadable when the write landed, in which case the
+ * error is not the reload's and the hold lasts until a read succeeds (`useJira`'s floor retry or a focus). A path's defaults `Save` is not held: it posts
+ * that one path's two values, never a derived list, so it has nothing stale to send.
  */
 export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
   const { data, error: unreadable, reload } = useJiraContext();
@@ -67,13 +68,15 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
   const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The `data` object on screen when the last path write LANDED. While the context still holds that very object the reload has not answered, and the
-  // lists drawn are the pre-write ones — see the header's "waits for the status" paragraph (#587). The ref is the latest render's `data`, read when the
-  // POST answers rather than when it was sent, so a poll that landed mid-write does not end the hold before the reload it triggers has answered.
-  const [wroteAgainst, setWroteAgainst] = useState<JiraStatusPayload | null>(null);
-  const latest = useRef(data);
-  latest.current = data;
-  const held = wroteAgainst !== null && data === wroteAgainst && !unreadable;
+  // The `data` object on screen when the last path write LANDED, and whether the status was readable then. While the context still holds that very object
+  // the reload has not answered, and the lists drawn are the pre-write ones — see the header's "waits for the status" paragraph (#587). The refs are the
+  // latest render's, read when the POST answers rather than when it was sent, so a poll that landed mid-write does not end the hold before the reload it
+  // triggers has answered. A failed read ends the hold only when the status was readable at landing: `useJira` keeps `error` set until a read succeeds, so
+  // an error that PREDATES the write is not the reload failing, and letting it through would leave the race open exactly while the status is flaky.
+  const [wroteAgainst, setWroteAgainst] = useState<{ data: JiraStatusPayload | null; readable: boolean } | null>(null);
+  const latest = useRef({ data, readable: !unreadable });
+  latest.current = { data, readable: !unreadable };
+  const held = wroteAgainst !== null && data === wroteAgainst.data && !(unreadable && wroteAgainst.readable);
 
   const repos = data?.repos ?? {};
   const names = new Map((data?.projects ?? []).map((p) => [p.key, p.name]));

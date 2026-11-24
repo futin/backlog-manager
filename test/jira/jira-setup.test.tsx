@@ -877,6 +877,29 @@ describe('the Repositories card — a landed path write waits for the status (#5
     await waitFor(() => expect(removeButtons()[0]).toBeEnabled());
   });
 
+  it('a status that was ALREADY unreadable when the write landed does not end the hold: the second × waits for a read that succeeds', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay', '/home/ada/pay-2', '/home/ada/pay-3'] } });
+    await renderSetup();
+    // One status read fails before any write — `useJira` keeps the old `data` and sets `error` until a read succeeds.
+    const before = statusReads();
+    nextStatusRead = () => answer({ error: 'boom' }, 500);
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+    const release = holdNextStatusRead();
+
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay-2' }));
+    await waitFor(() => expect(repoPosts()).toHaveLength(1));
+    // The error predates the write, so it is not the reload failing: every × and Add stays held on the pre-write rows.
+    await waitFor(() => expect(addButton()).toBeDisabled());
+    for (const b of removeButtons()) expect(b).toBeDisabled();
+
+    await act(async () => release(answer(statusAnswer)));
+    await waitFor(() => expect(removeButtons()[0]).toBeEnabled());
+    expect(repoHints().filter((h) => h.startsWith('~'))).toEqual(['~/pay', '~/pay-3']);
+  });
+
   it('a path\'s defaults Save is not held: it posts one path\'s own values and cannot clobber the list', async () => {
     statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay', '/home/ada/pay-2'] } });
     await renderSetup();
