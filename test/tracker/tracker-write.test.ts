@@ -728,6 +728,17 @@ describe('queue', () => {
   });
 });
 
+/* Used by `review` and `plan-review`. The read the tick's step 3 makes straight after a groom (I2 of the final review): `show --json` serves `planReview` off the poller's cache, so a label
+   the cache has not heard about reads as an unmarked plan and the tick records a good groom `failed`. The token is removed before the read for the reason
+   `create`'s absorption case gives — with no token no sweep can run, so the only way the label is in the payload is the cache the write itself filled. */
+async function servedWithoutAPoll(): Promise<ItemsIndex['items'][number] | undefined> {
+  gh.calls.length = 0;
+  delete process.env[GITHUB_TOKEN_ENV];
+  const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+  expect(gh.calls).toEqual([]);
+  return (res.body as ItemsIndex).items.find((i) => i.id === '#31');
+}
+
 /* =========================================================================
  * review — the tenth write route (the execute pr-mode spec, decision 9)
  * ========================================================================= */
@@ -810,6 +821,43 @@ describe('review', () => {
     expect(add).toBeLessThan(del);
     expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('in-review');
   });
+
+  /* A removal absorbs the re-read issue like `planReview` (the in-review-without-PR spec): a person who lifts a stale guard from the board sees the item
+     executable on the very next read, not one sync later. Every case reads through `servedWithoutAPoll`, so no sweep can be what filled the cache. */
+  it('shows a removal on the next /api/items, with no poll tick', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-review' }] });
+    await sync();
+    await post('review', { project: trackerPath, id: '#31', inReview: false }).expect(201);
+    expect((await servedWithoutAPoll())?.inReview).toBeUndefined();
+  });
+
+  it('absorbs on the removal 404 too: a label already gone on GitHub but still cached', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-review' }] });
+    await sync();
+    const cached = gh.issues.get(31);
+    if (cached === undefined) throw new Error('fixture issue missing');
+    cached.labels = cached.labels.filter((l) => l.name !== 'in-review');
+    await post('review', { project: trackerPath, id: '#31', inReview: false }).expect(201);
+    expect((await servedWithoutAPoll())?.inReview).toBeUndefined();
+  });
+
+  /* An add must NOT absorb: `absorbIssue` takes the issue alone, so the label would arrive before the next sync indexes the PR that pr-mode just opened,
+     and every normal pr-mode execute would read "no open PR" with a Lift for one sync interval. */
+  it('does not absorb an add: the label and the PR arrive in the same sync', async () => {
+    gh.issue();
+    await sync();
+    await post('review', { project: trackerPath, id: '#31', inReview: true }).expect(201);
+    expect((await servedWithoutAPoll())?.inReview).toBeUndefined();
+  });
+
+  it('answers success when the re-read after a removal fails', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-review' }] });
+    await sync();
+    gh.failNext = { fragment: '/issues/31', status: 500, method: 'GET' };
+    const res = await post('review', { project: trackerPath, id: '#31', inReview: false }).expect(201);
+    expect(res.body).toEqual({ id: '#31', inReview: false });
+    expect(gh.matching('/issues/31', 'GET').length).toBeGreaterThan(0);
+  });
 });
 
 /* =========================================================================
@@ -859,17 +907,6 @@ describe('plan-review', () => {
     expect(res.body.error).toMatch(/files/);
     expect(gh.calls).toEqual([]);
   });
-
-  /* The read the tick's step 3 makes straight after a groom (I2 of the final review): `show --json` serves `planReview` off the poller's cache, so a label
-     the cache has not heard about reads as an unmarked plan and the tick records a good groom `failed`. The token is removed before the read for the reason
-     `create`'s absorption case gives — with no token no sweep can run, so the only way the label is in the payload is the cache the write itself filled. */
-  async function servedWithoutAPoll(): Promise<ItemsIndex['items'][number] | undefined> {
-    gh.calls.length = 0;
-    delete process.env[GITHUB_TOKEN_ENV];
-    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
-    expect(gh.calls).toEqual([]);
-    return (res.body as ItemsIndex).items.find((i) => i.id === '#31');
-  }
 
   it('serves planReview: true on the next /api/items straight after a body write that set it, with no poll tick', async () => {
     const issue = gh.issue();

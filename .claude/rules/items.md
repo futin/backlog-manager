@@ -28,7 +28,8 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   because it calls the dashboard — yet gates and maps through the same exported `writable`/`answer`, and releases with `authority: 'board'`, a field the
   `release` route never parses, so no HTTP body can set it. The tenth, `review` (execute `pr` mode), is `queue`'s twin: `{ project, id, inReview }` with
   `inReview` a literal boolean or a 400, adding or removing the `in-review` label through `ItemWriter.review` on the same per-URN chain, a removal's 404
-  answered as success. The eleventh, `plan-review` (backlog-tick), is `review`'s twin again: `{ project, id, planReview }` with `planReview` a literal boolean
+  answered as success, and a landed REMOVAL re-reading the issue into the cache (an add absorbs nothing, so the label reaches the cache in the same sync as
+  the PR pr-mode opened). The eleventh, `plan-review` (backlog-tick), is `review`'s twin again: `{ project, id, planReview }` with `planReview` a literal boolean
   or a 400, adding or removing the `plan-review` label through `ItemWriter.planReview` on the same per-URN chain, a removal's 404 answered as success. It is the
   hold a tick's groom puts on a plan nobody has read, and `create` and `body` carry the same mark as an optional `planReview` (a literal boolean or a 400, like
   `runnerFix`) so the label lands in the write that wrote the plan: in `create`'s own request, and in `body` as a label call on the same chain — an ADD after
