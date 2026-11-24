@@ -1,12 +1,15 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 
 import type { GitlabPayload } from '../../../shared/types';
+import { useAnsweredAt } from './useAnsweredAt';
 import { useGitlab } from './useGitlab';
 
 export interface GitlabContextValue {
   data: GitlabPayload | null;
   error: string | null;
   refresh: () => Promise<GitlabPayload | null>;
+  /** When `data` last landed (`useAnsweredAt`, #588) — Settings › Shared's `Last read` foot. Optional: a hand-built value may leave it out. */
+  answeredAt?: number | null;
 }
 
 /** Exported raw so a test can render a consumer under a provided value without a fetch; app code reads `useGitlabContext`. */
@@ -19,7 +22,8 @@ export const GitlabContext = createContext<GitlabContextValue | null>(null);
  */
 export function GitlabProvider({ children }: { children: ReactNode }) {
   const { data, error, refresh } = useGitlab();
-  const value = useMemo<GitlabContextValue>(() => ({ data, error, refresh }), [data, error, refresh]);
+  const answeredAt = useAnsweredAt(data);
+  const value = useMemo<GitlabContextValue>(() => ({ data, error, refresh, answeredAt }), [data, error, refresh, answeredAt]);
   return <GitlabContext.Provider value={value}>{children}</GitlabContext.Provider>;
 }
 

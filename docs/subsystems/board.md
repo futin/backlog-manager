@@ -375,7 +375,9 @@ second.
 **Watchdog** — the sweeper's own page (`WatchdogMonitor`), the only surface that additionally mounts `useWatchdog()`. It opens on a `Runs · Watchdog` band, then
 the STATUS BAND — one `Sheet` row (`watchdog-state`): a ring `GlyphTile`, the phase as a word (`stateWord` beside a `Dot`: `Off · <reason>`,
 `Idle · nothing to watch`, `Watching N`), `stateLine`'s own sentence under it (`watchdog-state-line`, the only place the `next check in 42s` countdown is drawn),
-the sweep meter while armed, and a flat `Policy in Settings ›` chip, because the policy is read here and edited there. The policy is its own `FigureStrip`
+the sweep meter while armed, and a flat `Policy in Settings ›` chip, because the policy is read here and edited there — it opens Settings › Shared, where
+`WatchdogGroup` is, through `onOpenWatchdogSettings` (built in `App`, threaded through `RunsView`), and is not drawn without it (#588: it was an inert
+button). The policy is its own `FigureStrip`
 BELOW the band — `Check every`, `Leave a resumed run alone`, `Give up after` (`N resumes`) — with the enabled switch's state as a line under it. Then the
 Watching sheet: a count pill beside the title and the `⚠ 1 crashed · 2 fresh · 1 not yet watched` split as its sub, one row per `running` run, annotated from
 the sweeper's own set with the skew rendered rather than hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the
@@ -386,7 +388,8 @@ process's memory and emptied by a restart, which its subtitle says rather than b
 
 **Ticks** — the tick breaker's page (`TickMonitor`, `RunsMode` `'ticks'`), the third Runs page, built as the Watchdog page is and reached only through the
 rail's tree. It mounts `useTicks({ live: true })` — the one source, a 15 s poll while the page is open — and takes no props. Its band (`Runs · Ticks`) carries
-`N halted · M with tick history` and the same flat `Policy in Settings ›` chip, since the threshold is edited in Settings and a Reset is the only write here.
+`N halted · M with tick history` and a flat `Policy in Settings ›` chip, since the threshold is edited in Settings and a Reset is the only write here — still
+inert, where the Watchdog page's twin navigates since #588.
 Three figures: the breaker (the halted count in the `bad` tone, naming the projects, or `none` over `after N failures in a row`), the last 24 hours
 (`ticksLast24h`, the one reading that moves with no new payload, so the page's clock ticks at a minute) and the policy (`halt after N failures`; `tick.json
 cannot be read — showing the default` when the server answers `source: "unreadable"`). Then a Projects sheet, one row per project the server listed, halted

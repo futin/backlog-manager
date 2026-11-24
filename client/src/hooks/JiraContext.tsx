@@ -1,5 +1,6 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 
+import { useAnsweredAt } from './useAnsweredAt';
 import { useJira, type JiraState } from './useJira';
 
 /**
@@ -9,16 +10,23 @@ import { useJira, type JiraState } from './useJira';
  *
  * The default value is the hook's own loading state, not `null`-and-throw: a component rendered without the provider (a test mounting a page alone)
  * draws its loading branch rather than taking the page down. It never fetches; only the provider does.
+ *
+ * `answeredAt` is when the current answer landed (`useAnsweredAt`, #588), for Settings › Shared's `Last read` foot; optional so a test's hand-built value
+ * may leave it out, which reads as "no stamp".
  */
-const LOADING: JiraState = { data: null, loading: true, error: false, reload: () => {} };
+export type JiraContextValue = JiraState & { answeredAt?: number | null };
 
-export const JiraContext = createContext<JiraState>(LOADING);
+const LOADING: JiraContextValue = { data: null, loading: true, error: false, reload: () => {} };
+
+export const JiraContext = createContext<JiraContextValue>(LOADING);
 
 export function JiraProvider({ children }: { children: ReactNode }) {
   const state = useJira();
-  return <JiraContext.Provider value={state}>{children}</JiraContext.Provider>;
+  const answeredAt = useAnsweredAt(state.data);
+  const value = useMemo<JiraContextValue>(() => ({ ...state, answeredAt }), [state, answeredAt]);
+  return <JiraContext.Provider value={value}>{children}</JiraContext.Provider>;
 }
 
-export function useJiraContext(): JiraState {
+export function useJiraContext(): JiraContextValue {
   return useContext(JiraContext);
 }

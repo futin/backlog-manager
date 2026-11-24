@@ -39,6 +39,7 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     createdAt: minutesAgo(3000),
     updatedAt: minutesAgo(120),
     mergedAt: null,
+    headSha: null,
     pipeline: 'failed',
     keys: ['PAY-7'],
     review: null,
@@ -59,9 +60,19 @@ describe('readIgnoredSteps (spec T29)', () => {
       'a!1': { review: { state: 'none', landedAt: null } },
       'a!2': { review: { state: 'unread', landedAt: null } },
       'a!3': { pipeline: { status: 'failed', updatedAt: '2026-11-12T10:00:00Z' } },
-      'a!4': { review: { state: 'open', landedAt: '2026-11-12T09:00:00Z' }, pipeline: { status: 'canceled', updatedAt: '2026-11-12T10:00:00Z' } }
+      'a!4': { review: { state: 'open', landedAt: '2026-11-12T09:00:00Z' }, pipeline: { status: 'canceled', sha: 'c0ffee', updatedAt: '2026-11-12T10:00:00Z' } }
     };
-    expect(readIgnoredSteps(v)).toEqual(v);
+    // A pipeline half without `sha` (stored before #588) reads its `sha` as `null`; one with it keeps it.
+    expect(readIgnoredSteps(v)).toEqual({ ...v, 'a!3': { pipeline: { status: 'failed', sha: null, updatedAt: '2026-11-12T10:00:00Z' } } });
+  });
+
+  // #588: an ignore stored by the build before the head-commit key carries `{ status, updatedAt }` only. It is kept, not dropped, and judged by `updatedAt`.
+  it('keeps a legacy pipeline half with no sha and reads its sha as null', () => {
+    expect(readIgnoredSteps({ 'a!1': { pipeline: { status: 'failed', updatedAt: 'x' } } })).toEqual({ 'a!1': { pipeline: { status: 'failed', sha: null, updatedAt: 'x' } } });
+  });
+
+  it('drops a pipeline half whose sha is neither a string nor null', () => {
+    expect(readIgnoredSteps({ 'a!1': { pipeline: { status: 'failed', sha: 5, updatedAt: 'x' } } })).toEqual({});
   });
 
   it('drops an entry whose only half has a bad review.state', () => {
@@ -81,7 +92,7 @@ describe('readIgnoredSteps (spec T29)', () => {
   });
 
   it('keeps the good pipeline half of an entry whose review half is bad, and the good review half of one whose pipeline half is bad', () => {
-    const pipeline = { status: 'failed', updatedAt: '2026-11-12T10:00:00Z' };
+    const pipeline = { status: 'failed', sha: 'c0ffee', updatedAt: '2026-11-12T10:00:00Z' };
     const review = { state: 'stale', landedAt: '2026-11-12T09:00:00Z' };
     expect(readIgnoredSteps({ 'a!1': { review: { state: 'bogus', landedAt: null }, pipeline }, 'a!2': { review, pipeline: { status: 'bogus', updatedAt: 'x' } } })).toEqual({
       'a!1': { pipeline },
@@ -150,16 +161,39 @@ describe('ignoreHolds', () => {
     expect(ignoreHolds(entry, mr({ review: review({ open: 2 }) }), NOW).review).toBe(false);
   });
 
-  it('holds the pipeline while status and updatedAt both match, and drops it on either change', () => {
+  it('without a head commit on either side, holds the pipeline while status and updatedAt both match, and drops it on either change', () => {
     const m = mr({ pipeline: 'failed', updatedAt: '2026-11-12T10:00:00.000Z' });
-    expect(ignoreHolds({ pipeline: { status: 'failed', updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(true);
-    expect(ignoreHolds({ pipeline: { status: 'failed', updatedAt: '2026-11-12T09:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
-    expect(ignoreHolds({ pipeline: { status: 'canceled', updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: null, updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(true);
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: null, updatedAt: '2026-11-12T09:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
+    expect(ignoreHolds({ pipeline: { status: 'canceled', sha: null, updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
+  });
+
+  // #588: GitLab moves `updated_at` on a comment, a label, an approval — the ignore lapsed on all of them. A push moves the head commit; a comment does not.
+  it('holds the pipeline on the same head commit though updatedAt moved', () => {
+    const m = mr({ pipeline: 'failed', headSha: 'aaa111', updatedAt: '2026-11-12T11:00:00.000Z' });
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: 'aaa111', updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(true);
+  });
+
+  it('drops the pipeline ignore on a new head commit though the status is the same', () => {
+    const m = mr({ pipeline: 'failed', headSha: 'bbb222', updatedAt: '2026-11-12T10:00:00.000Z' });
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: 'aaa111', updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
+  });
+
+  it('judges a legacy entry (no sha) by updatedAt, exactly as before', () => {
+    const m = mr({ pipeline: 'failed', headSha: 'aaa111', updatedAt: '2026-11-12T11:00:00.000Z' });
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: null, updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: null, updatedAt: '2026-11-12T11:00:00.000Z' } }, m, NOW).pipeline).toBe(true);
+  });
+
+  it('judges by updatedAt when GitLab gave the MR no head commit', () => {
+    const m = mr({ pipeline: 'failed', headSha: null, updatedAt: '2026-11-12T11:00:00.000Z' });
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: 'aaa111', updatedAt: '2026-11-12T10:00:00.000Z' } }, m, NOW).pipeline).toBe(false);
+    expect(ignoreHolds({ pipeline: { status: 'failed', sha: 'aaa111', updatedAt: '2026-11-12T11:00:00.000Z' } }, m, NOW).pipeline).toBe(true);
   });
 
   it('judges each half on its own', () => {
     const m = mr({ pipeline: 'failed', updatedAt: '2026-11-12T10:00:00.000Z', review: review({ landedAt: landed, open: 1 }) });
-    const entry = { review: { state: 'stale', landedAt: landed }, pipeline: { status: 'failed', updatedAt: '2026-11-12T10:00:00.000Z' } } as const;
+    const entry = { review: { state: 'stale', landedAt: landed }, pipeline: { status: 'failed', sha: null, updatedAt: '2026-11-12T10:00:00.000Z' } } as const;
     expect(ignoreHolds(entry, m, NOW)).toEqual({ review: false, pipeline: true });
   });
 });

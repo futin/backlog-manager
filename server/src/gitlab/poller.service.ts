@@ -552,6 +552,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
         createdAt: raw.created_at,
         updatedAt: raw.updated_at,
         mergedAt: raw.merged_at ?? null,
+        headSha: typeof raw.sha === 'string' ? raw.sha : null,
         // Finished MRs are not read for a pipeline (spec §6.3 bounds the requests by open MRs), so they carry `null`, never a guessed `none`.
         pipeline: null,
         review: null,

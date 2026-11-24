@@ -1,5 +1,6 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 
+import { useAnsweredAt } from './useAnsweredAt';
 import { useTrackers, type TrackersState } from './useTrackers';
 
 /**
@@ -12,16 +13,23 @@ import { useTrackers, type TrackersState } from './useTrackers';
  *
  * The default value is the hook's own loading state, not `null`-and-throw: a component rendered without the provider (a test mounting `SettingsView`
  * alone, or a future surface) draws its loading branch — "checking…" — rather than taking the page down. It never fetches; only the provider does.
+ *
+ * `answeredAt` is when the current answer landed (`useAnsweredAt`, #588), for Settings › Shared's `Last read` foot; optional so a test's hand-built value
+ * may leave it out, which reads as "no stamp".
  */
-const LOADING: TrackersState = { data: null, loading: true, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
+export type TrackersContextValue = TrackersState & { answeredAt?: number | null };
 
-export const TrackersContext = createContext<TrackersState>(LOADING);
+const LOADING: TrackersContextValue = { data: null, loading: true, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
+
+export const TrackersContext = createContext<TrackersContextValue>(LOADING);
 
 export function TrackersProvider({ children }: { children: ReactNode }) {
   const state = useTrackers();
-  return <TrackersContext.Provider value={state}>{children}</TrackersContext.Provider>;
+  const answeredAt = useAnsweredAt(state.data);
+  const value = useMemo<TrackersContextValue>(() => ({ ...state, answeredAt }), [state, answeredAt]);
+  return <TrackersContext.Provider value={value}>{children}</TrackersContext.Provider>;
 }
 
-export function useTrackersContext(): TrackersState {
+export function useTrackersContext(): TrackersContextValue {
   return useContext(TrackersContext);
 }

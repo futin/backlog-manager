@@ -139,6 +139,7 @@ function mr(over: Partial<GitlabMr> & { iid: number }): GitlabMr {
     createdAt: minutesAgo(600 + over.iid),
     updatedAt: minutesAgo(over.iid),
     mergedAt: null,
+    headSha: null,
     pipeline: 'success',
     keys: ['PAY-12'],
     review: null,
@@ -674,7 +675,7 @@ describe('JiraDeliveryTab — Ignore (T25, T29)', () => {
     const red = () => within(strip()).getByRole('button', { name: 'develop · pipeline failed' });
     expect(red()).toHaveAttribute('data-tone', 'red');
     fireEvent.click(within(nextRow('develop') as HTMLElement).getByRole('button', { name: 'Ignore' }));
-    expect(ignoredStore()).toEqual({ 'acme/pay-api!41': { pipeline: { status: 'failed', updatedAt: mrs[0].updatedAt } } });
+    expect(ignoredStore()).toEqual({ 'acme/pay-api!41': { pipeline: { status: 'failed', sha: null, updatedAt: mrs[0].updatedAt } } });
     const word = within(step('develop', 'Pipeline')).getByRole('button', { name: 'ignored' });
     expect(word).toHaveAttribute('title', IGNORED_TITLE);
     expect(step('develop', 'Pipeline').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'grey');

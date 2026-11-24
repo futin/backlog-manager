@@ -11,7 +11,7 @@ import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { ProjectsContext } from '../../client/src/hooks/ProjectsContext';
 import type { DrawnSources } from '../../client/src/lib/sources';
 import type { JiraState } from '../../client/src/hooks/useJira';
-import { TrackersProvider } from '../../client/src/hooks/TrackersContext';
+import { TrackersProvider, useTrackersContext } from '../../client/src/hooks/TrackersContext';
 import type { GitlabPayload, GitlabStatus, JiraBoardStatus, JiraStatusPayload, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../../shared/types';
 
 /**
@@ -129,6 +129,11 @@ async function renderCard(jira: JiraStatusPayload | null = UNCONFIGURED, drawn: 
     </GitlabContext.Provider>
   );
   await waitFor(() => expect(linesOf('GitHub')[0]).not.toBe('checking…'));
+}
+
+/** Draws a marker once the shell's trackers provider holds an answer, so a case can wait for it without mounting the card. */
+function AnsweredProbe() {
+  return useTrackersContext().data === null ? null : <span data-testid="trackers-answered" />;
 }
 
 /** One source row, by its name. */
@@ -401,6 +406,55 @@ describe('the foot: Last read and Read again', () => {
   it('says how long ago the sources answered, in the client’s own time', async () => {
     await renderWithStub();
     expect(await screen.findByText(/^Last read \d+ s ago$/)).toBeInTheDocument();
+  });
+
+  /*
+    #588 — the card stamped each answer itself, in an effect that ran on ITS mount, so opening Settings › Shared five minutes after the shell's providers had
+    answered read `Last read 0 s ago`: the age of the card, not of the answer. The stamp is the provider's now, taken when the answer lands, so a card mounted
+    later reads the old one. The clock is shifted by an offset rather than faked, so `waitFor`'s own timers keep running.
+  */
+  it('ages the foot from when the providers answered, not from when the card mounted (#588)', async () => {
+    const realNow = Date.now.bind(Date);
+    let offset = 0;
+    jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
+    // A fresh object per read — the providers' contract, and what makes `Read again` a new answer.
+    global.fetch = jest.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(init?.method === 'POST' ? {} : { ...payload }) } as Response)
+    ) as jest.Mock;
+    const state: JiraState = { data: jiraStatus(), loading: false, error: false, reload: jiraReload };
+    function Shell({ card }: { card: boolean }) {
+      return (
+        <GitlabContext.Provider value={gitlabValue()}>
+          <JiraContext.Provider value={state}>
+            <ProjectsContext.Provider value={{ data: null, drawn: { files: true, github: true }, reload: projectsReload }}>
+              <TrackersProvider>
+                <AnsweredProbe />
+                {card && <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />}
+              </TrackersProvider>
+            </ProjectsContext.Provider>
+          </JiraContext.Provider>
+        </GitlabContext.Provider>
+      );
+    }
+    const { rerender } = render(<Shell card={false} />);
+    await screen.findByTestId('trackers-answered');
+
+    offset = 5 * 60_000;
+    rerender(<Shell card />);
+    expect(screen.getByText('Last read 5m ago')).toBeInTheDocument();
+
+    // `Read again` is a new answer, so the foot moves to it.
+    await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
+    expect(await screen.findByText(/^Last read \d+ s ago$/)).toBeInTheDocument();
+  });
+
+  it('reads `Not read yet` while no source has answered', () => {
+    render(
+      <GitlabContext.Provider value={{ data: null, error: null, refresh: gitlabRefresh }}>
+        <SourcesGroup />
+      </GitlabContext.Provider>
+    );
+    expect(screen.getByText('Not read yet')).toBeInTheDocument();
   });
 
   it('posts all three sweeps once and reloads projects, trackers, Jira and GitLab', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { StatusPill } from '../ui/StatusPill';
@@ -54,8 +54,10 @@ export function SourcesGroup({
   // The rail's own answer (`GET /api/projects`), read for the GitHub link's gate alone — see the comment on the link.
   const projects = useProjectsContext();
   const drawn = projects.drawn;
-  const answers = [useAnsweredAt(projects.data), useAnsweredAt(data), useAnsweredAt(jira.data), useAnsweredAt(gitlab.data)].filter((t): t is number => t !== null);
-  // The oldest of the four latest answers: the moment since which ALL answered. Sources that have not answered at all do not hold the foot back.
+  // Each provider stamps its own answer when it lands (`useAnsweredAt`, #588) — never this card, which mounts when the page opens and so would stamp a
+  // five-minute-old answer as `0 s ago`. The oldest of the four latest answers is the moment since which ALL answered; a source that has not answered at
+  // all does not hold the foot back.
+  const answers = [projects.answeredAt, trackers.answeredAt, jira.answeredAt, gitlab.answeredAt].filter((t): t is number => typeof t === 'number');
   const answeredAt = answers.length === 0 ? null : Math.min(...answers);
   const [reading, setReading] = useState(false);
   const [readNotice, setReadNotice] = useState<string | null>(null);
@@ -188,8 +190,8 @@ export function SourcesGroup({
         </div>
       )}
 
-      {/* The card's foot: when all three sources last answered (client time — none of the three payloads is stamped with one) and the one control that asks them
-          again. Never a ticking clock: the age is as of this render, like every other age on the card. */}
+      {/* The card's foot: when all four sources last answered (client time, stamped by each provider as its answer landed — none of the payloads carries a
+          read time) and the one control that asks them again. Never a ticking clock: the age is as of this render, like every other age on the card. */}
       <div className="set-foot">
         <span>{answeredAt === null ? 'Not read yet' : `Last read ${pollAge(new Date(answeredAt).toISOString(), now)} ago`}</span>
         <button type="button" className="set-link set-foot-action" disabled={reading} onClick={() => void readAgain()}>
@@ -202,15 +204,6 @@ export function SourcesGroup({
 
 /** The word on a source's pill for each tone — the card's own vocabulary ("connected"), where the strip chip's `TONE_WORD` is its accessible name ("on time"). */
 const CARD_WORD: Record<StateTone, string> = { green: 'connected', amber: 'late', red: 'down', grey: 'not polled yet' };
-
-/** The client time a context's payload last changed to a non-null answer, or `null` before the first. A fresh object per fetch is the contexts' contract. */
-function useAnsweredAt(data: unknown): number | null {
-  const [at, setAt] = useState<number | null>(null);
-  useEffect(() => {
-    if (data !== null) setAt(Date.now());
-  }, [data]);
-  return at;
-}
 
 /** A hint of several lines, each its own block (`.set-hint-line`), so one line is one reading and no reader — or test — sees two run together. */
 function Lines({ lines }: { lines: ReactNode[] }) {

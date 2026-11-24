@@ -796,6 +796,7 @@ describe('review', () => {
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-02T00:00:00.000Z',
     mergedAt: null,
+    headSha: null,
     pipeline: null,
     keys: ['PAY-1'],
     review: review(),

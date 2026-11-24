@@ -148,7 +148,8 @@ export class DashboardsService {
   /**
    * Upsert. An entry whose exact name exists is updated in place; `replaces` names the existing entry a rename takes over (same position, and its id in `order`
    * becomes the new name). A name that matches an existing entry in another case — or, on a rename, a DIFFERENT entry in any case — is a 400: names are machine
-   * ids and, uppercased, token env vars, so two that differ only in case would share a token and be indistinguishable on the wire.
+   * ids and, uppercased, token env vars, so two that differ only in case would share a token and be indistinguishable on the wire. An update or a rename
+   * holds `deleteEntry`'s rule (#420) for the old name: every other raw row of it, in any case, leaves the file with the kept row (#588).
    */
   upsertEntry(body: unknown): DashboardsView {
     if (!isPlainObject(body)) throw bad('bad body');
@@ -166,12 +167,16 @@ export class DashboardsService {
       if (at < 0 && list.length >= MAX_REMOTES) throw bad(`at most ${MAX_REMOTES} dashboards`);
       const dashboards = at < 0 ? [...list, entry] : list.map((d, i) => (i === at ? entry : d));
       const order = (cur.order ?? []).map((id) => (at >= 0 && id === list[at].name ? entry.name : id));
-      // On disk: the raw row the view drew is replaced where it stands, or the new row goes after every raw row — invalid, shadowed and past-the-cap rows
-      // included, all left where they were.
-      const rows = rawRows(raw);
+      // On disk: the raw row the view drew is replaced where it stands, or the new row goes after every raw row — invalid and past-the-cap rows of other
+      // names left where they were (#349). An update or a rename also drops every OTHER raw row of the old name in any case, valid or not — #420's delete
+      // rule, by `deleteEntry`'s own predicate. A duplicate the kept row shadowed was hidden only by that row, so renaming `Box` → `Cox` over
+      // `[Box, box]` and leaving `box` behind let the next read draw both (#588).
       const rawAt = at < 0 ? -1 : keptRowAt(raw, target);
-      if (rawAt < 0) rows.push(entry);
-      else rows[rawAt] = entry;
+      const lower = target.toLowerCase();
+      const rows =
+        rawAt < 0
+          ? [...rawRows(raw), entry]
+          : rawRows(raw).flatMap((r, i) => (i === rawAt ? [entry] : isPlainObject(r) && typeof r.name === 'string' && r.name.toLowerCase() === lower ? [] : [r]));
       return {
         ...raw,
         dashboards: rows,

@@ -195,6 +195,19 @@ describe('GitlabPollerService — what a sweep reads', () => {
     expect(details).toEqual([412, 419]);
   });
 
+  // #588: a pipeline Ignore is keyed on the MR's head commit, which the MR list carries as `sha`. A row without one maps to `null`, never a crash or a guess.
+  it("maps a raw MR's sha to headSha, and a row without one to null", async () => {
+    const h = setup();
+    h.fake.seed(MS, 'opened', [
+      rawMr(412, { source_branch: 'timify-123-export', sha: 'aaa111', head_pipeline: { status: 'failed' } }),
+      rawMr(419, { source_branch: 'timify-150-split', head_pipeline: { status: 'success' } })
+    ]);
+    const p = await boot(h);
+    const by = new Map(p.mrs.map((m) => [m.iid, m]));
+    expect(by.get(412)?.headSha).toBe('aaa111');
+    expect(by.get(419)?.headSha).toBeNull();
+  });
+
   it('asks merged and closed lists for the last 30 days only', async () => {
     const h = setup();
     await boot(h);
