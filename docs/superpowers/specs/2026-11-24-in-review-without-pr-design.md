@@ -47,9 +47,11 @@ off`) that nothing on the board names. Two faults: the sentence is false wheneve
   `mapIssue` takes the answer as a new trailing parameter whose default is "a PR is open" — a caller with no poller keeps today's sentence and draws no Lift —
   and both callers in `github.source.ts` (the list mapping and the single-item find) pass the poller's answer.
 - **Lag.** The PR index is the poller's, so a PR opened after the last sync shows the new reason and the Lift until the repo's next sync — its interval
-  (15 s / 1 m / 5 m), and never while sync is off or the repo sleeps on a rate limit. Every `pr`-mode execute passes through this window: it adds the label
-  after the push and then opens the PR. A Lift inside it removes the guard while a PR is in fact open. Accepted, because it takes a person's click past a
-  confirm, and a re-execute on the same machine still stops at `pr-mode.md` §2's refusal of an existing `execute/<n>` branch or tree.
+  (15 s / 1 m / 5 m), and never while sync is off or the repo sleeps on a rate limit. A normal `pr`-mode execute does not pass through it: `pr-mode.md` §8
+  pushes, runs `gh pr create`, and only then adds the label, so the PR is already listed by the time the label is. The window is a PR opened after the label —
+  by hand, after §8 reported that `gh` was missing or refused — and not yet synced. A Lift inside it removes the guard while a PR is in fact open. Accepted,
+  because it takes a person's click past a confirm, and a re-execute on the same machine still stops at `pr-mode.md` §2's refusal of an existing
+  `execute/<n>` branch or tree.
 - **Reason (shared).** A new constant beside `IN_REVIEW_REASON` in `shared/agent.ts`, exactly `in review, but no open PR references this item`.
   `inReviewBlock` returns it when the new flag is set, else `IN_REVIEW_REASON`; `itemLadderBlock`'s order is unchanged. `IN_REVIEW_REASON`'s "ONE string
   everywhere" comment (`shared/agent.ts`) and `docs/subsystems/invariants.md`'s statement of it become "the board and server say the precise one; the skills'
@@ -62,7 +64,9 @@ off`) that nothing on the board names. Two faults: the sentence is false wheneve
   'refs/heads/execute/<n>'])`: non-empty output is `true`, `''` is `false`, `null` (git failed or timed out) is `null` — never "not held". `show-ref --verify
   --quiet` cannot be used: it exits non-zero on a missing ref, which `runGit` cannot tell from a failure. The tree is `existsSync`. The new call site joins
   `.claude/rules/items.md`'s `runGit` call-site list (`null` → `branch: null`) and gets a case in `test/server/git-run.test.ts`.
-- **Lift (client).** A component in the item modal beside `PlanApprove`, same shape (#367): shown only for an open item carrying the new flag. Chip
+- **Lift (client).** A component in the item modal in `PlanApprove`'s shape (#367), placed after the dispatch control and before `PlanApprove` and
+  `ClaimRelease` (`ItemModal.tsx`'s facts column) — it explains the dispatch control's refusal, so it sits right under it. Shown only for an open item
+  carrying the new flag. Chip
   `Lift review` (title `remove the in-review label so this item can be executed again`) → `ui/Confirm` inline, `acceptLabel="Lift review"`,
   `dismissLabel="Keep in review"`. Opening the confirm fires the GET once; its text is one of, with `<id>` the item id and `<n>` its number:
   - pending: `Checking this machine for execute/<n>…`
@@ -72,14 +76,19 @@ off`) that nothing on the board names. Two faults: the sentence is false wheneve
   - unknown (branch null with tree false, or the GET failed): `Could not check this machine for execute/<n>. Lift only once you know the work is gone or
     pushed.`
 
-  Accept is enabled in every state, pending included, and always does the same thing: `POST /api/items/review` `{ project, id, inReview: false }` → the note
+- **The `review` write absorbs its result (server).** `GithubSource.review` today writes the label and returns, so the poller cache — and every board read —
+  keeps the label until the next sync. It gains `planReview`'s tail: after a landed change, re-read the issue and `absorbIssue` it; a failed re-read is not a
+  refusal (the label write landed, the next poll catches up). Without it the board's re-read after a Lift still shows the item blocked and the modal offers
+  Lift again. `.claude/rules/items.md`'s `review` sentence and `GithubSource.review`'s comment ("Unlike `review` and `queue`") change with it.
+- **Lift, continued.** Accept is enabled in every state, pending included, and always does the same thing: `POST /api/items/review` `{ project, id, inReview: false }` → the note
   `review lifted` in place of the chip and a board re-read (`onLifted`, as `onApproved`). A refusal prints the server's sentence verbatim and the chip comes
   back. The card's chip stays a disabled Execute with the new reason (no second control on the card).
 
 ## Left to the builder
 
 Flag and component names, and where the poller question lives (a new method or a widened `reviewLifted`). Text to update besides code: the
-`.claude/rules/` and `docs/subsystems/` passages that state the in-review reason; `.claude/rules/board.md`'s list of `ui/Confirm` openers;
+`.claude/rules/` and `docs/subsystems/` passages that state the in-review reason; `.claude/DESIGN.md` §8.7's item-modal facts paragraph (the new chip, its
+position, confirm copy and note, beside its `Approve plan` sentence); `.claude/rules/board.md`'s list of `ui/Confirm` openers;
 `ItemModal.tsx`'s header comment on the modal's writes; `.claude/rules/items.md`'s `runGit` call-site list and its note on the one read beside the write
 routes; the "ONE string everywhere" statements named above; and the tests that pin `IN_REVIEW_REASON`'s readers (`test/agents/agents-shared.test.ts`,
 `test/tracker/tracker-dispatch.test.ts`, `test/tracker/tracker-map.test.ts`, `test/tracker/tracker-review-lift.test.ts`).
