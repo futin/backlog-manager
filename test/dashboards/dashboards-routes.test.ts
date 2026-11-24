@@ -289,6 +289,8 @@ describe('the dashboards settings routes', () => {
     const fixture = { dashboards: [alpha, invalid, dupe], order: ['alpha', 'home'], home: { flavour: 'kept' }, note: 'keep me' };
     const disk = (): Record<string, unknown> & { dashboards: Record<string, unknown>[] } => JSON.parse(readFileSync(file, 'utf8'));
 
+    const view = async (): Promise<DashboardsView> => (await request(app!.getHttpServer()).get('/api/dashboards').expect(200)).body as DashboardsView;
+
     it('a threshold save leaves every raw row and the unknown key alone', async () => {
       writeFixture(fixture);
       await createApp();
@@ -321,18 +323,54 @@ describe('the dashboards settings routes', () => {
       expect(after.note).toBe('keep me');
     });
 
-    it('a rename replaces the row in place, the order follows, and the shadowed duplicate stays on disk', async () => {
+    // #588 extends #420's rule to upsert: a rename or an update replaces the kept row in place AND drops every other raw row of the OLD name in any case —
+    // the duplicate it shadowed would otherwise be promoted by the next read and revive under the name the person just renamed away from.
+    it('a rename replaces the row in place, the order follows, and the duplicate it shadowed goes', async () => {
       writeFixture(fixture);
       await createApp();
       await post('/entries', { entry: { ...alpha, name: 'gamma' }, replaces: 'alpha' }).expect(200);
       const after = disk();
-      expect(after.dashboards.map((d) => d.name)).toEqual(['gamma', 'Bad', 'ALPHA']);
-      expect(after.dashboards.slice(1)).toEqual([invalid, dupe]);
+      expect(after.dashboards.map((d) => d.name)).toEqual(['gamma', 'Bad']);
+      expect(after.dashboards[1]).toEqual(invalid);
       expect(after.order).toEqual(['gamma', 'home']);
       expect(after.note).toBe('keep me');
     });
 
-    const view = async (): Promise<DashboardsView> => (await request(app!.getHttpServer()).get('/api/dashboards').expect(200)).body as DashboardsView;
+    it('renaming Box to Cox over [Box, box] leaves only Cox, on disk and in the view', async () => {
+      const box = { ...pro, name: 'Box', host: 'box-host' };
+      writeFixture({ dashboards: [box, { ...pro, name: 'box', host: 'box-dupe' }] });
+      await createApp();
+      await post('/entries', { entry: { ...box, name: 'Cox' }, replaces: 'Box' }).expect(200);
+      expect(disk().dashboards.map((d) => d.name)).toEqual(['Cox']);
+      expect((await view()).dashboards.map((d) => d.name)).toEqual(['Cox']);
+    });
+
+    it('an in-place update drops the shadowed duplicate and keeps rows of other names', async () => {
+      const box = { ...pro, name: 'Box', host: 'box-host' };
+      const dev = { ...pro, name: 'Dev', host: 'dev-host' };
+      writeFixture({ dashboards: [box, { ...pro, name: 'box', host: 'box-dupe' }, dev] });
+      await createApp();
+      await post('/entries', { entry: { ...box, host: 'box-new' } }).expect(200);
+      expect(disk().dashboards).toEqual([{ ...box, host: 'box-new' }, dev]);
+    });
+
+    it('a case-only rename over [Pro, pro] is the same entry: no 400, and only PRO is left', async () => {
+      const p1 = { ...pro, name: 'Pro', host: 'pro-host' };
+      writeFixture({ dashboards: [p1, { ...pro, name: 'pro', host: 'pro-dupe' }] });
+      await createApp();
+      await post('/entries', { entry: { ...p1, name: 'PRO' }, replaces: 'Pro' }).expect(200);
+      expect(disk().dashboards.map((d) => d.name)).toEqual(['PRO']);
+    });
+
+    it('a rename leaves an invalid row and a past-the-cap row of other names byte-identical', async () => {
+      const eight = Array.from({ length: 8 }, (_, i) => ({ ...pro, name: `M${i + 1}`, host: `m${i + 1}` }));
+      const bad = { name: 'Bad', url: 'not a url' };
+      const ninth = { ...pro, name: 'Nine', host: 'nine-host' };
+      writeFixture({ dashboards: [...eight, bad, ninth] });
+      await createApp();
+      await post('/entries', { entry: { ...eight[0], name: 'Renamed' }, replaces: 'M1' }).expect(200);
+      expect(disk().dashboards).toEqual([{ ...eight[0], name: 'Renamed' }, ...eight.slice(1), bad, ninth]);
+    });
 
     // #420 reverses #349's delete: a name is one machine case-insensitively, so a delete removes every raw row of that name — the shadowed duplicate
     // included — and nothing the next read could promote under the same identity is left behind. `jira.json`'s deleteBoard has the same contract.

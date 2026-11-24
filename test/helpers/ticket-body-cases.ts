@@ -142,6 +142,7 @@ export function mr(over: Partial<GitlabMr> & { iid: number }): GitlabMr {
     createdAt: minutesAgo(600 + over.iid),
     updatedAt: minutesAgo(over.iid),
     mergedAt: null,
+    headSha: null,
     pipeline: 'success',
     keys: ['PAY-12'],
     review: null,

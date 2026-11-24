@@ -53,6 +53,7 @@ function mr(iid: number, over: Partial<GitlabMr> = {}): GitlabMr {
     createdAt: daysAgoStamp(30 + iid),
     updatedAt: daysAgoStamp(1 + iid / 100),
     mergedAt: null,
+    headSha: null,
     pipeline: 'failed',
     keys: ['PAY-7'],
     review: null,
@@ -75,14 +76,15 @@ describe('the ignore store', () => {
     expect(screen.getByTestId('b')).toHaveTextContent('');
   });
 
+  // The pipeline half records the MR's head commit beside `updatedAt` (#588): the commit is what a later read is judged against.
   it('records the state and the stamp the step shows, per MR and per half (two keys)', () => {
     render(<Reader id="a" />);
-    const a = mr(41, { updatedAt: daysAgoStamp(2), pipeline: 'failed' });
+    const a = mr(41, { updatedAt: daysAgoStamp(2), pipeline: 'failed', headSha: 'aaa111' });
     const b = mr(42, { updatedAt: daysAgoStamp(3), pipeline: 'canceled' });
     act(() => api.ignore(a, 'pipeline', null));
     act(() => api.ignore(b, 'review', null));
     expect(api.entries).toEqual({
-      [ignoreKey(a)]: { pipeline: { status: 'failed', updatedAt: a.updatedAt } },
+      [ignoreKey(a)]: { pipeline: { status: 'failed', sha: 'aaa111', updatedAt: a.updatedAt } },
       [ignoreKey(b)]: { review: { state: 'unread', landedAt: null } }
     });
   });

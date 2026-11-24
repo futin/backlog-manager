@@ -18,6 +18,9 @@ import { useState } from 'react';
  * alone — remounting it then re-seeds nothing and only swaps the element out
  * from under whoever holds it.
  *
+ * A blur that leaves the box empty or holding a non-number commits nothing and re-seeds the box to `value` (#588): `Number('')` is 0, so committing it
+ * handed every caller a zero nobody typed — SuggestCard's Threshold (min 1) POSTed `threshold: 0`. A `0` typed on purpose still commits.
+ *
  * The stepper (`− value unit +`, the Watchdog and Tick rows of `SettingsMore.dc.html`): `step` (default 1) moves a free value by one press, clamped to
  * `[min, max]`, and commits at once — a press is a whole intention, unlike a keystroke. `ladder` replaces the free input with a list of allowed rungs shown
  * as text (`format` words them: `1m`); a press commits the neighbouring rung, and a `value` that is not on the ladder is placed in order so a stored
@@ -84,6 +87,12 @@ export function NumberField({
           key={`${value}:${commits}`} /* re-seed when the value changes from elsewhere (e.g. Reset), and after a commit of new text */
           onBlur={(e) => {
             const typed = e.currentTarget.value;
+            // An empty box, or text the number input reports as `''`, is not a number: `Number('')` is 0, a figure nobody typed (#588). Commit nothing
+            // and bump the counter, so the key changes and the box re-seeds to `value`.
+            if (typed.trim() === '' || !Number.isFinite(Number(typed))) {
+              setCommits((n) => n + 1);
+              return;
+            }
             onCommit(Number(typed));
             if (typed !== String(value)) setCommits((n) => n + 1);
           }}

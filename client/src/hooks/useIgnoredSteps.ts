@@ -24,7 +24,7 @@ const store = persistedJsonStore<IgnoredSteps>(JIRA_IGNORED_STEPS_KEY, readIgnor
 
 export type IgnoreStep = 'review' | 'pipeline';
 
-/** `entry` with `step` set to the state `mr` shows right now: the review's state (`'unread'` for a `null` review) and `landedAt`, or the pipeline and `updatedAt`. */
+/** `entry` with `step` set to the state `mr` shows right now: the review's state (`'unread'` for a `null` review) and `landedAt`, or the pipeline, the head commit and `updatedAt`. */
 function recorded(entry: IgnoreEntry | undefined, mr: GitlabMr, step: IgnoreStep): IgnoreEntry | null {
   if (step === 'review') {
     const state = mr.review === null ? 'unread' : reviewState(mr.review, Date.now());
@@ -32,7 +32,7 @@ function recorded(entry: IgnoreEntry | undefined, mr: GitlabMr, step: IgnoreStep
   }
   // A step with no pipeline to record (a `null` pipeline has nothing to look past) is not an ignore.
   if (mr.pipeline === null) return null;
-  return { ...entry, pipeline: { status: mr.pipeline, updatedAt: mr.updatedAt } };
+  return { ...entry, pipeline: { status: mr.pipeline, sha: mr.headSha, updatedAt: mr.updatedAt } };
 }
 
 /** `entry` without `step`; `null` when that leaves nothing, so the caller drops the key rather than store `{}`. */

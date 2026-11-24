@@ -768,7 +768,9 @@ export interface GitlabReview {
 /**
  * One merge request, as the board draws it. `project` is the GitLab namespace path it lives in. `pipeline` is the head pipeline folded to five, read only
  * for an OPEN MR — a merged or closed one carries `null` (not read), never `none` (read, and there is no pipeline). `keys` are the Jira keys its source
- * branch and title carry, over the keys `jira.json` maps its project to; never empty, because an MR that names no ticket is not kept.
+ * branch and title carry, over the keys `jira.json` maps its project to; never empty, because an MR that names no ticket is not kept. `headSha` is the MR's
+ * head commit (GitLab's `sha` on the MR list), `null` when GitLab omits it: a push moves it, a comment, a label or an approval does not — unlike `updatedAt`,
+ * which moves on all of them — so it is what a pipeline Ignore is keyed on (#588).
  */
 export interface GitlabMr {
   project: string;
@@ -782,6 +784,7 @@ export interface GitlabMr {
   createdAt: string;
   updatedAt: string;
   mergedAt: string | null;
+  headSha: string | null;
   pipeline: GitlabPipeline | null;
   keys: string[];
   /** The CodeRabbit review's facts; `null` is NOT READ (merged, closed, not read yet, never read successfully) and never means "no review" (spec 4.2). */

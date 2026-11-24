@@ -1622,6 +1622,7 @@ describe('JiraView — the review button opens the launch sheet', () => {
     createdAt: iso(120),
     updatedAt: iso(30),
     mergedAt: null,
+    headSha: null,
     pipeline: 'success',
     keys: ['PAY-131'],
     review: {
@@ -1739,6 +1740,7 @@ describe('JiraLaunchSheet — review skill mode', () => {
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     mergedAt: null,
+    headSha: null,
     pipeline: null,
     keys: ['PAY-131'],
     review: null

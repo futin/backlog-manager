@@ -54,6 +54,8 @@ export interface RawMr {
   created_at: string;
   updated_at: string;
   merged_at?: string | null;
+  /** The MR's head commit; the MR list API returns it on every MR, but it is optional here so a payload without it maps to `null`, never a crash. */
+  sha?: string | null;
   head_pipeline?: { status: string } | null;
 }
 

@@ -43,6 +43,7 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     createdAt: '2026-11-10T08:00:00Z',
     updatedAt: '2026-11-11T10:00:00Z',
     mergedAt: null,
+    headSha: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
     review: null,
@@ -993,7 +994,7 @@ describe('deliveryNext with an ignore (spec §4.5.1)', () => {
 
   it('an ignored failed pipeline under a clean review is row 9, and says the pipeline is ignored', () => {
     const m = fx.cleanFailed;
-    const entry: IgnoreEntry = { pipeline: { status: 'failed', updatedAt: stamp(m) } };
+    const entry: IgnoreEntry = { pipeline: { status: 'failed', sha: null, updatedAt: stamp(m) } };
     expect(deliveryNext(m, NOW, entry)).toEqual(
       next({ step: 'merged', word: 'merge', pill: 'next: merge', sentence: 'Reviewed and green — merge happens in GitLab.', button: 'merge', ignored: { review: false, pipeline: true } })
     );
@@ -1001,7 +1002,7 @@ describe('deliveryNext with an ignore (spec §4.5.1)', () => {
 
   it('an ignored canceled pipeline under a clean review reads as finished too: the merge row, with the green sentence', () => {
     const m = fx.cleanCanceled;
-    const n = deliveryNext(m, NOW, { pipeline: { status: 'canceled', updatedAt: stamp(m) } });
+    const n = deliveryNext(m, NOW, { pipeline: { status: 'canceled', sha: null, updatedAt: stamp(m) } });
     expect(n).toEqual(
       next({ step: 'merged', word: 'merge', pill: 'next: merge', sentence: 'Reviewed and green — merge happens in GitLab.', button: 'merge', ignored: { review: false, pipeline: true } })
     );
@@ -1026,13 +1027,13 @@ describe('deliveryNext with an ignore (spec §4.5.1)', () => {
 
   it('an entry for failed while the pipeline now runs is not ignored: row 7', () => {
     const m = fx.cleanRunning;
-    const n = deliveryNext(m, NOW, { pipeline: { status: 'failed', updatedAt: stamp(m) } });
+    const n = deliveryNext(m, NOW, { pipeline: { status: 'failed', sha: null, updatedAt: stamp(m) } });
     expect(n).toEqual(next({ pill: 'pipeline running' }));
   });
 
   it('an entry for failed with an older updatedAt (a push since) is not ignored: row 8', () => {
     const m = fx.cleanFailed;
-    const n = deliveryNext(m, NOW, { pipeline: { status: 'failed', updatedAt: minutesAgo(300) } });
+    const n = deliveryNext(m, NOW, { pipeline: { status: 'failed', sha: null, updatedAt: minutesAgo(300) } });
     expect(n.step).toBe('pipeline');
     expect(n.word).toBe('fix pipeline');
     expect(n.ignored).toEqual(noIgnore);
@@ -1078,7 +1079,7 @@ describe('deliveryNext with an ignore (spec §4.5.1)', () => {
   });
 
   it('an entry never makes a merged MR draw ignored, and never changes its row', () => {
-    const n = deliveryNext(fx.merged, NOW, { review: { state: 'none', landedAt: null }, pipeline: { status: 'failed', updatedAt: fx.merged.updatedAt } });
+    const n = deliveryNext(fx.merged, NOW, { review: { state: 'none', landedAt: null }, pipeline: { status: 'failed', sha: null, updatedAt: fx.merged.updatedAt } });
     expect(n).toEqual(next({ pill: 'merged' }));
   });
 
@@ -1090,7 +1091,7 @@ describe('deliveryNext with an ignore (spec §4.5.1)', () => {
 
   it('a pipeline ignore on a draft never draws ignored: the draft pipeline is off', () => {
     const m = fx.draftNone;
-    const n = deliveryNext(m, NOW, { review: { state: 'none', landedAt: null }, pipeline: { status: 'failed', updatedAt: m.updatedAt } });
+    const n = deliveryNext(m, NOW, { review: { state: 'none', landedAt: null }, pipeline: { status: 'failed', sha: null, updatedAt: m.updatedAt } });
     expect(n.step).toBe('merged');
     expect(n.word).toBe('mark ready');
     expect(n.ignored).toEqual({ review: true, pipeline: false });

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 
 import type { ProjectSummary } from '../../../shared/types';
 import { drawnSources, type DrawnSources } from '../lib/sources';
+import { useAnsweredAt } from './useAnsweredAt';
 import { useMountedRef } from './useMountedRef';
 import { useRefreshing } from './useRefreshing';
 
@@ -26,6 +27,8 @@ export interface ProjectsState {
   data: ProjectSummary[] | null;
   drawn: DrawnSources | null;
   reload: () => void;
+  /** When `data` last landed (`useAnsweredAt`, #588) — Settings › Shared's `Last read` foot. Optional: a hand-built value may leave it out. */
+  answeredAt?: number | null;
 }
 
 const UNKNOWN: ProjectsState = { data: null, drawn: null, reload: () => {} };
@@ -52,7 +55,8 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     void trigger();
   }, [trigger]);
 
-  const value = useMemo<ProjectsState>(() => ({ data, drawn: data ? drawnSources(data) : null, reload }), [data, reload]);
+  const answeredAt = useAnsweredAt(data);
+  const value = useMemo<ProjectsState>(() => ({ data, drawn: data ? drawnSources(data) : null, reload, answeredAt }), [data, reload, answeredAt]);
   return <ProjectsContext.Provider value={value}>{children}</ProjectsContext.Provider>;
 }
 

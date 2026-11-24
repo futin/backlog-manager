@@ -18,9 +18,14 @@ export interface IgnoredReview {
   landedAt: string | null;
 }
 
-/** The pipeline half: the head pipeline's status at the time and the MR's `updatedAt`, which a push moves. */
+/**
+ * The pipeline half: the head pipeline's status at the time, the MR's head commit (`sha`) and its `updatedAt`. A push moves the head commit; a comment, a label
+ * or an approval moves nothing it carries — but all of them move `updatedAt`, which is why the commit is the key (#588). `sha` is `null` for an entry stored
+ * before that (read back without one) or for an MR GitLab gave no head commit; such an entry is judged by `updatedAt`, as it always was.
+ */
 export interface IgnoredPipeline {
   status: GitlabPipeline;
+  sha: string | null;
   updatedAt: string;
 }
 
@@ -52,7 +57,9 @@ function readReview(v: unknown): IgnoredReview | null {
 
 function readPipeline(v: unknown): IgnoredPipeline | null {
   if (!isRecord(v) || !has(PIPELINES, v.status) || typeof v.updatedAt !== 'string') return null;
-  return { status: v.status as GitlabPipeline, updatedAt: v.updatedAt };
+  // An absent `sha` is an ignore stored before the head-commit key (#588): kept, read as `null`, judged by `updatedAt`. Any other non-string is malformed.
+  if (v.sha !== undefined && v.sha !== null && typeof v.sha !== 'string') return null;
+  return { status: v.status as GitlabPipeline, sha: typeof v.sha === 'string' ? v.sha : null, updatedAt: v.updatedAt };
 }
 
 /**
@@ -77,15 +84,22 @@ export function readIgnoredSteps(v: unknown): IgnoredSteps {
 /**
  * Which halves of an entry still hold for this MR right now. The review holds while the CURRENT state (`'unread'` for `review === null`) is the stored one and
  * the review's `landedAt` is still the stored stamp — a state that moved, or a new round that landed, is a fresh review. The pipeline holds while its status
- * and the MR's `updatedAt` are both unchanged — a push moves `updatedAt`. Limit, accepted by the spec: a pipeline retried by hand on the same commit and failing
- * again keeps its ignore, since nothing on the MR moved; `ignored` is one click to undo.
+ * is unchanged and the MR is on the same head commit: a push moves the head commit, a comment moves nothing (#588 — keyed on `updatedAt`, any comment, label
+ * or approval lapsed the ignore). Only when either side has no commit (a legacy entry, or an MR GitLab gave none) is it judged by `updatedAt`, as before.
+ * Limit, accepted by the spec: a pipeline retried by hand on the same commit and failing again keeps its ignore, since nothing on the MR moved; `ignored` is
+ * one click to undo.
  */
 export function ignoreHolds(entry: IgnoreEntry | undefined, mr: GitlabMr, now: number): { review: boolean; pipeline: boolean } {
   const state: ReviewState | 'unread' = mr.review === null ? 'unread' : reviewState(mr.review, now);
   return {
     review: entry?.review !== undefined && entry.review.state === state && entry.review.landedAt === (mr.review?.landedAt ?? null),
-    pipeline: entry?.pipeline !== undefined && entry.pipeline.status === mr.pipeline && entry.pipeline.updatedAt === mr.updatedAt
+    pipeline: entry?.pipeline !== undefined && entry.pipeline.status === mr.pipeline && samePush(entry.pipeline, mr)
   };
+}
+
+/** The head commit when both sides carry one, else the `updatedAt` stamp — see `ignoreHolds`. */
+function samePush(entry: IgnoredPipeline, mr: GitlabMr): boolean {
+  return entry.sha !== null && mr.headSha !== null ? entry.sha === mr.headSha : entry.updatedAt === mr.updatedAt;
 }
 
 /**
