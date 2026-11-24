@@ -136,10 +136,12 @@ would show every normal pr-mode execute as "no open PR" with a Lift for one sync
 sync. Say this in `review`'s comment.
 
 - [ ] **Step 1: Failing tests** in that suite:
-  - remove `in-review` from a labelled issue via the route → `GET /api/items` immediately (no poller tick) shows the item without `inReview`.
+  - remove `in-review` from a labelled issue via the route → the FIRST `GET /api/items` after the POST shows the item without `inReview`. In all three
+    cases assert on that first GET only and make no other read: `list()` arms the poller and starts a tick (`github.source.ts:132` →
+    `poller.service.ts:450-451`), so only the first response is pre-tick, and a later read would pass or fail regardless of the absorb.
   - removal when the label is already gone on GitHub but still cached: sync with the label on, delete it from the fake's `gh.issues` directly (no tick),
     post the removal → 201 (the 404 path), and `GET /api/items` reads the item without `inReview`.
-  - an ADD (`inReview: true`) on an issue → 201, and `GET /api/items` before any tick still reads the item WITHOUT `inReview` (no absorb on add).
+  - an ADD (`inReview: true`) on an issue → 201, and the first `GET /api/items` after it still reads the item WITHOUT `inReview` (no absorb on add).
   - the re-read failing (fake answers the issue GET with 500 once) → the route still answers success.
 - [ ] **Step 2: Run; the first case fails.**
 - [ ] **Step 3: Implement**, and update both comments: `review`'s says a removal absorbs like `planReview` and why an add does not; `planReview`'s
