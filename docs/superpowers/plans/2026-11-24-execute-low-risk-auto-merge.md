@@ -60,6 +60,8 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
 - Follow the repo's `isMain` main-guard twin (`skills/backlog/tools/backlog.mjs:3846`). `scripts/run-as-main.test.mjs:27-36` lists one row per tool and
   `:94` walks every `skills/*/tools` dir for files carrying the guard, so add a row: `script: 'skills/backlog-execute/tools/low-risk.mjs', args: [],
   status: 2, output: 'usage: low-risk.mjs'`. Missing `--base` → exit 2 with stderr `usage: low-risk.mjs --base <base>`.
+- The CLI ends `process.exitCode = main(...)` (synchronous; `.claude/rules/skills.md` "Every skill CLI ends with…"), and `low-risk.mjs` joins `CLI_SOURCES`
+  in `skills/backlog/tools/backlog.test.mjs:3702`.
 
 - [ ] **Step 1: Write the failing tests** (`classify` table, then two CLI tests in a temp git repo with an `origin` remote)
 
@@ -85,18 +87,21 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
     `src/migrate/x.ts`, `.env.local`, `config/.env`, `.claude/rules/x.md`, `skills/foo/SKILL.md`. And `docs/skills/x.md` is **not** denied (top-level
     only) → `docs`; `.github` nested as `a/.github/x.md` → `docs`.
   - Order: binary beats deny (`package.json` binary → `is binary`); deny beats docs (`.github/x.md` → `never low-risk`); added beats files beats lines.
+    The scan is rule-major, not file-major: `D src/a.ts` + binary `b.png` → `'b.png is binary'`; `D package.json` → `'package.json deleted'`;
+    `M package.json` `100644→100755` → `'package.json mode changed'`.
+  - `M src/backlog/x.ts` 50+0 → `'50 lines, patch limit 40'` (only the TOP-LEVEL `backlog/` is ignored).
 
   CLI cases:
   - "judges against origin/<base>, not local <base>": temp repo, `origin` a bare clone; commit `src/x.ts` (50 lines) on local `main` only (not pushed); cut
-    a branch, edit `README.md`; run with `--base main` → `lowRisk: false`, reason `'51 lines, patch limit 40'`-style (the unpushed `src/x.ts` is judged —
-    assert `lowRisk: false` and that `files` counts 2).
+    a branch, edit `README.md`; run with `--base main` → `lowRisk: false`, reason `'src/x.ts added'`, `files: 2` (the unpushed `src/x.ts` is an add against
+    `origin/main`, and added beats files and lines).
   - unknown base (`--base nope`) → exit 0, `lowRisk: false`, reason starts `git: `. Missing `--base` → non-zero exit.
 
 - [ ] **Step 2: Run** `node --test skills/backlog-execute/tools/low-risk.test.mjs` — expected FAIL (module missing).
 - [ ] **Step 3: Implement** `classify` and the CLI. Parse `--raw -z`/`--numstat -z` (paths with spaces/renames); join by path. Order of checks exactly as the
   spec's "The `reason` names the first failing rule" paragraph.
-- [ ] **Step 4: Run** the same command — PASS; then `pnpm run test:skills` scoped run passes for `skills/backlog-execute/tools/*.test.mjs` and
-  `scripts/run-as-main.test.mjs`.
+- [ ] **Step 4: Run** the same command — PASS; then `node --test` on `skills/backlog-execute/tools/low-risk.test.mjs`, `scripts/run-as-main.test.mjs` and
+  `skills/backlog/tools/backlog.test.mjs` — PASS.
 - [ ] **Step 5: Commit** `feat(skills): low-risk diff classifier for backlog-execute`.
 
 ### Task 2: Shared vocabulary — `FinishFlags`, `finishClause`, `FINISH_FLAG`, dispatch type, pr-mode §1 quote
@@ -196,13 +201,17 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
 - Modify: `server/src/tick/tick-breaker.util.ts:93-185` (`TickFileRead` ok shape, `readTickFile`, `writeTickFile` patch + carry-over)
 - Modify: `server/src/tick/tick.service.ts:21-22` (`TickConfigPatch` gains it), `:119-131` (payload config)
 - Modify: `server/src/tick/tick.controller.ts:21-45` (`CONFIG_KEYS` handling: numbers stay integer-checked, the boolean is boolean-checked)
-- Modify: `client/src/lib/ticks.ts:53-60` (patch type), `client/src/components/settings/TickGroup.tsx` (row after "Open execute PRs")
+- Modify: `client/src/lib/ticks.ts:14` (`TickConfigPatch` gains it), `:22-28` (`isTicksPayload` also requires `typeof config.lowRiskAutoMerge ===
+  'boolean'` — the server always sends it), `client/src/components/settings/TickGroup.tsx` (row after "Open execute PRs")
 - Modify: `.claude/rules/tick.md` (file shape, "any non-empty subset of the four", boolean edge cases, both readers)
 - Test: `test/tick/tick-breaker.test.ts`, `test/tick/tick-routes.test.ts`, `test/settings/settings-tick.test.tsx`
 
 - [ ] **Step 1: Failing tests**
   - read: missing file → `lowRiskAutoMerge: false`; file `{ "lowRiskAutoMerge": true }` → `true`; `"true"`, `1`, absent → `false` (Review Focus 5).
-  - write: patch `{ lowRiskAutoMerge: true }` on a file with `maxPrs: 5` → file has both; a later patch `{ maxPrs: 4 }` keeps `lowRiskAutoMerge: true`.
+  - write: patch `{ lowRiskAutoMerge: true }` on a file with `maxPrs: 5` → file has both; a later patch `{ maxPrs: 4 }` keeps `lowRiskAutoMerge: true`;
+    then patch `{ lowRiskAutoMerge: false }` → file has `false` (a truthiness carry-over would keep `true`).
+  - POST `{ lowRiskAutoMerge: false }` alone over a `true` file → 200 and the payload's `config.lowRiskAutoMerge === false`.
+  - `ticks-lib`: `isTicksPayload` rejects a payload whose `config` lacks `lowRiskAutoMerge` or carries `"true"` (`test/tick/ticks-lib.test.ts`).
   - unreadable file → GET `config.lowRiskAutoMerge === false`, `source: 'unreadable'`; POST `{ lowRiskAutoMerge: true }` → 409, file byte-identical.
   - POST `{ lowRiskAutoMerge: true }` alone → 200 (not `nothing to set`); `{ lowRiskAutoMerge: 'true' }` → 400 `lowRiskAutoMerge must be a boolean`;
     `{ maxPrs: 1.5 }` → 400 `maxPrs must be an integer` (unchanged); `{}` → 400 `nothing to set` (unchanged).
@@ -244,9 +253,12 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
 - Modify: `skills/backlog-execute/references/pr-mode.md:288-330` (§8: new low-risk branch before "Last, with `--auto-merge`"; failure lines; final
   message — `low-risk:` line above the PR URL, URL last), `:350-352` (provenance: cite this spec)
 - Modify: `skills/backlog-execute/references/auto-merge.md:1-5` (third caller)
-- Modify: `docs/subsystems/skills.md`, `docs/subsystems/board.md`, `docs/subsystems/api.md`, `docs/subsystems/invariants.md` (the auto-merge invariant
-  entry), and the tick doc wherever it lists caps / tick.json keys
-- Test: `test/agents/agents-shared.test.ts` (extend) or a new `test/skills/low-risk-procedure.test.ts`
+- Modify: `docs/subsystems/skills.md` (backlog-execute's flags and the backlog-tick section's `tick.json` keys), `docs/subsystems/board.md` (launch sheet
+  and Settings rows), `docs/subsystems/api.md` (dispatch body and `/api/ticks/config`), `docs/subsystems/invariants.md` (the auto-merge invariant entry),
+  `docs/workflows/development.md` where it lists `tick.json` keys. There is no separate tick doc: `grep -n "maxPrs\|tick.json\|auto-merge" docs/` is the
+  edit map.
+- Modify: `.claude/rules/orchestrator.md:52-53` ("With `--auto-merge` either may then arm…" gains the low-risk route)
+- Test: `test/agents/agents-shared.test.ts` (extend, beside the pr-mode pins at `:863-899`); `test/guards/claude-rules.test.ts` (run)
 
 - [ ] **Step 1: Failing tests** (text guards, whitespace-collapsed):
   - `pr-mode.md` contains `node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/tools/low-risk.mjs" --base <base>` (or the exact invocation form the file
@@ -260,7 +272,7 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
   tracker claim sequence ran; run the classifier in `<tree>`; low-risk → print the success line, then read `auto-merge.md` in full and run it as with
   `--auto-merge --fix`; otherwise print the matching line and finish as plain pr. Never re-run the classifier after a fix round. A tick-run execute is `ok`
   whatever auto-merge did. Docs: describe the flag where each doc lists `--auto-merge`/`--fix`.
-- [ ] **Step 4: Run** the guard suite and `pnpm run test:skills` scoped to `skills/backlog-execute/tools/*.test.mjs skills/backlog/tools/backlog.test.mjs`
+- [ ] **Step 4: Run** the guard suite, `test/guards/claude-rules.test.ts`, and `pnpm run test:skills` scoped to `skills/backlog-execute/tools/*.test.mjs skills/backlog/tools/backlog.test.mjs`
   (the latter reads pr-mode.md) — PASS.
 - [ ] **Step 5: Commit** `feat(skills): backlog-execute --low-risk-auto-merge`.
 
