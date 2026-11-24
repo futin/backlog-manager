@@ -21,7 +21,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is
   ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
-  item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira Detail's session card `Stop` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
+  item modal's claim release (#225) and Lift review (`ReviewLift`), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira Detail's session card `Stop` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with eleven composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`), the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraTicketStrip.tsx`, the Status chip in the ticket body's strip) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request) and the Delivery row's `Review menu` (`components/jira/ReviewMenu.tsx`, the split's `More reviewers` chevron or the ghost `Review ▾`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
@@ -121,7 +121,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   "improve" that into disabled buttons. The stated exception is the Jira card's `Run ▾`, which is not a Board dispatch control (next bullet). Five per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
   local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale, for a files item; a tracker claim past
   `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an open PR (`inReviewBlock`, `shared/agent.ts` — a
-  tracker issue labelled `in-review`), an outsider's issue no groom of ours has pinned
+  tracker issue labelled `in-review`; `in review, but no open PR references this item` when `inReviewNoPr` says none does), an outsider's issue no groom of ours has pinned
   (`unvettedBlock`, `shared/agent.ts` — `BacklogItem.unvetted`, #341; after in-review and before plan-review), an
   orchestrator claim (`runClaimBlock`). `itemLadderBlock` (`shared/agent.ts`, #468) is the one home of the order of in-review, execute-held, unvetted and
   plan-review, and the button and the server's `plan`/`dispatch` all read it. A sixth refusal is the server's alone and `DispatchButton` must not learn it:

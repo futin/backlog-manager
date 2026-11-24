@@ -142,7 +142,14 @@ export class GithubSource implements ItemSource, ItemWriter {
     const items: BacklogItem[] = [];
     const errors: string[] = [];
     for (const issue of this.poller.issues(repo)) {
-      const mapped = mapIssue(issue, repo, project, claims.get(issue.number) ?? [], this.poller.reviewLifted(repo, issue.number));
+      const mapped = mapIssue(
+        issue,
+        repo,
+        project,
+        claims.get(issue.number) ?? [],
+        this.poller.reviewLifted(repo, issue.number),
+        this.poller.reviewPullOpen(repo, issue.number)
+      );
       // `null` is a pull request, which the issues endpoint returns alongside
       // real issues and which is not an item at all — dropped silently,
       // because there is nothing wrong with the repo containing PRs.
@@ -202,7 +209,8 @@ export class GithubSource implements ItemSource, ItemWriter {
       found.repo,
       project,
       claimsFor(found.issue.number, this.poller.comments(found.repo)),
-      this.poller.reviewLifted(found.repo, found.issue.number)
+      this.poller.reviewLifted(found.repo, found.issue.number),
+      this.poller.reviewPullOpen(found.repo, found.issue.number)
     );
     return mapped === null ? null : mapped.item;
   }
@@ -1044,7 +1052,14 @@ export class GithubSource implements ItemSource, ItemWriter {
    * is answered by GitHub's own 404 through `refusalFor`.
    *
    * A removal's 404 is SUCCESS, for the reason `queue` gives: the caller's contract is "the label is not there". Here the caller is `backlog.mjs review
-   * <id> off`, a person clearing a guard after a PR closed unmerged, and a guard already gone is the state they asked for.
+   * <id> off`, a person clearing a guard after a PR closed unmerged, or the board's Lift review on an item no open PR references, and a guard already gone
+   * is the state they asked for.
+   *
+   * A landed REMOVAL (the 200, or that 404) is followed by a re-read of the issue into the poller's cache, as `planReview` does, so the board's next read
+   * shows the item executable rather than one sync interval later. A failed re-read is not a refusal: the label write landed, and the next sync catches up.
+   * An ADD absorbs nothing, on purpose: `absorbIssue` takes the issue alone, so the label would reach the cache before the next sync indexes the PR that
+   * pr-mode opened a moment earlier — and `mapIssue` would read every normal pr-mode execute as `inReviewNoPr` with a Lift for one interval. Left to the
+   * sync, the label and the PR arrive together.
    */
   async review(project: RegistryProject, marker: SourceMarker, req: ItemReviewRequest): Promise<WriteOutcome<{ id: string; inReview: boolean }>> {
     const ready = this.ready(marker);
@@ -1060,6 +1075,10 @@ export class GithubSource implements ItemSource, ItemWriter {
         : await this.client.removeLabel(repo, number, IN_REVIEW_LABEL, { token });
       const ok = res.status === 200 || (!req.inReview && res.status === 404);
       if (!ok) return { ok: false as const, refusal: refusalFor(res) };
+      if (!req.inReview) {
+        const reread = await this.client.issue(repo, number, { token });
+        if (reread.status === 200 && reread.data !== null) this.poller.absorbIssue(repo, reread.data);
+      }
       return { ok: true as const, value: { id: `#${number}`, inReview: req.inReview } };
     });
   }
@@ -1069,7 +1088,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * `issueNow` first, a closed issue not refused, and a removal's 404 answered as success because the caller's contract is "the label is not there".
    * Here the removing caller is a person approving a plan, and an approval already given is the state they asked for.
    *
-   * Unlike `review` and `queue`, a landed change is followed by a re-read of the issue into the poller's cache, so the board's Run and `show --json` see the
+   * Unlike `queue` (and `review`'s add), a landed change is followed by a re-read of the issue into the poller's cache, so the board's Run and `show --json` see the
    * hold (or the approval) at once rather than a poll interval later — the same reason `patchBody` absorbs its own `plan-review` change. A failed
    * re-read is not a refusal: the label write landed, and the next poll catches the cache up.
    */

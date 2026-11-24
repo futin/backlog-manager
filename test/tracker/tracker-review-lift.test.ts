@@ -469,6 +469,97 @@ describe('reviewLifted', () => {
   });
 });
 
+/* The question behind the second in-review sentence: is a PR that references this issue OPEN right now? `decidingPull`'s first answer, read off the same index
+   `reviewLifted` reads, so the two can never disagree about which PRs reference an issue. An unsynced repo answers `true` — the conservative reading, which
+   keeps today's sentence and offers no Lift. */
+describe('reviewPullOpen', () => {
+  it('is true while a referencing PR is open', async () => {
+    const { poller: p } = poller([['/issues?', { status: 200, body: [issue(266), pr(370, 'Refs #266', null)] }]]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(true);
+    p.disarm();
+  });
+
+  it('is false with no referencing PR at all', async () => {
+    const { poller: p } = poller([['/issues?', { status: 200, body: [issue(266)] }]]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
+
+  it('is false when the only referencing PR closed unmerged', async () => {
+    const { poller: p } = poller([['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', null, 'closed', MERGED)] }]]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
+
+  it('is false when the latest referencing PR merged into a feature base', async () => {
+    const { poller: p } = poller([
+      ['/pulls/362', pull(362, 'feature/x')],
+      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
+
+  it('is false when the referencing PR merged but its base is not learned yet', async () => {
+    const { poller: p } = poller([
+      ['/pulls/362', { status: 500, body: { message: 'boom' } }],
+      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
+
+  it('is false for an open PR that references the same number in another repo', async () => {
+    const { poller: p } = poller([['/issues?', { status: 200, body: [issue(266), pr(362, 'Closes other/repo#266', null)] }]]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
+
+  it('answers per issue: an open PR for 266 says nothing about 267', async () => {
+    const { poller: p } = poller([['/issues?', { status: 200, body: [issue(266), issue(267), pr(370, 'Refs #266', null)] }]]);
+    await p.tick();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(true);
+    expect(p.reviewPullOpen('futin/x', 267)).toBe(false);
+    p.disarm();
+  });
+
+  it('is true for a repo that never synced', () => {
+    const { poller: p } = poller([]);
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(true);
+  });
+
+  /* Final review, 2026-11-24: the repo's state exists from the first line of `syncRepo`, and a cold read absorbs page by page — so a cold pagination that
+     fails after page 1 leaves the issue cached with its open PR (on page 2) never indexed. Until the first successful sync stamps `polledAt`, the index is
+     partial and the answer stays the conservative `true`; once it is stamped, the index is whole and the answer is the index's. */
+  it('stays true while the cold pagination has not finished — the issue on page 1, its PR never read', async () => {
+    const NEXT = '<https://api.github.com/repos/futin/x/issues?page=2>; rel="next"';
+    const { poller: p } = poller([
+      ['/issues?', (n) => (n === 1 ? { status: 200, body: [issue(266)], headers: { link: NEXT } } : { status: 500, body: { message: 'boom' } })]
+    ]);
+    await p.tick();
+    expect(p.issue('futin/x', 266)).toBeDefined();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(true);
+    p.disarm();
+  });
+
+  it('answers from the index once a cold pagination completes — page 2 brings no referencing PR', async () => {
+    const NEXT = '<https://api.github.com/repos/futin/x/issues?page=2>; rel="next"';
+    const { poller: p } = poller([['/issues?', (n) => (n === 1 ? { status: 200, body: [issue(266)], headers: { link: NEXT } } : { status: 200, body: [issue(267)] })]]);
+    await p.tick();
+    expect(p.issue('futin/x', 267)).toBeDefined();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
+});
+
 describe('end to end — the #266 shape through GithubSource.list', () => {
   it('drops inReview once a Refs PR merged into the default branch, so no gate refuses', async () => {
     const root = githubProject();
@@ -492,5 +583,23 @@ describe('end to end — the #266 shape through GithubSource.list', () => {
     // The control: the same label with no merged PR behind it still blocks.
     expect(kept?.inReview).toBe(true);
     expect(inReviewBlock(kept!)).not.toBeNull();
+  });
+
+  /* The other half of the derivation: an in-review issue that no open PR references lists with `inReviewNoPr`, one whose PR is open lists without it. This is
+     the case that fails if a `GithubSource` caller forgets to pass the poller's answer — `mapIssue`'s default is "a PR is open". */
+  it('flags an in-review issue that no open PR references, and not one whose PR is open', async () => {
+    const root = githubProject();
+    const { poller: p, client } = poller([['/issues?', { status: 200, body: [issue(214), issue(31), pr(370, 'Fixes #31', null)] }]], root);
+    await p.tick();
+    const source = new GithubSource(p, client, { get: () => null } as unknown as DispatchRecordsService);
+    const { items } = await source.list({ name: 'p0', path: root, createdAt: '2026-08-26T00:00:00.000Z' }, { kind: 'github', repo: 'futin/x' });
+    p.disarm();
+
+    const stale = items.find((i) => i.id === '#214');
+    const open = items.find((i) => i.id === '#31');
+    expect(stale?.inReview).toBe(true);
+    expect(stale?.inReviewNoPr).toBe(true);
+    expect(open?.inReview).toBe(true);
+    expect('inReviewNoPr' in (open ?? {})).toBe(false);
   });
 });

@@ -658,6 +658,13 @@ has pushed a `pr`-mode branch — the moment its claim is released and the still
 closes the issue, or by `backlog.mjs review <id> off`. A `Refs #<n>` PR closes nothing, so the flag is also lifted without a write once the latest closed
 referencing PR merged into the default branch and none is open (#411, `TrackerPollerService.reviewLifted`) — the label stays, the card reads ready. A files item never carries it.
 
+**An `in-review` issue no open PR references says so, and the item modal offers Lift review** (the in-review-without-PR spec, ixray #214). An in-place
+execute sets the label and opens no PR, and a PR closed unmerged lifts nothing, so the mapper's `inReviewNoPr` (`TrackerPollerService.reviewPullOpen`) turns
+the rung's sentence into `in review, but no open PR references this item` (`IN_REVIEW_NO_PR_REASON`). `ReviewLift` (`components/board/ReviewLift.tsx`) draws
+only then, for an open `github` item, between the dispatch control and `PlanApprove`: its inline confirm reads `GET /api/items/held` once per opening and
+words its sentence by what it finds (`reviewLiftText`, `lib/review-lift.ts`), keeps Lift enabled in every state, and posts `POST /api/items/review` with
+`inReview: false`; a refusal prints the server's sentence and the chip comes back.
+
 **A files item an execute branch or tree holds is refused by the launch sheet, and its control stays enabled** (#427). A `--finish pr` execute in a new tree leaves
 `execute/<id>` and `.worktrees/execute-<id>` behind while the item stays in `open/`; one that reused a linked worktree leaves neither, and is not caught. `plan` and `dispatch` refuse it with `an execute branch or worktree already holds this item`
 (`executeHeldBlock`, `server/src/agents/execute-held.util.ts`), right after the in-review rung, handed to `itemLadderBlock` as a value; `DispatchButton` passes

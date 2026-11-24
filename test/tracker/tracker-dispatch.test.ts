@@ -10,7 +10,7 @@ import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
 import { GithubClient } from '../../server/src/tracker/github.client';
 import { TrackerPollerService } from '../../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../../server/src/tracker/token.util';
-import { FakeGithub, FAKE_REPO } from '../helpers/github';
+import { FakeGithub, FAKE_REPO, type FakeIssue } from '../helpers/github';
 import { listenLoopback } from '../helpers/app';
 import { gitRepoWithBranches, item, makeProject, makeRegistry } from '../helpers/store';
 import type { ClaimRecord } from '../../shared/types';
@@ -255,9 +255,10 @@ describe('a tracker item with a leftover execute branch', () => {
 });
 
 /**
- * The in-review guard (spec decision 9): an issue labelled `in-review` has a PR open for it, so the plan answers it as `blocked` with the one shared
- * sentence and `dispatch` refuses it with the same uncoded 409 the run-claim refusal uses. Driven through the real label and the real mapper, because the
- * flag only exists on a tracker item — a files project has no way to carry it.
+ * The in-review guard (spec decision 9): an issue labelled `in-review` is blocked in the plan with a shared sentence and refused by `dispatch` with the same
+ * uncoded 409 the run-claim refusal uses. Driven through the real label and the real mapper, because the flag only exists on a tracker item — a files project
+ * has no way to carry it. The fake repo holds no PR referencing #31, so the sentence is the no-PR one (ixray #214); the last case adds an OPEN PR that says
+ * `Fixes #31`, served through the issues list as the poller reads PRs, and the sentence goes back to naming it.
  */
 describe('an item whose PR is in review', () => {
   beforeEach(async () => {
@@ -265,19 +266,34 @@ describe('an item whose PR is in review', () => {
     await app.get(TrackerPollerService).tick();
   });
 
-  it('is blocked in the plan with the in-review reason', async () => {
+  it('is blocked in the plan with the no-open-PR reason when no PR references it', async () => {
     const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
     expect(res.body.action).toBe('execute');
-    expect(res.body.blocked).toBe('a PR is open for this item');
+    expect(res.body.blocked).toBe('in review, but no open PR references this item');
   });
 
-  it('409s dispatch with the in-review reason, and spawns nothing', async () => {
+  it('409s dispatch with the no-open-PR reason when no PR references it, and spawns nothing', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/agents/dispatch')
       .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
       .expect(409);
-    expect(res.body).toEqual({ error: 'a PR is open for this item' });
+    expect(res.body).toEqual({ error: 'in review, but no open PR references this item' });
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it('names the open PR once one that says Fixes #31 is listed', async () => {
+    gh.issue({
+      number: 370,
+      title: 'fix the board',
+      body: 'Fixes #31',
+      labels: [],
+      updated_at: '2026-09-03T10:00:00Z',
+      pull_request: { url: `https://api.github.com/repos/${FAKE_REPO}/pulls/370`, merged_at: null }
+    } as Partial<FakeIssue>);
+    await app.get(TrackerPollerService).tick();
+
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(res.body.blocked).toBe('a PR is open for this item');
   });
 });
 
@@ -307,17 +323,17 @@ describe('an item whose plan awaits review', () => {
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
   });
 
-  it('says the in-review reason when the issue carries both labels — in-review first', async () => {
+  it('says the in-review reason when the issue carries both labels with no open PR — in-review first', async () => {
     gh.issues.get(31)!.labels.push({ name: 'in-review' });
     await app.get(TrackerPollerService).tick();
 
     const plan = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
-    expect(plan.body.blocked).toBe('a PR is open for this item');
+    expect(plan.body.blocked).toBe('in review, but no open PR references this item');
     const res = await request(app.getHttpServer())
       .post('/api/agents/dispatch')
       .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
       .expect(409);
-    expect(res.body).toEqual({ error: 'a PR is open for this item' });
+    expect(res.body).toEqual({ error: 'in review, but no open PR references this item' });
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
   });
 });

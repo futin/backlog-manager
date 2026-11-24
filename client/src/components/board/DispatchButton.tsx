@@ -43,8 +43,9 @@ export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null
  * item's project (derived here, from `status`), a local skill session already
  * holds this item (derived here too, by `progressBlock` — one of the four the
  * item itself can answer, since `started:` is right there in its
- * frontmatter), a PR is open for this item (`inReviewBlock`, the next one:
- * a tracker issue's `in-review` label, from execute's `pr` mode), an outsider filed it and no
+ * frontmatter), a PR is open for this item, or the label is held with no
+ * open PR referencing it (`inReviewBlock`, the next one: a tracker issue's
+ * `in-review` label, from execute's `pr` mode, and `inReviewNoPr` beside it), an outsider filed it and no
  * groom has pinned its body yet (`unvettedBlock`, the third: `unvetted`, #341),
  * its plan was written unattended and awaits a person's review (`planReviewBlock`, the fourth of those:
  * the `plan-review` label or frontmatter line backlog-tick sets, rendered

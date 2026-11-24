@@ -192,6 +192,31 @@ describe('issue → BacklogItem', () => {
     expect('inReview' in (plain?.item ?? {})).toBe(false);
   });
 
+  /* The second in-review sentence: `inReviewNoPr` rides only with `inReview`, and only when the poller says no referencing PR is open. Same `true | absent`
+     shape. The default (no sixth argument) is "a PR is open", so a caller with no poller keeps today's sentence. */
+  it('sets inReviewNoPr beside inReview only when no referencing PR is open', () => {
+    const labelled = { labels: [{ name: 'type:task' }, { name: 'in-review' }] };
+    const noPr = mapIssue(issue(labelled), REPO, project, [], false, false)?.item;
+    expect(noPr?.inReview).toBe(true);
+    expect(noPr?.inReviewNoPr).toBe(true);
+
+    const prOpen = mapIssue(issue(labelled), REPO, project, [], false, true)?.item;
+    expect(prOpen?.inReview).toBe(true);
+    expect('inReviewNoPr' in (prOpen ?? {})).toBe(false);
+
+    const lifted = mapIssue(issue(labelled), REPO, project, [], true, false)?.item;
+    expect('inReview' in (lifted ?? {})).toBe(false);
+    expect('inReviewNoPr' in (lifted ?? {})).toBe(false);
+
+    const unlabelled = mapIssue(issue({ labels: [{ name: 'type:task' }] }), REPO, project, [], false, false)?.item;
+    expect('inReview' in (unlabelled ?? {})).toBe(false);
+    expect('inReviewNoPr' in (unlabelled ?? {})).toBe(false);
+
+    const defaulted = mapIssue(issue(labelled), REPO, project, [], false)?.item;
+    expect(defaulted?.inReview).toBe(true);
+    expect('inReviewNoPr' in (defaulted ?? {})).toBe(false);
+  });
+
   /* plan-review (backlog-tick): the same `true | absent` shape as `inReview`, consumed for the same reason. The first case carries BOTH labels so a swapped
      mapping fails; unlike `inReview` it has a second writer (the files scan), which is why the flag's doc comment says so. */
   it('reads plan-review as planReview: true beside inReview: true, so a swapped mapping fails', () => {

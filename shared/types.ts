@@ -326,6 +326,15 @@ export interface BacklogItem {
    */
   inReview?: true;
   /**
+   * Set beside `inReview` when no PR that references this issue is OPEN (`TrackerPollerService.reviewPullOpen`): nothing referenced it, the latest one closed
+   * unmerged, merged into a non-default base, or merged with its base not learned yet. The label then guards work no PR carries — unpushed on some machine,
+   * or lost — so `inReviewBlock` says `IN_REVIEW_NO_PR_REASON` instead of claiming a PR is open, and the item modal offers **Lift review**. Never lifts by
+   * itself: in-place work unpushed on another machine leaves nothing here to see, and the label is the one guard that works across machines.
+   *
+   * **Optional, `true` or absent, and never `false`,** `inReview`'s rule; the mapper is the only writer, and never sets it without `inReview`.
+   */
+  inReviewNoPr?: true;
+  /**
    * A plan written unattended (backlog-tick) that a human has not yet approved: a tracker issue carrying the `plan-review` label, or a files item whose
    * frontmatter has a `plan-review: true` line. Removing the label, or the line, is the approval. Gates will read it — the dispatch ladders, the queue
    * builders and execute's refusal skip such an item, with the reason `this plan awaits review` — but this field only reports it.
@@ -3853,6 +3862,16 @@ export interface ItemPlanReviewRequest extends ItemWriteRequest {
 export interface ItemPlanReviewResult {
   id: string;
   planReview: boolean;
+}
+
+/**
+ * `GET /api/items/held`'s answer: whether THIS machine still holds an in-place execute's leftovers for one tracker issue (the in-review-without-PR spec).
+ * `branch` is a local `execute/<n>` branch — `null` when git could not be asked (a timeout, not a repository), which the board words as "could not check",
+ * never as "nothing here". `tree` is a `.worktrees/execute-<n>` directory. Read per request and stored nowhere; it never gates anything.
+ */
+export interface ItemHeld {
+  branch: boolean | null;
+  tree: boolean;
 }
 
 /** What `claim`, `release` and `heartbeat` answer on success: the comment that

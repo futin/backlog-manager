@@ -44,7 +44,8 @@ the diff (at most two fix rounds), pushes that branch and opens a pull request i
 force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns git. `base` is the trigger's
 `--base`, else the remote's default branch (`origin/HEAD`), else `main`. An unknown or doubled `--finish` stops execute rather than falling back to either mode.
 In a tracker project nothing is archived: the claim is held through the review, and after the push
-`backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges — a
+`backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges (the board and the server say `in review, but no open PR
+references this item` while none does; the skills' copies keep the first sentence, reading the label alone) — a
 `Closes #<n>` merge shuts the issue, and a `Refs #<n>` one into the default branch lifts the guard by derivation (#411) while the issue stays open. In a files
 project a new tree's branch and directory are the guard (#427), and a reused tree on its own branch has neither name, so nothing guards its item until the PR merges: `orchestrate.mjs`'s `executeHeldGate`, applied over `planReviewGate`, turns the item `ungroomed` with
 `an execute branch or worktree already holds this item` (a hand-kept copy of `EXECUTE_HELD_REASON`), and the server's `plan`/`dispatch` refuse it with the same

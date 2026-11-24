@@ -7,6 +7,7 @@ import type {
   ExecuteFinish,
   ItemAbortResult,
   ItemDispatchResult,
+  ItemHeld,
   ItemPlanReviewResult,
   LaunchSurface,
   MergeCheckResult,
@@ -418,6 +419,31 @@ export async function approvePlan(project: string, id: string): Promise<ItemPlan
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project, id, planReview: false })
+    })
+  );
+}
+
+/**
+ * The Lift review confirmation's question (the in-review-without-PR spec) — `GET /api/items/held`: does this machine still hold an `execute/<n>` branch or
+ * `.worktrees/execute-<n>` for a tracker item. A read the confirm words its sentence from and nothing else; both parameters are encoded because the id
+ * carries a `#` and the project is an absolute path.
+ */
+export async function readHeld(project: string, id: string): Promise<ItemHeld> {
+  const query = `project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`;
+  return unwrap<ItemHeld>(await fetch(`/api/items/held?${query}`));
+}
+
+/**
+ * The item modal's **Lift review** — `POST /api/items/review` with `inReview: false`, removing an `in-review` label no open PR answers for. `approvePlan`'s
+ * shape and its reasons: the route, its guard and the GitHub write (with the cache re-read a removal now makes) are the server's, and `unwrap` turns a
+ * refusal — a sync-off repo, a missing token — into an `ApiError` carrying the server's own sentence. Only a person's click past the confirm reaches it.
+ */
+export async function liftReview(project: string, id: string): Promise<{ id: string; inReview: boolean }> {
+  return unwrap<{ id: string; inReview: boolean }>(
+    await fetch('/api/items/review', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project, id, inReview: false })
     })
   );
 }
