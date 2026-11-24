@@ -97,8 +97,8 @@ export type TickFileRead =
 /**
  * The three shapes of answer, never a throw:
  *   - no file                              → `{ ok: true, source: 'default' }` — never configured, the common case;
- *   - a file that parses to a plain object → `{ ok: true, source: 'file' }`, `haltAfter`, `maxPlans` and `maxPrs` clamped and `resetAt` reduced to its usable
- *     entries;
+ *   - a file that parses to a plain object → `{ ok: true, source: 'file' }`, `haltAfter`, `maxPlans` and `maxPrs` clamped, `lowRiskAutoMerge` true only for a
+ *     literal `true`, and `resetAt` reduced to its usable entries;
  *   - ANYTHING else (an I/O error that is not ENOENT — EISDIR, EACCES —, text that is not JSON, JSON that is an array or `null`) → `{ ok: false, file, error }`.
  * The last is never read as the default: see the header — `decide` answers `idle` naming the file, and the board shows `source: 'unreadable'`.
  */
@@ -161,9 +161,9 @@ export class TickFileUnreadable extends Error {
 
 /**
  * The one write path for `tick.json`. Reads the current file first and refuses (`TickFileUnreadable`, file untouched) if it is unreadable: rewriting from
- * defaults would turn a stray comma into "3, no resets" with nothing on disk left to recover the old values from. Otherwise each of `haltAfter`, `maxPlans`
- * and `maxPrs` replaces the current one only when the patch carries it (clamped) and is carried through from the current file when it does not, and `resetAt`
- * merges KEY-WISE over the current map — resetting one project must not forget another's Reset, nor setting one number forget the other two.
+ * defaults would turn a stray comma into "3, no resets" with nothing on disk left to recover the old values from. Otherwise each of `haltAfter`, `maxPlans` and
+ * `maxPrs` (clamped) and `lowRiskAutoMerge` replaces the current one only when the patch carries it and is carried through from the current file when it does
+ * not, and `resetAt` merges KEY-WISE over the current map — resetting one project must not forget another's Reset, nor setting one value forget the others.
  *
  * Written through `writeJsonAtomic`: a `tick.mjs` reading concurrently sees the old complete file or the new complete one and never half of one, and a write
  * that fails leaves the old file as it was with no temp file beside it.

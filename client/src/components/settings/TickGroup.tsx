@@ -5,15 +5,16 @@ import { Switch } from '../ui/Switch';
 import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../../shared/types';
 
 /**
- * The tick breaker's Settings card (tick-breaker spec, "Settings"; drawn to `.claude/DESIGN.md` §8.6 — a `SettingsGroup` of three `SettingsRow`s, each a
- * ladder stepper, the same composition `WatchdogGroup` makes of its three ladders). Three knobs: how many failed ticks in a row halt a project, and the two
- * caps a tick job applies when its prompt carries no `--max-plans` / `--max-prs` flag (#378) — how many plans may wait in `plan-review` before a tick stops
- * grooming, and how many `execute/*` PRs may be open before it stops executing. A job's flag still wins over either cap: a number written into one
- * schedule's prompt is a fact about that schedule, and this card sets the default for every job on this machine that does not say.
+ * The tick breaker's Settings card (tick-breaker spec, "Settings"; drawn to `.claude/DESIGN.md` §8.6 — a `SettingsGroup` of four `SettingsRow`s, three ladder
+ * steppers and one switch, the composition `WatchdogGroup` makes of its ladders). Four knobs: how many failed ticks in a row halt a project, the two caps a
+ * tick job applies when its prompt carries no `--max-plans` / `--max-prs` flag (#378) — how many plans may wait in `plan-review` before a tick stops grooming,
+ * and how many `execute/*` PRs may be open before it stops executing — and, the switch, whether a tick's execute may arm auto-merge on a low-risk diff. A job's
+ * flag still wins over either cap: a number written into one schedule's prompt is a fact about that schedule, and this card sets the default for every job on
+ * this machine that does not say.
  *
- * It sits on the SHARED page, under the watchdog, for the reason the watchdog does: `tick.json` is a file on the API host, read by the server and by
- * `tick.mjs` alike, so a phone and a laptop that open this board are editing the same three numbers. The card's pill says `this machine`, as the Shared page's other host cards do: the setting binds every tick job that runs on this machine,
- * whichever process is asking.
+ * It sits on the SHARED page, under the watchdog, for the reason the watchdog does: `tick.json` is a file on the API host, read by the server and by `tick.mjs`
+ * alike, so a phone and a laptop that open this board are editing the same settings. The card's pill says `this machine`, as the Shared page's other host cards
+ * do: the setting binds every tick job that runs on this machine, whichever process is asking.
  *
  * Ladder steppers over 1–10 (`NumberField` ladder mode, `−` / `+`, no textbox), not free number fields, for `WatchdogGroup`'s reason: the server clamps `haltAfter` to `TICK_HALT_LIMITS` and each cap to `TICK_CAP_LIMITS`
  * quietly and a POST outside them is a 400, so a free-text field could be typed past the bound and silently snap. The options are built from the same shared
@@ -29,9 +30,10 @@ import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../../shared/types';
  * Three states beside the ordinary one, each with its own wording rather than a shared "something went wrong":
  *   - no answer yet (the first GET failed): a one-line notice and NO control — there is no value to bind a stepper to, and a stepper defaulting to 3 would be
  *     a setting that was never read presented as one that was;
- *   - `source: "unreadable"`: `tick.json` exists and cannot be parsed. The server shows all three numbers at their defaults for display only and refuses
- *     every write (409, file untouched), so all three steppers are DISABLED together and the first row's hint names the file and says what to do — the one fix is by hand, and offering a control that
- *     can only fail would be the silent no-op this card exists to avoid. The Ticks page's own figures are unaffected: they read `state.json`, not this file;
+ *   - `source: "unreadable"`: `tick.json` exists and cannot be parsed. The server shows all three numbers (and the switch, off) at their defaults for display
+ *     only and refuses every write (409, file untouched), so all three steppers and the switch are DISABLED together and the first row's hint names the file
+ *     and says what to do — the one fix is by hand, and offering a control that can only fail would be the silent no-op this card exists to avoid. The Ticks
+ *     page's own figures are unaffected: they read `state.json`, not this file;
  *   - a refused save (`saveError`): one `role="alert"` row under the controls, saying the pick was not saved and that the values shown are the ones still
  *     on the server. Each pick posts only its own key, so a refusal can leave no stepper off the server's value. `data` is intact in that state, which is why it is a field of its own beside the failed-GET `error` (`useTicks`' comment has the argument).
  */
@@ -123,7 +125,6 @@ export function TickGroup() {
       <SettingsRow
         name="Auto-merge low-risk PRs"
         hint="ticked executes arm auto-merge and fix when the PR is docs-only, tests-only or a small patch"
-        more="Applies to every execute a tick launches in PR mode on this machine; a person's own launch keeps its own Auto-merge if low-risk pick."
       >
         <Switch
           label="Auto-merge low-risk PRs"

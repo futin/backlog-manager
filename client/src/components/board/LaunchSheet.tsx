@@ -47,8 +47,8 @@ import type { BacklogItem, ExecuteFinish, ItemDispatchResult, LaunchSurface, Per
  *
  * A `groom` on the home machine picks its finish the same way, seeded from its own Settings default; a groom sent to another machine has no finish at all
  * (the server 400s one) and draws only the clause line, which then reads the commit rule the server appends. Under PR, for either action, two Switches —
- * auto-merge, and fix-if-it-fails beneath it — ride as booleans beside `finish`/`base` and change the clause line as they flip. They are the §8.2/§8.6 Switch
- * row the remote-control toggle already uses.
+ * auto-merge, and fix-if-it-fails beneath it — ride as booleans beside `finish`/`base` and change the clause line as they flip; an execute under PR draws a
+ * third, "auto-merge if low-risk", beneath them, the alternative to auto-merge. They are the §8.2/§8.6 Switch row the remote-control toggle already uses.
  *
  * An execute or a groom on the home machine may open in the Claude desktop app instead of the dashboard's headless `claude`: an "Open in" Dashboard |
  * Desktop control, the §8.2/§8.6 pill `Segmented`, drawn only when the plan carries `launchSurface` — home's dashboard said `desktopAvailable` — and
@@ -196,20 +196,24 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           remoteControl,
           // An execute, and a groom on home, always name their finish, even untouched — the server appends the closing clause from it, so an absent key
           // would read as in-place whatever the sheet showed. `base`, `autoMerge` and `fix` ride only under PR: a base or a toggle picked and then
-          // abandoned must not reach an in-place launch, which the server refuses; under PR both booleans are always present, and `fix` is sent as
-          // `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote groom and a capture send none of the four keys: the
-          // server 400s a finish on either, and a remote groom's clause is always the commit rule.
+          // abandoned must not reach an in-place launch, which the server refuses; under PR `autoMerge` and `fix` are always present (and, for an
+          // execute, `lowRiskAutoMerge`), and `fix` is sent as `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote
+          // groom and a capture send none of the five keys: the server 400s a finish on either, and a remote groom's clause is always the commit rule.
           // `reviewer` is `{}` unless an execute's PR pick differs from Settings, so every other launch's body is unchanged.
-          ...(hasFinish ? (finish === 'pr' ? {
-                    finish,
-                    base,
-                    autoMerge,
-                    fix: autoMerge && fix,
-                    // Execute only, like the clause: a groom has no low-risk path and the server 400s `true` there, and an in-place launch sends no key.
-                    // The explicit auto-merge wins, so the flag goes out false while it is on whatever the stored value is.
-                    ...(isExecute ? { lowRiskAutoMerge: !autoMerge && lowRisk } : {}),
-                    ...reviewer
-                  } : { finish }) : {}),
+          ...(hasFinish
+            ? finish === 'pr'
+              ? {
+                  finish,
+                  base,
+                  autoMerge,
+                  fix: autoMerge && fix,
+                  // Execute only, like the clause: a groom has no low-risk path and the server 400s `true` there, and an in-place launch sends no key. The
+                  // explicit auto-merge wins, so the flag goes out false while it is on whatever the stored value is.
+                  ...(isExecute ? { lowRiskAutoMerge: !autoMerge && lowRisk } : {}),
+                  ...reviewer
+                }
+              : { finish }
+            : {}),
           // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
           // picker existed (Review Focus 1).
           ...runOn.request,
@@ -314,7 +318,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               groom draws it too, with no finish to read: the server appends the commit rule to it, and `in-place` is what yields exactly that. */}
           {(isExecute || isGroom) && (
             <div className="sheet-note">
-              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix, lowRiskAutoMerge: isExecute && !autoMerge && lowRisk, ...reviewer })}
+              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, {
+                autoMerge,
+                fix,
+                lowRiskAutoMerge: isExecute && !autoMerge && lowRisk,
+                ...reviewer
+              })}
             </div>
           )}
 
@@ -341,8 +350,9 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             </div>
           )}
 
-          {/* The PR finish's two Switches, the remote-control row's §8.2/§8.6 shape. Fix is disabled, not hidden, while auto-merge is off: it only means
-              something once GitHub is waiting to merge, and a dead control with its reason in `title` says that where a missing one would not. */}
+          {/* The PR finish's Switches (a third, "auto-merge if low-risk", for an execute), the remote-control row's §8.2/§8.6 shape. Fix is disabled, not
+              hidden, while auto-merge is off: it only means something once GitHub is waiting to merge, and a dead control with its reason in `title` says that
+              where a missing one would not. */}
           {isPr && (
             <>
               <div className="sheet-check">

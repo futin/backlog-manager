@@ -521,9 +521,10 @@ export class AgentsService {
     if (req.surface === 'desktop' && !m.home) {
       throw new HttpException({ error: `the desktop app opens only on this machine, not on ${m.label}` }, 400);
     }
-    //   8. An execute or groom body carrying a `--finish`, `--base`, `--auto-merge`, `--fix` or `--low-risk-auto-merge` token. The pickers and checkboxes are the only channel for any
-    //      of them: the clause appended below is built from validated values alone, so a typed `--finish pr` under an In place pick would reach the skill
-    //      beside `COMMIT_RULE` (which carries no token) and push, a typed `--base develop` beside the clause's own `--base main` would leave the session
+    //   8. An execute or groom body carrying a `--finish`, `--base`, `--auto-merge`, `--fix` or `--low-risk-auto-merge` token. The pickers
+    //      and checkboxes are the only channel for any of them: the clause appended below is built from validated values alone, so a typed
+    //      `--finish pr` under an In place pick would reach the skill beside `COMMIT_RULE` (which carries no token) and push, a typed
+    //      `--base develop` beside the clause's own `--base main` would leave the session
     //      two bases, and a typed `--auto-merge` under a plain PR pick would arm a merge nobody chose. The skill reads the token as the signal wherever it
     //      appears in the trigger, and the board's own clause spells it inside backticks, so a body that quotes, backticks or parenthesises the token
     //      (`--finish pr`, "--finish pr", (--base x)) steers the session as surely as a bare one. The pattern therefore asks only that no word character or

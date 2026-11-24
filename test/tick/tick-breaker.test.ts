@@ -106,11 +106,27 @@ describe('readTickFile / writeTickFile', () => {
       for (const raw of ['true', 1, null, [true]]) expect(readTickFile(withFile({ lowRiskAutoMerge: raw }))).toMatchObject({ lowRiskAutoMerge: false });
     });
     it('an absent file is the default', () => {
-      expect(readTickFile(join(dir, 'nope.json'))).toEqual({ ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'default' });
+      expect(readTickFile(join(dir, 'nope.json'))).toEqual({
+        ok: true,
+        haltAfter: 3,
+        maxPlans: 3,
+        maxPrs: 2,
+        lowRiskAutoMerge: false,
+        resetAt: {},
+        source: 'default',
+      });
     });
 
     it('a file is read, haltAfter clamped and non-integers read as 3', () => {
-      expect(readTickFile(withFile({ haltAfter: 5 }))).toEqual({ ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'file' });
+      expect(readTickFile(withFile({ haltAfter: 5 }))).toEqual({
+        ok: true,
+        haltAfter: 5,
+        maxPlans: 3,
+        maxPrs: 2,
+        lowRiskAutoMerge: false,
+        resetAt: {},
+        source: 'file',
+      });
       expect(readTickFile(withFile({ haltAfter: 0 }))).toMatchObject({ haltAfter: 1 });
       expect(readTickFile(withFile({ haltAfter: 42 }))).toMatchObject({ haltAfter: 10 });
       expect(readTickFile(withFile({ haltAfter: '7' }))).toMatchObject({ haltAfter: 3 });

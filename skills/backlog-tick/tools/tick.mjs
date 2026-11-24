@@ -490,7 +490,9 @@ async function cmdDecide(argv) {
     // 45 minutes after opening its PR, so a job that passed a shorter `--lock-ttl` would see the lock recovered under a live session. The field tells the
     // skill (and the board's log) which of the three it got — `true`, `false` (setting off) or the veto sentence — and exists on no other verdict.
     let lowRisk = false;
-    if (settings.lowRiskAutoMerge) lowRisk = opts.lockTtl >= LOW_RISK_MIN_LOCK_TTL_MIN ? true : `off: lock TTL ${opts.lockTtl} min < ${LOW_RISK_MIN_LOCK_TTL_MIN}`;
+    if (settings.lowRiskAutoMerge) {
+      lowRisk = opts.lockTtl >= LOW_RISK_MIN_LOCK_TTL_MIN ? true : `off: lock TTL ${opts.lockTtl} min < ${LOW_RISK_MIN_LOCK_TTL_MIN}`;
+    }
     const args = `${pick.id} --finish pr${opts.base === null ? '' : ` --base ${opts.base}`}${lowRisk === true ? ' --low-risk-auto-merge' : ''} ${MARKER}`;
     return act(dir, ctx, base, now, opts, caps, say, {
       kind: 'execute',

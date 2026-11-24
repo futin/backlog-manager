@@ -879,6 +879,8 @@ describe('inReviewBlock', () => {
   it('pr-mode.md quotes the low-risk auto-merge sentence', () => {
     const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
     expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { lowRiskAutoMerge: true }));
+    // §9: the low-risk line sits above the PR URL, which stays last — `backlog-tick` records an execute `ok` only when the message ends with it.
+    expect(prMode).toContain('The PR URL stays the message\'s last line');
   });
 
   /* The procedure's load-bearing literals: the one line a not-allowed repo gets (a person greps the final message for it), the two soft bounds the spec

@@ -1,7 +1,7 @@
-// backlog-execute's low-risk diff classifier. After execute opens a PR with `--low-risk-auto-merge`, it runs `low-risk.mjs --base <base>` in its tree and only a
-// verdict of `lowRisk: true` lets it arm GitHub auto-merge. The rules are the spec's "The classifier" (docs/superpowers/specs/2026-11-24-execute-low-risk-auto-
-// merge-design.md) and must hold on ANY registered project, so nothing here reuses `scripts/ci-scope.mjs`, whose prefixes are this repo's. They are constants,
-// not per-project configuration.
+// backlog-execute's low-risk diff classifier. After execute opens a PR with `--low-risk-auto-merge`, it runs `low-risk.mjs --base <base>` in its tree and only
+// a verdict of `lowRisk: true` lets it arm GitHub auto-merge. The rules are the spec's "The classifier"
+// (docs/superpowers/specs/2026-11-24-execute-low-risk-auto-merge-design.md) and must hold on ANY registered project, so nothing here reuses
+// `scripts/ci-scope.mjs`, whose prefixes are this repo's. They are constants, not per-project configuration.
 //
 // Exit codes: 0 for either verdict (a git failure is a `lowRisk: false` verdict whose reason is git's error, never a crash), 2 for a usage error.
 //

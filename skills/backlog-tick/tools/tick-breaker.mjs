@@ -65,7 +65,15 @@ export function readTickSettings(file = tickSettingsFile()) {
     text = fs.readFileSync(file, 'utf8');
   } catch (e) {
     if (e && e.code === 'ENOENT') {
-      return { ok: true, haltAfter: HALT_DEFAULT, maxPlans: MAX_PLANS_DEFAULT, maxPrs: MAX_PRS_DEFAULT, lowRiskAutoMerge: false, resetAt: {}, source: 'default' };
+      return {
+        ok: true,
+        haltAfter: HALT_DEFAULT,
+        maxPlans: MAX_PLANS_DEFAULT,
+        maxPrs: MAX_PRS_DEFAULT,
+        lowRiskAutoMerge: false,
+        resetAt: {},
+        source: 'default',
+      };
     }
     return { ok: false, file, error: e instanceof Error ? e.message : String(e) };
   }

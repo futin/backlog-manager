@@ -172,8 +172,8 @@ export class TickService {
   }
 
   /**
-   * `POST /api/ticks/config` — any non-empty subset of the three numbers, already validated by the controller; a key the patch does not carry keeps its value
-   * on file. Throws `TickFileUnreadable` (the controller's 409) and writes nothing in that case.
+   * `POST /api/ticks/config` — any non-empty subset of the three numbers and the boolean, already validated by the controller; a key the patch does not carry
+   * keeps its value on file. Throws `TickFileUnreadable` (the controller's 409) and writes nothing in that case.
    */
   setConfig(patch: TickConfigPatch): TicksPayload {
     writeTickFile(patch, tickFile());

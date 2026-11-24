@@ -80,7 +80,15 @@ test('readTickSettings — an absent file is the default', (t) => {
 });
 
 test('readTickSettings — a file is read, haltAfter clamped and non-integers read as 3', (t) => {
-  assert.deepEqual(readTickSettings(withFile(t, { haltAfter: 5 })), { ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'file' });
+  assert.deepEqual(readTickSettings(withFile(t, { haltAfter: 5 })), {
+    ok: true,
+    haltAfter: 5,
+    maxPlans: 3,
+    maxPrs: 2,
+    lowRiskAutoMerge: false,
+    resetAt: {},
+    source: 'file',
+  });
   assert.equal(readTickSettings(withFile(t, { haltAfter: 0 })).haltAfter, 1);
   assert.equal(readTickSettings(withFile(t, { haltAfter: 42 })).haltAfter, 10);
   assert.equal(readTickSettings(withFile(t, { haltAfter: '7' })).haltAfter, 3);

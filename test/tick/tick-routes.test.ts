@@ -58,7 +58,8 @@ describe('the tick breaker routes', () => {
     writeFileSync(file, JSON.stringify(raw, null, 2));
   }
 
-  const readFile = (): { haltAfter: number; maxPlans: number; maxPrs: number; lowRiskAutoMerge?: boolean; resetAt: Record<string, string> } => JSON.parse(readFileSync(file, 'utf8'));
+  const readFile = (): { haltAfter: number; maxPlans: number; maxPrs: number; lowRiskAutoMerge?: boolean; resetAt: Record<string, string> } =>
+    JSON.parse(readFileSync(file, 'utf8'));
   const row = (body: TicksPayload, root: string): TickProject => body.projects.find((p) => p.root === root)!;
 
   beforeEach(() => {
