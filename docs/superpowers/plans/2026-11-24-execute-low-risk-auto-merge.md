@@ -60,8 +60,8 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
 - Follow the repo's `isMain` main-guard twin (`skills/backlog/tools/backlog.mjs:3846`). `scripts/run-as-main.test.mjs:27-36` lists one row per tool and
   `:94` walks every `skills/*/tools` dir for files carrying the guard, so add a row: `script: 'skills/backlog-execute/tools/low-risk.mjs', args: [],
   status: 2, output: 'usage: low-risk.mjs'`. Missing `--base` → exit 2 with stderr `usage: low-risk.mjs --base <base>`.
-- The CLI ends `process.exitCode = main(...)` (synchronous; `.claude/rules/skills.md` "Every skill CLI ends with…"), and `low-risk.mjs` joins `CLI_SOURCES`
-  in `skills/backlog/tools/backlog.test.mjs:3702`.
+- The CLI ends `process.exitCode = main(...)` (synchronous; `.claude/rules/skills.md` "Every skill CLI ends with…"), and `low-risk.mjs` joins both
+  `CLI_SOURCES` (`skills/backlog/tools/backlog.test.mjs:3702`) and `ENTRY_SHAPES` (`:3745`, as `['process.exitCode = main(']`).
 
 - [ ] **Step 1: Write the failing tests** (`classify` table, then two CLI tests in a temp git repo with an `origin` remote)
 
@@ -219,7 +219,9 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
     switch label "Auto-merge low-risk PRs"; toggling POSTs exactly `{ lowRiskAutoMerge: <new> }`; unreadable source → switch disabled like the caps.
 - [ ] **Step 2: Run** `pnpm run test:jest test/tick test/settings/settings-tick.test.tsx` — FAIL.
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** the same — PASS; `pnpm run typecheck` — clean.
+- [ ] **Step 4: Run** the same — PASS; `pnpm run typecheck` — clean. The stricter `isTicksPayload` rejects fixtures without the field:
+  `grep -ln "maxPlans\|useTicks" test/` (today also `test/board/poll-coalescing.test.tsx`, `test/agents/plan-review-chip.test.tsx`,
+  `test/agents/plan-review-lib.test.ts`), give each `TicksPayload` fixture `lowRiskAutoMerge: false`, and run every hit — PASS.
 - [ ] **Step 5: Commit** `feat(tick): lowRiskAutoMerge in tick.json and Settings`.
 
 ### Task 6: `tick.mjs` — read the setting, append the flag, report it
@@ -255,8 +257,7 @@ where this plan and the spec disagree, the spec wins and the disagreement is a b
 - Modify: `skills/backlog-execute/references/auto-merge.md:1-5` (third caller)
 - Modify: `docs/subsystems/skills.md` (backlog-execute's flags and the backlog-tick section's `tick.json` keys), `docs/subsystems/board.md` (launch sheet
   and Settings rows), `docs/subsystems/api.md` (dispatch body and `/api/ticks/config`), `docs/subsystems/invariants.md` (the auto-merge invariant entry),
-  `docs/workflows/development.md` where it lists `tick.json` keys. There is no separate tick doc: `grep -n "maxPrs\|tick.json\|auto-merge" docs/` is the
-  edit map.
+  There is no separate tick doc: `grep -n "maxPrs\|auto-merge" docs/subsystems/` is the edit map.
 - Modify: `.claude/rules/orchestrator.md:52-53` ("With `--auto-merge` either may then arm…" gains the low-risk route)
 - Test: `test/agents/agents-shared.test.ts` (extend, beside the pr-mode pins at `:863-899`); `test/guards/claude-rules.test.ts` (run)
 
