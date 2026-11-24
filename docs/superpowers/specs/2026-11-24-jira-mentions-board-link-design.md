@@ -21,7 +21,7 @@ user works tickets; the **Mentions** page is where the user sees who asked them 
 
 - **Board → mention.** Wherever the board draws a ticket that holds an open (not dismissed) mention, it draws an amber **mention marker**; clicking it opens the
   **mention modal** for that ticket, over the page the user is on.
-- **Mention → ticket.** The Mentions page and its modal offer **Open ticket**, which opens the **ticket page** (`?section=jira&ticket=<KEY>`) with origin
+- **Mention → ticket.** The Mentions page and its modal offer **Open ticket page**, which opens the **ticket page** (`?section=jira&ticket=<KEY>`) with origin
   `mentions`, so its `← Mentions` returns. This works for EVERY mention — the ticket page reads `fetchJiraDetail` by key and needs no board.
 - **One mentions payload for the whole section.** The board's marker, the Mentions page and the mention modal read one poll, so a Dismiss in the modal clears
   the board's marker on the same render, and no two readers disagree for an interval.
@@ -36,12 +36,13 @@ user works tickets; the **Mentions** page is where the user sees who asked them 
 
 ## Anti-goals
 
-- **A second mentions poller.** Two `useJiraMentions` instances would be two timers on one cache and two newest-read counters — exactly what the mentions
-  spec's "One read per page mount" and `board.md`'s poller rule exist to prevent. If the build ends with the hook called in two places, it failed.
+- **A second mentions poller.** Two `useJiraMentions` instances would be two timers on one cache and two newest-read counters — exactly what
+  `JiraMentionsView`'s header ("One read per page mount") and `board.md`'s poller rule exist to prevent. If the build ends with the hook called in two places, it failed.
 - **The marker lagging a Dismiss.** Dismiss in the modal, close it, and the card still saying "asks you" until the next poll is a failure even though every
   piece "works".
-- **Polling mentions while the Jira section is closed.** The rail count already comes from the status payload's `mentions` summary (`SideRail`), which is the
-  only reader outside the section; a shell-wide poll on top of it would read the cache every 3 min for nobody.
+- **Polling mentions while the Jira section is closed.** The two readers outside the section — the rail count (`SideRail`) and the Jira chip's popover
+  `Mentions` row (`JiraChip`) — both read the status payload's `mentions` summary, never `useJiraMentions`; a shell-wide poll on top of them would read the
+  cache every 3 min for nobody.
 
 ## Approaches (picked in the conversation)
 
@@ -75,7 +76,13 @@ and the mentions spec's own premise is that most mentions sit on no tracked boar
 A small amber chip, the shape the board already uses for a count that waits on the reader (`DESIGN.md`: amber when something waits on the reader; the
 mark `--amber-solid`, its word `--amber-ink` on the tint, as the warn pill does). Content `@ N`, where N is the ticket's open mentions (`mentions.length` of
 the ticket's entry in `data.issues`; `dismissed` tickets draw nothing). Accessible name and `title`: `1 mention waits for your answer` /
-`<n> mentions wait for your answer`. It is a `<button>`; its click opens the mention modal (§4) and never reaches the card's or row's own open.
+`<n> mentions wait for your answer`. It is a `<button>`; its click opens the mention modal (§4) and never reaches the card's or row's own open — it stops
+`click`, `auxclick` and an Enter/Space `keydown` from bubbling, the three `JiraCard`'s own handlers listen for (`JiraCard.tsx`'s `Contained` is the
+pattern), so a keyboard press or middle-click on the marker never opens Detail or the ticket page. Tests cover the keyboard and middle-click cases.
+
+**One home each** (`board.md`: one `components/ui/` home per look, one `lib/` home per derivation): the look is a new `components/ui/MentionMark.tsx` — a
+`<button>` worn as the warn-tone `Pill` (`ui-pill` warn: amber tint, `--amber-ink` word), not `Marker` (a marker is an unfilled word, not a control); the
+words are one `lib/jira-mentions.ts` function returning the `@ N` label and the `title` sentence for a count. All four homes draw `MentionMark`.
 
 Where it draws, and nowhere else:
 
@@ -84,7 +91,7 @@ Where it draws, and nowhere else:
 | Board card (`JiraCard`) | In `.jira-card-head`, after the key (before the crumb). |
 | Lane header (`JiraLaneHeader`) — a parent on the board is drawn here, never as a card | Beside the header's key. |
 | List row (`JiraIssueList`): card rows AND the board-header row (kind `board`, the parent itself) — not the `none` lane row | In the summary cell, after the title, before `jira-issues-under`. |
-| Summary strip (`JiraTicketStrip`, so both `JiraDetail` and `JiraTicketPage`) | A `Mentions` cell: `@ N waiting`, the button. Absent when N is 0. |
+| Summary strip (`JiraTicketStrip`, so both `JiraDetail` and `JiraTicketPage`) | A `Mentions` cell, the strip's last (after `Agent`): `MentionMark` (`@ N`). Absent when N is 0. |
 
 Parents are in on purpose (user, 2026-11-24): a story or epic with children on the board is in no column (DESIGN.md §8.9.1), and questions are often
 asked on exactly those. DESIGN.md §8.9.1's lane-header description gains the marker.
@@ -96,13 +103,17 @@ The lookup is a `Map<key, JiraMentionIssue>` built from `data.issues` once per p
 so each card's read is one `get`. A payload that is `null`, unconfigured, or whose `polledAt` is null draws no marker — "not checked" is never "none", but it
 is also never a guess.
 
-### 3. Open ticket (mention → ticket)
+### 3. Open ticket page (mention → ticket)
 
-- **List row** (`JiraMentionList`): an `Open ticket` action in the hover action cell, before `Open in Jira`. **Card** (`JiraMentionCards`): the same, before
-  `Reply in Jira`. Dismissed rows (Show dismissed on) offer it too — reading the ticket is not answering it.
-- **Mention modal**: the right column's "This ticket is on none of your boards, so the board cannot open it." note is replaced by an **Open ticket** button
-  under the ticket facts, drawn for every ticket; the head's "· on none of your boards" stays (it is still true and still useful). Its click closes the modal
-  and opens the ticket page.
+The control is worded **`Open ticket page`** everywhere, never `Open ticket` — the modal already has `Open ticket in Jira`, and the two must not read alike.
+- **List row** (`JiraMentionList`): an icon-only `Chip size={28}`, matching its `Open in Jira` neighbour, in the hover action cell before it; glyph: the
+  one Detail's `Open full page ↗` chip uses; `aria-label` and `title` `Open ticket page`. **Card** (`JiraMentionCards`): a text `Chip size={28}`
+  `Open ticket page`, before `Reply in Jira`. Dismissed rows (Show dismissed on) offer it too — reading the ticket is not answering it.
+- **Mention modal**: the right column's "This ticket is on none of your boards, so the board cannot open it." note is removed. A text chip
+  `Open ticket page` joins `Open ticket in Jira` in that column's chip row, before it, for every ticket; the head's "· on none of your boards" stays (still
+  true, still useful). Its click closes the modal and opens the ticket page. **An unposted edit in the reply box is dropped, exactly as Close and Escape
+  already drop it** (the box's text is local state, `JiraMentionModal`'s draft box); the server-held draft survives and is there on return. No new guard: a
+  guard on this one exit and not the other two would be inconsistent.
 - All three call one `onOpenPage(key)` threaded from `JiraView` — its existing `openPage`, which already computes the origin from the current page
   (`mentions` → `← Mentions`) and pushes the key store. A Cmd-, Ctrl- or middle-click on a mention row's key opens the page too, as a card's does on the board.
 
@@ -116,18 +127,24 @@ is also never a guess.
   steps per ticket — so no tested page behaviour is rewritten. The board's caller computes its own, simpler walk (below).
 - `JiraView` holds a `mentionOpen` slot beside `walk` and `launch`, cleared on a page change like them. The marker sets it with the ticket's newest mention;
   the walk (`Mention i of N`) runs over **that ticket's** open mentions, newest first — the board has no mentions order of its own.
+- **The board walk when the payload moves under it.** The slot holds the opened snapshot `{ issue, mention }`, so the dialog never vanishes from under the
+  reader. Every render re-reads the ticket's entry from the live payload: the order is its current `mentions`, `position`/`onPrev`/`onNext` come from the
+  shown mention's place in it, and `state` is the page's own mapping (`MentionTicketState`: open, dismissed when the ticket is in `dismissed`, `gone` when
+  in neither — answered or posted). A shown mention no longer in the order (Dismiss, a posted reply, answered elsewhere) draws no position and no
+  neighbours, as the page draws a stop that left its order; a NEW mention arriving mid-walk joins the order and the position recounts.
 - Stacking: opened from a card or row it is the only dialog. Opened from `JiraDetail`'s strip it mounts over the ticket modal and ranks above it by mount
   order (`useDialogEscape`), so Escape closes the mention modal and leaves the ticket modal up. On the ticket page it opens over the page. The Escape-stack
   dialog count in `board.md` does not change — it is the same dialog, with a second home.
-- Its **Open ticket** from `JiraView`: on the ticket page for the same key it only closes; elsewhere it calls `openPage` unchanged, so the origin is the
+- Its **Open ticket page** from `JiraView`: on the ticket page for the same key it only closes; elsewhere it calls `openPage` unchanged, so the origin is the
   page the user is on — `board`, or `sessions` for a `JiraDetail` opened from the Sessions page (my call: `← Sessions` is where that user came from).
 - After a Dismiss, the modal keeps its "Dismissed. It comes back…" footer with Undo (unchanged), and the marker behind it is gone on the same render.
 
 ## Constraints
 
 - **Rule files that change** (each in the same PR as the code): `board.md` — the client-poller bullet (`useJiraMentions` is called once, by
-  `JiraMentionsProvider`, gated on the section being open), and the mention modal's homes; `DESIGN.md` — the marker under the card and List row sections and
-  §8.9.7's Open ticket. The mentions spec gets a one-line "Superseded in part by" pointer at its "board cannot open it" note. `invariants.md` needs no change
+  `JiraMentionsProvider`, gated on the section being open), the mention modal's homes, and the Jira-pages bullet that lists every link reaching the ticket
+  page (it gains the Mentions row, card and modal `Open ticket page`, mirrored in `JiraView`'s header); `DESIGN.md` — the marker under the card and List row sections and
+  §8.9.7's Open ticket page. The mentions spec gets a one-line "Superseded in part by" pointer at its "board cannot open it" note. `invariants.md` needs no change
   (no new rendered-age cache: the marker shows no age).
 - **Source guards.** Before pushing, `grep -l` each symbol the diff adds a caller of (`useJiraMentions`, `useJiraMentionsContext`, `JiraMentionModal`,
   `openPage`) in `test/` and add every hit to the scoped run (CLAUDE.md). If a guard pins `useJiraMentions`' caller list, it moves to the provider.
@@ -139,7 +156,7 @@ is also never a guess.
   called unconditionally — React's rules — so most likely an input).
 - Test shape: a provider-level test that one mount = one timer and that a closed section reads nothing; marker tests on card, lane header, both List row
   kinds and the strip (N, dismissed →
-  none, `polledAt` null → none, click opens the modal and not the card); Open ticket tests on row, card and modal (origin `mentions`); a Dismiss-from-board
+  none, `polledAt` null → none, click opens the modal and not the card); Open ticket page tests on row, card and modal (origin `mentions`); a Dismiss-from-board
   test asserting the marker is gone on the next render with no extra read.
 - Final task: `/ui-verify` on the live board — a card, a lane header, a List card row and header row, and the strip with a marker, the modal over each, and
-  Open ticket landing on the page.
+  Open ticket page landing on the page.
