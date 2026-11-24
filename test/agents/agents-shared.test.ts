@@ -10,6 +10,9 @@ import {
   deriveAction,
   dispatchBlock,
   dispatchGate,
+  FINISH_FLAG,
+  defuseFinishFlags,
+  reviewFlags,
   finishClause,
   EXECUTE_HELD_REASON,
   IN_REVIEW_NO_PR_REASON,
@@ -872,6 +875,12 @@ describe('inReviewBlock', () => {
     expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { autoMerge: true, fix: true }));
   });
 
+  /* Same seam for the third sentence: §1 quotes it so a session can tell `--low-risk-auto-merge` came from the board's "auto-merge if low-risk" pick. */
+  it('pr-mode.md quotes the low-risk auto-merge sentence', () => {
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { lowRiskAutoMerge: true }));
+  });
+
   /* The procedure's load-bearing literals: the one line a not-allowed repo gets (a person greps the final message for it), the two soft bounds the spec
      states in the file, the `--auto --<method>` spelling that arms rather than merges, and the force-push ban the fix loop's merge-of-base relies on. */
   it('auto-merge.md names the exact not-allowed line, the 45-minute and 3-round bounds, and forbids force-push', () => {
@@ -1161,6 +1170,31 @@ describe('finishClause', () => {
     );
   });
 
+  /* The third form: GitHub auto-merge armed only if the classifier calls the diff low-risk. The sentence is pinned literally, not rebuilt from the function. */
+  it('low-risk auto-merge is its own sentence, and its flag sits inside the backticks', () => {
+    expect(finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --low-risk-auto-merge`: the skill commits, reviews, pushes and opens the PR into main, then arms GitHub ' +
+        "auto-merge and fixes failing checks and conflicts with main only if the PR's diff is docs-only, tests-only or a small patch; the skill never merges itself."
+    );
+  });
+
+  it('low-risk auto-merge puts the review flags after its own flag, in the auto-merge form\'s order', () => {
+    const review = DEFAULT_REVIEW_CONFIG;
+    const clause = finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true, review });
+    expect(clause).toContain(`\`--finish pr --base main --low-risk-auto-merge ${reviewFlags(review).join(' ')}\``);
+  });
+
+  it('the explicit --auto-merge wins over low-risk auto-merge', () => {
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, lowRiskAutoMerge: true })).toBe(finishClause('execute', 'pr', 'main', { autoMerge: true }));
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true, lowRiskAutoMerge: true })).toBe(
+      finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true })
+    );
+  });
+
+  it('low-risk auto-merge is ignored for in-place, as auto-merge is', () => {
+    expect(finishClause('execute', 'in-place', 'main', { lowRiskAutoMerge: true })).toBe(COMMIT_RULE);
+  });
+
   it('fix alone is ignored', () => {
     expect(finishClause('execute', 'pr', 'main', { fix: true })).toBe(EXEC_PR);
     expect(finishClause('groom', 'pr', 'main', { fix: true })).toBe(GROOM_PR);
@@ -1172,7 +1206,7 @@ describe('finishClause', () => {
      assert something. */
   it('flags only inside the backticks', () => {
     const review = DEFAULT_REVIEW_CONFIG;
-    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }, { review }, { autoMerge: true, review }, { autoMerge: true, fix: true, review }];
+    const flagSets = [{}, { lowRiskAutoMerge: true }, { lowRiskAutoMerge: true, review }, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }, { review }, { autoMerge: true, review }, { autoMerge: true, fix: true, review }];
     for (const action of ['execute', 'groom'] as const) {
       for (const flags of flagSets) {
         const clause = finishClause(action, 'pr', 'main', flags);
@@ -1183,6 +1217,20 @@ describe('finishClause', () => {
         expect(clause.slice(0, open) + clause.slice(close + 1)).not.toContain('--');
       }
     }
+  });
+});
+
+describe('FINISH_FLAG and --low-risk-auto-merge', () => {
+  it('matches the flag as a whole token only', () => {
+    expect(FINISH_FLAG.test('x --low-risk-auto-merge y')).toBe(true);
+    expect(FINISH_FLAG.test('x --low-risk-auto-merge-ish')).toBe(false);
+    expect(FINISH_FLAG.test('pre--low-risk-auto-merge')).toBe(false);
+  });
+
+  it('defuseFinishFlags swaps its hyphens like the other finish flags', () => {
+    const out = defuseFinishFlags('a --low-risk-auto-merge b');
+    expect(out).not.toContain('--low-risk-auto-merge');
+    expect(out).toBe('a \u2011\u2011low-risk-auto-merge b');
   });
 });
 

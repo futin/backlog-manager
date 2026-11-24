@@ -1591,6 +1591,11 @@ export interface AgentDispatchRequest {
   autoMerge?: boolean;
   fix?: boolean;
   /**
+   * `--low-risk-auto-merge` (`FinishFlags`): the skill arms auto-merge only if its classifier calls the PR docs-only, tests-only or a small patch. Execute
+   * only, and only beside `finish: 'pr'`; the server owns the 400s for the rest.
+   */
+  lowRiskAutoMerge?: boolean;
+  /**
    * The sheet's Reviewer picker, sent only when it differs from the saved setting (`review.json`). Legal only for an `execute` whose DERIVED finish is `pr` —
    * a remote execute derives `pr` without sending `finish` — and a 400 on any other launch, groom included. Validated with `parseReviewConfig` and composed
    * into the finish clause's backticks by `reviewFlags`, never copied from caller text; absent leaves the clause byte-identical to what it was before.
@@ -1934,6 +1939,11 @@ export type FinishAction = 'execute' | 'groom';
 export interface FinishFlags {
   autoMerge?: boolean;
   fix?: boolean;
+  /**
+   * Arm GitHub auto-merge, and fix failing checks and base conflicts, only when the skill's diff classifier calls the PR docs-only, tests-only or a small
+   * patch (`--low-risk-auto-merge`). The explicit `autoMerge` wins over it, so beside `autoMerge` it changes nothing; `finishClause` ignores it for in-place.
+   */
+  lowRiskAutoMerge?: boolean;
   /** A validated reviewer override (`parseReviewConfig`): its `reviewFlags` go inside the clause's backticks, after `--auto-merge [--fix]`. */
   review?: ReviewConfig;
 }

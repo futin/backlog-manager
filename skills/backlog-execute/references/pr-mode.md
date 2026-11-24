@@ -33,7 +33,7 @@ trigger and refused an unknown or doubled `--finish`; this section settles `<bas
   commit and push where nobody asked for it.
 - **It is read once, from the trigger, and never re-read in the new worktree.**
 - **State the mode in one line and ask nothing:** `finish mode: pr → PR into <base>`, followed by `, auto-merge` and `, fix` for each of those flags the
-  trigger carries — `finish mode: pr → PR into <base>, auto-merge, fix` with both. SKILL.md's Finish mode section has already refused a flag that arrived
+  trigger carries, or `, auto-merge if low-risk` for `--low-risk-auto-merge` — `finish mode: pr → PR into <base>, auto-merge, fix` with both. SKILL.md's Finish mode section has already refused a flag that arrived
   without the ones it needs (`--auto-merge` needs `--finish pr`; `--fix` needs both).
 - **A board-dispatched prompt in `pr` mode ends with**
   ``Finish with `--finish pr --base <base>`: the skill commits, reviews, pushes and opens the PR into <base>, and never merges.``
@@ -45,6 +45,9 @@ trigger and refused an unknown or doubled `--finish`; this section settles `<bas
   — and with Auto-merge alone, the same sentence without ` --fix` inside the backticks and without the ", fixing … meanwhile" clause. The flags count only
   inside the backticks, exactly like `--finish pr`; the prose after the colon describes `references/auto-merge.md` and is no signal of its own. "The skill
   never merges itself" holds: arming auto-merge asks GitHub to merge, and GitHub performs the merge into `<base>`.
+- **With the sheet's "auto-merge if low-risk" pick, it ends instead with**
+  ``Finish with `--finish pr --base <base> --low-risk-auto-merge`: the skill commits, reviews, pushes and opens the PR into <base>, then arms GitHub auto-merge and fixes failing checks and conflicts with <base> only if the PR's diff is docs-only, tests-only or a small patch; the skill never merges itself.``
+  — the same flag-only-inside-the-backticks rule applies. It is `--auto-merge --fix` behind a classifier gate, not a different procedure.
 
 ## 2. Pick the tree
 
