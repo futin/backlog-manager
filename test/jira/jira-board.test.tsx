@@ -2917,7 +2917,9 @@ describe('the mention mark', () => {
     expect(open).toHaveBeenCalledWith('PAY-180');
     expect(onOpenIssue).not.toHaveBeenCalled();
     mark.focus();
+    open.mockClear();
     await userEvent.keyboard('{Enter}');
+    expect(open).toHaveBeenCalledWith('PAY-180');
     expect(onOpenIssue).not.toHaveBeenCalled();
     fireEvent(mark, new MouseEvent('auxclick', { bubbles: true, button: 1 }));
     expect(onOpenPage).not.toHaveBeenCalled();

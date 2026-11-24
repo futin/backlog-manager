@@ -75,7 +75,10 @@ export function JiraTicketStrip({
   const [moveOpen, setMoveOpen] = useState(false);
   const moveChip = useRef<HTMLButtonElement>(null);
   // The Mentions cell is drawn only when its mark will be: the index holds the key AND something above can open the modal, so an empty cell never shows.
-  const mentioned = useMentionIndex().has(src.key) && useOpenMention() !== null;
+  // Both hooks run on every render: a `&&` between the calls would skip the second one whenever the key has no entry.
+  const mentionIndex = useMentionIndex();
+  const openMention = useOpenMention();
+  const mentioned = mentionIndex.has(src.key) && openMention !== null;
   const moveReady = transitions !== null && transitions.length > 0;
 
   return (
