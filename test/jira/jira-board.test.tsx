@@ -20,6 +20,7 @@ import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, JIRA_LANE_FOLDS_KEY, LANE_INDENT_CAP,
 import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { NoGitlab } from '../helpers/no-gitlab';
+import { MentionWrap, mention, mentionIssue, mentionsPayload } from '../helpers/mention-stub';
 import { daysAgoStamp } from '../helpers/dates';
 import { readStyles, ruleBlock } from '../helpers/css-rule';
 import {
@@ -2876,5 +2877,107 @@ describe('modifier clicks open the ticket page', () => {
     expect(page()).toBe('board');
     expect(storedKey()).toBe('');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+/* The `@ N` mention mark on a card and on an on-board lane header (Jira mentions <-> board link, Task 5): the mentions payload is stubbed through
+   `MentionWrap`, the opener is a spy. PAY-180 is GROUP's standalone card and PAY-120 its on-board header. */
+describe('the mention mark', () => {
+  const mentions = (over = {}) =>
+    mentionsPayload({
+      issues: [
+        mentionIssue('PAY-180', [mention('a2', 'Ivo', 'newer', 'PAY-180', 0.1), mention('a1', 'Mara', 'older', 'PAY-180', 0.2)]),
+        mentionIssue('PAY-120', [mention('b1', 'Lukas', 'one', 'PAY-120', 0.3)])
+      ],
+      dismissed: [mentionIssue('PAY-162', [mention('c1', 'Tomas', 'set aside', 'PAY-162', 0.4)])],
+      ...over
+    });
+  async function mount(data = mentions()) {
+    const open = jest.fn();
+    const onOpenPage = jest.fn();
+    onOpenIssue = jest.fn();
+    lists[ALPHA.id] = GROUP;
+    render(
+      <MentionWrap data={data} open={open}>
+        <JiraProvider>
+          <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={onOpenIssue} onOpenPage={onOpenPage} onRun={jest.fn()} nudge={0} />
+        </JiraProvider>
+      </MentionWrap>,
+      { wrapper: NoGitlab }
+    );
+    await screen.findByText('Standalone task');
+    return { open, onOpenPage };
+  }
+
+  it('draws the count in the card head and opens the mention modal, not the card', async () => {
+    const { open, onOpenPage } = await mount();
+    const head = card('Standalone task').querySelector('.jira-card-head') as HTMLElement;
+    const mark = within(head).getByRole('button', { name: '2 mentions wait for your answer' });
+    await userEvent.click(mark);
+    expect(open).toHaveBeenCalledWith('PAY-180');
+    expect(onOpenIssue).not.toHaveBeenCalled();
+    mark.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onOpenIssue).not.toHaveBeenCalled();
+    fireEvent(mark, new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    expect(onOpenPage).not.toHaveBeenCalled();
+  });
+
+  it('draws nothing for a ticket with no entry, a dismissed ticket, or an unstamped cache', async () => {
+    await mount();
+    expect(within(card('Payout retries')).queryByRole('button', { name: /wait for your answer/ })).toBeNull();
+    expect(within(card('Ledger rounding fix')).queryByRole('button', { name: /wait for your answer/ })).toBeNull();
+    expect(document.querySelectorAll('.mention-mark')).toHaveLength(2);
+    cleanup();
+    await mount(mentions({ polledAt: null }));
+    expect(document.querySelector('.mention-mark')).toBeNull();
+  });
+
+  it('draws the mark in an on-board lane header and opens that key', async () => {
+    const { open } = await mount();
+    await userEvent.click(within(headOf('PAY-120')).getByRole('button', { name: '1 mention waits for your answer' }));
+    expect(open).toHaveBeenCalledWith('PAY-120');
+  });
+});
+
+describe('the mention mark in the List view', () => {
+  const data = mentionsPayload({
+    issues: [mentionIssue('PAY-180', [mention('a2', 'Ivo', 'newer', 'PAY-180', 0.1), mention('a1', 'Mara', 'older', 'PAY-180', 0.2)]), mentionIssue('PAY-120', [mention('b1', 'Lukas', 'one', 'PAY-120', 0.3)])]
+  });
+  async function mountList() {
+    setJiraView('list');
+    lists[ALPHA.id] = GROUP;
+    const open = jest.fn();
+    onOpenIssue = jest.fn();
+    render(
+      <MentionWrap data={data} open={open}>
+        <JiraProvider>
+          <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
+        </JiraProvider>
+      </MentionWrap>,
+      { wrapper: NoGitlab }
+    );
+    await waitFor(() => expect(document.querySelector('tr.jira-issues-row[data-key="PAY-180"]')).not.toBeNull());
+    return open;
+  }
+  const rowOf = (key: string): HTMLElement => document.querySelector<HTMLElement>(`tr.jira-issues-row[data-key="${key}"]`) as HTMLElement;
+
+  it('draws the mark right after the title, ahead of the lane chip and count, and never in the No parent lane row', async () => {
+    await mountList();
+    const kids = Array.from(rowOf('PAY-180').querySelectorAll('.jira-issues-summary .jira-issues-flex > *'));
+    const at = kids.findIndex((n) => n.classList.contains('mention-mark'));
+    expect(at).toBe(kids.findIndex((n) => n.classList.contains('jira-issues-title')) + 1);
+    const head = Array.from(rowOf('PAY-120').querySelectorAll('.jira-issues-summary .jira-issues-flex > *')).map((n) => n.className);
+    const m = head.findIndex((c) => c.includes('mention-mark'));
+    expect(m).toBeGreaterThan(-1);
+    expect(m).toBeLessThan(head.findIndex((c) => c.includes('jira-issues-under')));
+    expect(document.querySelector('tr[data-kind="none"] .mention-mark')).toBeNull();
+  });
+
+  it('a click on a row’s mark calls the opener with its key and leaves the row’s own open uncalled', async () => {
+    const open = await mountList();
+    await userEvent.click(within(rowOf('PAY-180')).getByRole('button', { name: '2 mentions wait for your answer' }));
+    expect(open).toHaveBeenCalledWith('PAY-180');
+    expect(onOpenIssue).not.toHaveBeenCalled();
   });
 });

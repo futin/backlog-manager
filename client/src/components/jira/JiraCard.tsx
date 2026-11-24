@@ -19,6 +19,7 @@ import { PriorityPill } from '../ui/PriorityPill';
 import { RepoMark } from '../ui/RepoMark';
 import { TreeMark } from '../ui/TreeMark';
 import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
+import { JiraMentionMarkFor } from './JiraMentionMarkFor';
 import { JiraRunMenu } from './JiraRunMenu';
 import { MrChip } from './MrChip';
 import { OpenChip, SessionOpen } from './SessionOpen';
@@ -35,6 +36,9 @@ import { OpenChip, SessionOpen } from './SessionOpen';
  *
  * **Everything the card prints comes from `lib/`.** The crumb's words are `crumbText`'s, the age `cardAgeStamp`'s (aged against the page's `now` so every
  * card shares one clock), the ended line `endedLine`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
+ *
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): in the head, after the key and before the crumb, a `JiraMentionMarkFor` that draws only while the ticket has open mentions
+ * and a `MentionOpenContext` opener exists above. Its press is stopped inside `MentionMark`, so it never also opens Detail.
  *
  * **The crumb never names the parent** (parent-lanes spec §3.4). The lane the card sits in already says it, so `crumbOf`'s `parent` kind draws nothing here;
  * the precedence — root, then parent, then mine — is unchanged, so a followed root still reads `root` and a parentless issue assigned to me reads
@@ -117,6 +121,7 @@ export function JiraCard({
         <div className="jira-card-head">
           <IssueTypeTile type={issue.type} />
           <span className="jira-card-key">{issue.key}</span>
+          <JiraMentionMarkFor issueKey={issue.key} />
           {crumb !== null && <span className="jira-card-crumb">{crumb}</span>}
           {/* The slot is page-owned so the push right lives on a page class (guard 7 keeps page rules off `ui-*`), and it is drawn only when the pill is —
               PriorityPill draws nothing for a null or empty name, and an empty slot would still be the head's last child. */}

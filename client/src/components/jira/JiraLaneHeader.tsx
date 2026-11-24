@@ -10,6 +10,7 @@ import { IssueTypeTile } from '../ui/IssueTypeTile';
 import { PersonMark } from '../ui/PersonMark';
 import { PriorityPill } from '../ui/PriorityPill';
 import { SpreadBar } from '../ui/SpreadBar';
+import { JiraMentionMarkFor } from './JiraMentionMarkFor';
 import { EndedLine, IssueLinkOut, IssueMarks, SessionControl, SessionStateLine } from './JiraCard';
 
 /**
@@ -36,6 +37,9 @@ export function LaneChevron({ label, open, locked, onToggle }: { label: string; 
 /**
  * JiraLaneHeader — the row above a lane's three cells (parent-lanes spec §3.2; .claude/DESIGN.md §8.9.1; mocks `Board.dc.html`, `BoardDeep.dc.html`). Three
  * kinds, one per `JiraLane['kind']`:
+ *
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): on the on-board header only, beside its key (an off-board or `No parent` header has no entry of its own to open), a `JiraMentionMarkFor` that draws only while the ticket has open mentions
+ * and a `MentionOpenContext` opener exists above. Its press is stopped inside `MentionMark`, so it never also opens Detail.
  *
  * **On the board.** The header issue's card laid out as a row — it was a full card before lanes and loses nothing by becoming a header, which is why the mock's
  * reduced header is not the rule (`00-mock-audit.md`). Type tile, key, title (a button that opens Detail, as the card's face does), `↳ <parent>` when the issue
@@ -154,6 +158,7 @@ export function JiraLaneHeader({
         <div className="jira-lane-line">
           <IssueTypeTile type={issue.type} />
           <span className="jira-card-key">{issue.key}</span>
+          <JiraMentionMarkFor issueKey={issue.key} />
           <button type="button" className="jira-lane-title" onClick={() => onOpenIssue(issue)}>
             {issue.summary}
           </button>
