@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const USAGE = 'usage: low-risk.mjs --base <base>';
 
+const GIT_TIMEOUT_MS = 60_000;
 const PATCH_MAX_FILES = 3;
 const PATCH_MAX_LINES = 40;
 
@@ -85,7 +86,8 @@ export function classify(entries) {
   const lines = list.reduce((sum, entry) => sum + (entry.added ?? 0) + (entry.deleted ?? 0), 0);
   const no = (reason) => verdict(false, null, reason, files, lines);
 
-  for (const entry of list) if (entry.added === null || entry.deleted === null) return no(`${entry.path} is binary`);
+  // `== null` on purpose: a missing count (undefined) is as unknown as a binary file's null, and every doubt is not-low-risk.
+  for (const entry of list) if (entry.added == null || entry.deleted == null) return no(`${entry.path} is binary`);
 
   for (const entry of list) {
     const { status } = entry;
@@ -126,7 +128,8 @@ export function classify(entries) {
 
 // Runs git in the cwd; returns { ok, out } or { ok: false, error } carrying git's first stderr line.
 function git(args) {
-  const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  // A hung fetch (credential prompt, dead remote) must land in the `git:` failure verdict, not hang the skill: expiry sets `result.error`.
+  const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: GIT_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.error || result.status !== 0) {
     const text = (result.error ? result.error.message : result.stderr) || `exit ${result.status}`;
     return { ok: false, error: text.split('\n').find((line) => line.trim() !== '') ?? `exit ${result.status}` };
@@ -173,7 +176,8 @@ function parseNumstat(text) {
 function main(argv) {
   const at = argv.indexOf('--base');
   const base = at === -1 ? undefined : argv[at + 1];
-  if (!base) {
+  // A value starting with `-` would reach `git fetch` as an option.
+  if (!base || base.startsWith('-')) {
     process.stderr.write(`${USAGE}\n`);
     return 2;
   }
@@ -195,7 +199,8 @@ function main(argv) {
 
   const stats = parseNumstat(numstat.out);
   const entries = parseRaw(raw.out).map((entry) => {
-    const counts = stats.get(entry.path) ?? { added: 0, deleted: 0 };
+    // No numstat row for a raw entry means the two parses disagree: unknown counts (null), never 0, so the verdict cannot fail open.
+    const counts = stats.get(entry.path) ?? { added: null, deleted: null };
     return { ...entry, ...counts };
   });
   process.stdout.write(`${JSON.stringify(classify(entries))}\n`);

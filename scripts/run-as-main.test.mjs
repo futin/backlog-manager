@@ -108,7 +108,7 @@ test('no script still compares an unresolved argv[1] with its own module path', 
   assert.deepEqual(stale, [])
 })
 
-test('exactly the eleven scripts guard with isMain(import.meta.url)', () => {
+test('exactly the listed scripts guard with isMain(import.meta.url)', () => {
   const using = everySource().filter((file) => fs.readFileSync(path.join(REPO, file), 'utf8').includes('isMain(import.meta.url)'))
   assert.deepEqual(using.sort(), ELEVEN)
 })

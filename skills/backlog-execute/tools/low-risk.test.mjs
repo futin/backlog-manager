@@ -135,6 +135,47 @@ test('cli: a docs-only branch is low-risk docs', () => {
   assert.deepEqual(out, { lowRisk: true, category: 'docs', reason: out.reason, files: 1, lines: 1 });
 });
 
+test('classify: a missing line count is unknown, never zero', () => {
+  const result = classify([{ status: 'M', path: 'src/a.ts', oldMode: '100644', newMode: '100644' }]);
+  assert.equal(result.lowRisk, false);
+  assert.equal(result.reason, 'src/a.ts is binary');
+});
+
+test('cli: a rename with an edit and spaced paths is refused with the old path verbatim', () => {
+  const tree = makeRepo();
+  fs.mkdirSync(path.join(tree, 'old dir'));
+  fs.writeFileSync(path.join(tree, 'old dir/my file.ts'), Array.from({ length: 20 }, (_, i) => `line ${i}\n`).join(''));
+  git(tree, 'add', 'old dir/my file.ts');
+  git(tree, 'commit', '-m', 'add');
+  git(tree, 'push', 'origin', 'main');
+  git(tree, 'switch', '-c', 'feature');
+  fs.mkdirSync(path.join(tree, 'new dir'));
+  git(tree, 'mv', 'old dir/my file.ts', 'new dir/your file.ts');
+  fs.appendFileSync(path.join(tree, 'new dir/your file.ts'), 'extra\n');
+  git(tree, 'add', '-A');
+  git(tree, 'commit', '-m', 'rename');
+  const out = JSON.parse(run(tree, ['--base', 'main']).stdout);
+  assert.equal(out.lowRisk, false);
+  assert.equal(out.reason, 'old dir/my file.ts renamed');
+});
+
+test('cli: a binary file is refused as binary', () => {
+  const tree = makeRepo();
+  git(tree, 'switch', '-c', 'feature');
+  fs.writeFileSync(path.join(tree, 'logo.png'), Buffer.from([0, 1, 2, 0, 255, 0]));
+  git(tree, 'add', 'logo.png');
+  git(tree, 'commit', '-m', 'bin');
+  const out = JSON.parse(run(tree, ['--base', 'main']).stdout);
+  assert.equal(out.lowRisk, false);
+  assert.equal(out.reason, 'logo.png is binary');
+});
+
+test('cli: a --base starting with a dash is a usage error', () => {
+  const r = run(makeRepo(), ['--base', '--upload-pack=x']);
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.includes('usage: low-risk.mjs --base <base>'), r.stderr);
+});
+
 test('cli: an unknown base is a lowRisk:false verdict, exit 0', () => {
   const tree = makeRepo();
   const r = run(tree, ['--base', 'nope']);
