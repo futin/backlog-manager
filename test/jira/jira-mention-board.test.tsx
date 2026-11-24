@@ -91,6 +91,8 @@ const onOpenJiraPage = jest.fn();
 let sessionLinks: unknown[];
 let mentionsGets: number;
 let dismissAnswer: JiraMentionsConfigured | null;
+// The board's issues; a case that needs an off-board parent lane appends children whose parent is on no board.
+let boardIssues: JiraIssue[];
 
 beforeEach(() => {
   onOpenJiraPage.mockReset();
@@ -102,6 +104,7 @@ beforeEach(() => {
   mentionsGets = 0;
   sessionLinks = [];
   dismissAnswer = null;
+  boardIssues = ['PAY-1', 'PAY-2', 'PAY-4'].map(issue);
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === '/api/jira') return ok(STATUS);
@@ -111,7 +114,7 @@ beforeEach(() => {
       return ok(mentionsAnswer);
     }
     if (url.startsWith('/api/jira/mentions/dismiss') && dismissAnswer !== null) return ok(dismissAnswer);
-    if (/^\/api\/jira\/boards\/[^/]+\/issues$/.test(url)) return ok({ issues: ['PAY-1', 'PAY-2', 'PAY-4'].map(issue), polledAt: BOARD.polledAt });
+    if (/^\/api\/jira\/boards\/[^/]+\/issues$/.test(url)) return ok({ issues: boardIssues, polledAt: BOARD.polledAt });
     if (url === '/api/jira/worktrees') return ok({ worktrees: [], unavailable: [] });
     const thread = /^\/api\/jira\/issue\/([^/]+)\/thread$/.exec(url);
     if (thread !== null) {
@@ -216,6 +219,50 @@ describe('the mention modal over the board', () => {
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     act(() => setJiraPage('sessions'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+});
+
+// The off-board lane header (DESIGN.md §8.9.7): a parent that is on no board still carries the mark when it has open mentions, and pressing it opens the
+// mention modal on that parent's key — never Detail, never the header's parent read.
+describe('the mark on an off-board parent’s lane header', () => {
+  const offChild = (key: string, parentKey: string, parentSummary: string): JiraIssue => ({
+    ...issue(key),
+    parent: { key: parentKey, summary: parentSummary, type: null, status: null }
+  });
+  const offHead = (key: string): HTMLElement =>
+    Array.from(document.querySelectorAll<HTMLElement>('.jira-lane-head[data-kind="off"]')).find((h) => within(h).queryByText(key) !== null) as HTMLElement;
+
+  beforeEach(() => {
+    boardIssues = [...boardIssues, offChild('PAY-5', 'PAY-900', 'Billing platform'), offChild('PAY-6', 'PAY-901', 'Quiet epic')];
+    const PAY900 = mentionIssue('PAY-900', [mention('m7', 'Nina', 'a question on the epic', 'PAY-900', 0.05)]);
+    mentionsAnswer = mentionsPayload({ issues: [PAY1, PAY4, PAY900] });
+  });
+
+  it('draws the mark beside the key of a parent with open mentions, and its press opens the mention modal on that parent', async () => {
+    await mount();
+    const head = offHead('PAY-900');
+    expect(head).toBeDefined();
+    const mark = within(head).getByRole('button', { name: '1 mention waits for your answer' });
+    expect(head.querySelector('.jira-card-key')?.nextElementSibling).toContainElement(mark);
+    const fetches = (global.fetch as jest.Mock).mock.calls.length;
+    await userEvent.click(mark);
+    // The header's own parent read never started: its title button would be disabled while that read is out.
+    expect(within(head).getByRole('button', { name: 'Billing platform' })).toBeEnabled();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByText('Mention 1 of 1')).toBeInTheDocument();
+    expect(await screen.findByText(/a question on the epic/)).toBeInTheDocument();
+    // The modal reads the parent's detail once, itself; a second read would be the header's, which would then open Detail over it.
+    const after = (global.fetch as jest.Mock).mock.calls.slice(fetches).map(([u]) => String(u));
+    expect(after.filter((u) => u === '/api/jira/issue/PAY-900')).toHaveLength(1);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+
+  it('draws no mark on an off-board parent with no open mentions', async () => {
+    await mount();
+    const head = offHead('PAY-901');
+    expect(head).toBeDefined();
+    expect(within(head).getByText('not on this board')).toBeInTheDocument();
+    expect(within(head).queryByRole('button', { name: /wait(s)? for your answer/ })).toBeNull();
   });
 });
 
