@@ -6,6 +6,7 @@ import '@testing-library/jest-dom';
 
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JIRA_STATUS_FLOOR_MS } from '../../client/src/hooks/useJira';
+import { JIRA_MENTIONS_POLL_MS } from '../../shared/types';
 import { JIRA_REPLY_REREAD_MS, useJiraMentions } from '../../client/src/hooks/useJiraMentions';
 import { TRACKER_FETCH_SLACK_MS } from '../../client/src/hooks/useTrackers';
 import type { JiraMentionIssue, JiraMentionsPayload, JiraStatusPayload } from '../../shared/types';
@@ -30,15 +31,22 @@ let fetchMock: jest.Mock;
 let last: ReturnType<typeof useJiraMentions>;
 let access: JiraStatusPayload['access'] = 'ok';
 let statusReload: jest.Mock;
+let enabled = true;
+// The status payload's `mentions.polledAt` (the shell's view of the same cache); null = no mentions slice.
+let statusPolled: string | null = null;
 
 function Probe() {
-  last = useJiraMentions();
+  last = useJiraMentions({ enabled });
   const d = last.data;
   return <span data-testid="p">{`${d === null ? 'none' : d.configured ? `ok:${d.me}` : 'off'}|${last.checking}|${last.error?.message ?? ''}`}</span>;
 }
 
 const tree = () => (
-  <JiraContext.Provider value={{ data: { access } as JiraStatusPayload, loading: false, error: false, reload: statusReload }}>
+  <JiraContext.Provider value={{
+      data: { access, mentions: statusPolled === null ? null : { polledAt: statusPolled, count: 0, detail: null } } as unknown as JiraStatusPayload, loading: false,
+      error: false,
+      reload: statusReload
+    }}>
     <Probe />
   </JiraContext.Provider>
 );
@@ -60,6 +68,8 @@ const calls = (): number => fetchMock.mock.calls.filter(([u, init]) => u === '/a
 beforeEach(() => {
   jest.useFakeTimers();
   access = 'ok';
+  enabled = true;
+  statusPolled = null;
   statusReload = jest.fn();
   fetchMock = jest.fn(() => res(payload()));
   global.fetch = fetchMock as unknown as typeof fetch;
@@ -431,5 +441,99 @@ describe('useJiraMentions', () => {
     expect(calls()).toBe(2);
     await advance(170_000 + TRACKER_FETCH_SLACK_MS - JIRA_REPLY_REREAD_MS);
     expect(calls()).toBe(3);
+  });
+
+  describe('enabled and the status-newer trigger', () => {
+    const settle = (ms: number): number => ms + 170_000 + TRACKER_FETCH_SLACK_MS;
+
+    it('makes no read, arms no timer and ignores focus while disabled from mount', async () => {
+      enabled = false;
+      render(tree());
+      await flush();
+      await advance(JIRA_STATUS_FLOOR_MS * 3);
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      await flush();
+      expect(calls()).toBe(0);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('stops polling when disabled after the first read, keeps data, and reads once at the false to true edge', async () => {
+      const { rerender } = render(tree());
+      await flush();
+      expect(calls()).toBe(1);
+      enabled = false;
+      rerender(tree());
+      await advance(settle(JIRA_MENTIONS_POLL_MS));
+      expect(calls()).toBe(1);
+      expect(screen.getByTestId('p')).toHaveTextContent('ok:Ada');
+      enabled = true;
+      rerender(tree());
+      await flush();
+      expect(calls()).toBe(2);
+    });
+
+    it('re-reads once when the status mentions stamp is strictly later than the payload’s, and not again for the same status', async () => {
+      const stamp = iso(60_000);
+      fetchMock.mockImplementation(() => res(payload({ polledAt: stamp })));
+      const { rerender } = render(tree());
+      await flush();
+      expect(calls()).toBe(1);
+      statusPolled = iso(1_000);
+      rerender(tree());
+      await flush();
+      expect(calls()).toBe(2);
+      rerender(tree());
+      await flush();
+      expect(calls()).toBe(2);
+    });
+
+    it('does not re-read for a status stamp equal to or older than the payload’s', async () => {
+      const stamp = iso(60_000);
+      fetchMock.mockImplementation(() => res(payload({ polledAt: stamp })));
+      const { rerender } = render(tree());
+      await flush();
+      statusPolled = stamp;
+      rerender(tree());
+      await flush();
+      statusPolled = iso(120_000);
+      rerender(tree());
+      await flush();
+      expect(calls()).toBe(1);
+    });
+
+    it('does not follow a newer status stamp while disabled', async () => {
+      fetchMock.mockImplementation(() => res(payload({ polledAt: iso(60_000) })));
+      const { rerender } = render(tree());
+      await flush();
+      enabled = false;
+      rerender(tree());
+      statusPolled = iso(1_000);
+      rerender(tree());
+      await flush();
+      expect(calls()).toBe(1);
+    });
+
+    it('lands a write answered after the hook was disabled, without re-arming the timer', async () => {
+      const { rerender } = render(tree());
+      await flush();
+      const d = deferred();
+      fetchMock.mockImplementation((u: string, init?: RequestInit) => (init === undefined ? res(payload()) : d.promise));
+      let p!: Promise<unknown>;
+      await act(async () => {
+        p = last.dismiss('PAY-1', ['10']);
+      });
+      enabled = false;
+      rerender(tree());
+      await act(async () => {
+        d.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload({ me: 'late' })) } as Response);
+        await p;
+      });
+      expect(screen.getByTestId('p')).toHaveTextContent('ok:late');
+      const before = calls();
+      await advance(settle(JIRA_MENTIONS_POLL_MS));
+      expect(calls()).toBe(before);
+    });
   });
 });
