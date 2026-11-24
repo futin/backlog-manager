@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { JiraMentionsView } from '../../client/src/components/jira/JiraMentionsView';
 import { JiraReplyEditor } from '../../client/src/components/jira/JiraReplyEditor';
+import { JiraMentionsProvider } from '../../client/src/hooks/JiraMentionsContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { TimeZoneContext } from '../../client/src/hooks/TimeZoneContext';
@@ -273,7 +274,9 @@ const tree = () => {
       <TimeZoneContext.Provider value={zone}>
         <JiraContext.Provider value={status}>
           <JiraSessionsContext.Provider value={{ data: sessions, reload: () => Promise.resolve() }}>
-            <JiraMentionsView onOpenJiraPage={() => {}} />
+            <JiraMentionsProvider enabled>
+              <JiraMentionsView onOpenJiraPage={() => {}} />
+            </JiraMentionsProvider>
           </JiraSessionsContext.Provider>
         </JiraContext.Provider>
       </TimeZoneContext.Provider>

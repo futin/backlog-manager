@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { JiraMentionsView } from '../../client/src/components/jira/JiraMentionsView';
+import { JiraMentionsProvider } from '../../client/src/hooks/JiraMentionsContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { TimeZoneContext } from '../../client/src/hooks/TimeZoneContext';
 import type { JiraAccess, JiraMention, JiraMentionIssue, JiraMentionsPayload, JiraStatusPayload } from '../../shared/types';
@@ -103,7 +104,9 @@ function renderPage(access: JiraAccess = 'ok') {
   return render(
     <TimeZoneContext.Provider value={zone}>
       <JiraContext.Provider value={status}>
-        <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
+        <JiraMentionsProvider enabled>
+          <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
+        </JiraMentionsProvider>
       </JiraContext.Provider>
     </TimeZoneContext.Provider>
   );

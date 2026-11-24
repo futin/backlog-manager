@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
-import { useJiraMentions, type JiraMentionsWrite } from '../../hooks/useJiraMentions';
+import { useJiraMentionsContext } from '../../hooks/JiraMentionsContext';
+import type { JiraMentionsWrite } from '../../hooks/useJiraMentions';
 import { useJiraMentionsDismissed, useJiraMentionsView } from '../../hooks/useJiraMentionsView';
 import { useNow } from '../../hooks/useNow';
 import { useSettings } from '../../hooks/useSettings';
@@ -34,8 +35,9 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * DESIGN.md §8.9.7 — Jira › Mentions: the comments that @-mention the user and still wait on them (Jira mentions phase 1, Task 8; spec "The page", "Sync now,
  * two ways"; mocks `Main.dc.html`, band states `Sync.dc.html`).
  *
- * **One read per page mount.** `useJiraMentions` is called here and nowhere under it: the List, and the Cards and the modal after it, take its values as props,
- * so one mount is one timer aimed at the server's clock and one newest-read counter, never two pollers that could disagree for an interval.
+ * **One read for the section — the provider is the one caller.** `useJiraMentionsContext` hands this page the shell's single `useJiraMentions` instance
+ * (`JiraMentionsProvider` in `App`); the List, and the Cards and the modal after it, take its values as props, so the whole section is one timer aimed at the
+ * server's clock and one newest-read counter, never two pollers that could disagree for an interval.
  *
  * **The band is the Board page's.** `Band` titled `Mentions`; the switch is `Segmented track` as `JiraViewSwitch` draws it, over this page's own remembered
  * view (`useJiraMentionsView`) — a view of one page, so the rail stays the only page switch; then the `.board-band-search` field, the `Show dismissed · N`
@@ -68,7 +70,7 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * status's `repos` — the ticket's project first — and a `Draft ready` marker on the List row and the card is the List's and the Cards' own (`draft !== null`).
  */
 export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
-  const { data, loading, error, checking, sweep, dismiss, restore, reload, discardDraft, postReply } = useJiraMentions();
+  const { data, loading, error, checking, sweep, dismiss, restore, reload, discardDraft, postReply } = useJiraMentionsContext();
   const status = useJiraContext().data;
   const access = status?.access;
   const sessions = useJiraSessionsContext();
