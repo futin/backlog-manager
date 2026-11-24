@@ -73,9 +73,13 @@ That is the skill's own bookkeeping, not the change under review. Execute never 
 The rules must hold on **any registered project**, not only this repo — so this does not reuse `scripts/ci-scope.mjs`, whose prefixes are this repo's.
 
 A diff is low-risk when it is non-empty, every entry is a plain modification or addition (`M` or `A` — see "patch" for `A`), no file is binary (`-` in
-numstat), and it falls in one of three categories, checked in this order:
+numstat), every entry is a regular file whose mode did not change (read with `git diff --raw`: both modes `100644` or `100755` and equal, or `000000` →
+regular for an add — so a submodule bump `160000`, a symlink `120000` and a mode-only change are never low-risk), and it falls in one of three categories,
+checked in this order:
 
-1. **docs** — every file is documentation, which means its extension is one of `.md`, `.mdx`, `.markdown`, `.rst`, `.txt` or `.adoc` — wherever it sits.
+1. **docs** — every file is documentation, which means its extension is one of `.md`, `.mdx`, `.markdown`, `.rst` or `.adoc` — wherever it sits — or its
+   basename, case-insensitive and with or without `.txt`, is one of `README`, `LICENSE`, `CHANGELOG`, `NOTICE`, `AUTHORS`, `CONTRIBUTING`. Any other
+   `.txt` is not docs (`CMakeLists.txt`, `robots.txt`, `constraints.txt` and files a program reads at run time are behaviour).
    There is no directory clause: `docs/conf.py` or `docs/.vitepress/config.ts` is code that builds a site, not documentation. No size limit. Two exceptions,
    markdown that is behaviour and therefore never docs:
    - a file under a top-level `agents/` (agent prompts) — not denied, so it can still be a **patch** if it fits that category's limits;
@@ -100,10 +104,12 @@ Denied anywhere (any one makes the whole diff not low-risk, whichever category i
 `packages/x/package.json` is denied); `.github/`, `.claude/` and `skills/` match only at the top level of the tree; `migrations`/`migrate` and `.env*`
 match as any path segment.
 
-`requirements*.txt` being a `.txt` means the deny list is checked **before** the docs rule — that order is part of the contract.
+The deny list is checked **before** the docs and tests rules — that order is part of the contract.
 
-The `reason` names the first failing rule. Rules checked in this order, first failure wins: `empty diff`; a binary file → `<path> is binary`; a delete or
-rename → `<path> deleted` / `<old> renamed`; a denied file → `<path> is never low-risk`; then, when the diff is neither docs nor tests, the patch rules in
+The `reason` names the first failing rule. Rules checked in this order, first failure wins: `empty diff`; a binary file → `<path> is binary`; any status
+other than `M`/`A` → `<path> deleted` (`D`), `<old> renamed` (`R`), `<old> copied` (`C`), `<path> changed type` (`T`), `<path> unmerged` (`U`) or
+`<path>: status <X>` for anything else; a non-regular mode → `<path> is a submodule` (`160000`) / `<path> is a symlink` (`120000`); a mode change →
+`<path> mode changed`; a denied file → `<path> is never low-risk`; then, when the diff is neither docs nor tests, the patch rules in
 the order added → files → lines: `<path> added`, `<n> files, patch limit 3`, `<n> lines, patch limit 40`. The lines reason is the whole diff's total, never
 one file's. A git failure → `git: <first line of git's stderr>`.
 
@@ -128,11 +134,18 @@ one file's. A git failure → `git: <first line of git's stderr>`.
 
 ## The board
 
-- **Settings › Local** — a new switch "auto-merge low-risk PRs" (`prLowRiskAutoMergeDefault`, default **off**) beside the existing "auto-merge PRs" and
-  "fix" rows. Clamped like its siblings.
-- **Launch sheet** — under a PR finish for an **execute** only (groom has no low-risk path), a third switch "Auto-merge if low-risk", seeded from that setting
-  each time the finish becomes PR and cleared when it leaves PR, the same render-time seeding `autoMerge`/`fix` use. While "Auto-merge" is on, the switch is
-  drawn disabled and reads on (auto-merge already covers it) — what is sent is `lowRiskAutoMerge: false` then, because the explicit flag wins.
+- **Settings › Local** — a new `SettingsRow` after "Fix if it fails" (`prLowRiskAutoMergeDefault`, default **off**, clamped like its siblings), not tied to
+  the Auto-merge row (it is the alternative to it, so it is never disabled):
+  - `name="Auto-merge low-risk PRs"`
+  - `hint="preselects Auto-merge if low-risk on an execute PR launch"`
+  - `more="Only when the PR is docs-only, tests-only or a patch of at most 3 files and 40 lines — then the session arms auto-merge and fixes failures."`
+  - Switch `label="auto-merge low-risk PRs"`.
+- **Launch sheet** — under a PR finish for an **execute** only (groom has no low-risk path), a third `sheet-check` row after "fix if it fails", seeded from
+  that setting each time the finish becomes PR and cleared when it leaves PR, the same render-time seeding `autoMerge`/`fix` use:
+  - Switch `label="auto-merge if low-risk"`; visible text `auto-merge if low-risk — only a docs-only, tests-only or small-patch PR arms auto-merge and fix`;
+  - while Auto-merge is on it is `disabled`, drawn **on**, with `title="Auto-merge is on: every PR arms it"`, and the body sends `lowRiskAutoMerge: false`
+    (the explicit flag wins). Its own stored value is left untouched while disabled — drawn-on is display only — so turning Auto-merge back off shows and
+    sends again whatever it held before (unlike Fix, which Auto-merge off clears, because Fix means nothing alone and this does).
 - **Dispatch body** — `lowRiskAutoMerge?: boolean` beside `autoMerge` / `fix` on the execute dispatch shape. Same validation rules, checked beside their
   siblings in `agents.service.ts`, each a 400 with exactly this `error`:
   - non-boolean → `lowRiskAutoMerge must be a boolean`;
@@ -145,6 +158,8 @@ one file's. A git failure → `git: <first line of git's stderr>`.
   form byte-equal beside the two it quotes today, and the existing clause/pr-mode parity test extends to it.
 - **`FINISH_FLAG`** (`shared/agent.ts:951`) gains `low-risk-auto-merge`. That one regex is both the title defuse `defuseFinishFlags` (it swaps the hyphens
   for U+2011, it does not strip) and dispatch's rule-8 refusal (`agents.service.ts`), so a title spelling the new flag is defused and refused like the others.
+  Rule 8's 400 text becomes exactly: `the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge,
+  --fix and --low-risk-auto-merge from the prompt` (any test pinning the old text is updated with it).
 - **The name is `--low-risk-auto-merge`, deliberately not `--auto-merge-low-risk`.** A skill that predates this change (plugin not yet synced, a remote
   machine on an older install) reading a token that starts with `--auto-merge` could take it for `--auto-merge` and arm every PR — the anti-goal. A token
   that does not start with an existing flag cannot be misread as one; the old skill at worst ignores it and the PR stays open.
@@ -152,7 +167,9 @@ one file's. A git failure → `git: <first line of git's stderr>`.
 ## The tick
 
 - **`tick.json`** gains `lowRiskAutoMerge: boolean` (default `false`), settable through `POST /api/ticks/config` and shown in Settings › Shared › Backlog
-  tick as a switch labelled "auto-merge low-risk PRs" beside the caps. `TickConfig` / `TickConfigPatch` grow the field. Edge cases, mirroring the caps:
+  tick as a new row after "Open execute PRs" in `TickGroup.tsx`: row `name="Auto-merge low-risk PRs"`, `hint="ticked executes arm auto-merge and fix when
+  the PR is docs-only, tests-only or a small patch"`, Switch `label="Auto-merge low-risk PRs"`. `TickConfig` / `TickConfigPatch` grow the field. Edge cases,
+  mirroring the caps:
   - in the **file**, anything but a boolean (missing, `"true"`, `1`) reads as `false` — in both readers, the server's (`tick.controller.ts` /
     `tick-breaker.util.ts`) and `tick.mjs`'s hand copy (`readTickSettings` in `tick-breaker.mjs`);
   - in a **POST body**, a present non-boolean is `400 lowRiskAutoMerge must be a boolean`; a body carrying only `lowRiskAutoMerge` is a valid non-empty
@@ -167,8 +184,9 @@ one file's. A git failure → `git: <first line of git's stderr>`.
   not idle while its PR is merging. A job can pass a shorter `--lock-ttl`, though, and a lock that expires under a live wait gets the session "recovered"
   while it still runs. So `decide` appends the flag only when the effective lock TTL is **≥ 180 minutes** (the default); below that it omits it. The
   channel is the one JSON line `decide` already prints: it gains a field `lowRiskAutoMerge` — `true` when the flag was appended, `false` when the setting is
-  off, or the string `"off: lock TTL <n> min < 180"` when the setting is on but the TTL vetoed it. `--dry-run` and `--peek` compute and print the same field
-  (they already print the would-be verdict) and change nothing else.
+  off, or the string `"off: lock TTL <n> min < 180"` when the setting is on but the TTL vetoed it. The field is present **only on an `execute` verdict**;
+  every other verdict (`groom`, `idle`, `busy`, `recover`, and any printed before step 3b reads `tick.json`) carries no such key. `--dry-run` and `--peek`
+  compute and print the same field on an `execute` verdict and change nothing else.
 - **Outcome:** an execute tick that opened its PR is `ok` whatever the auto-merge part did (merged, armed and waiting out the bound, not allowed on the repo,
   refused, fix rounds spent). The tick's unit is "open a PR", and counting an auto-merge shortfall as `failed` would let a repo with auto-merge disabled
   trip the halt breaker. The `low-risk:` and `auto-merge:` lines go in the tick's closing summary paragraph, not in `--reason`.
@@ -210,4 +228,6 @@ one file's. A git failure → `git: <first line of git's stderr>`.
 - `.claude/rules/dispatch-watchdog.md` and any rule or doc listing the finish flags or the dispatch body fields (`--finish`/`--base`/`--auto-merge`/`--fix`,
   `autoMerge`/`fix`) — gain `--low-risk-auto-merge` / `lowRiskAutoMerge`.
 - `docs/subsystems/invariants.md` — the "execute and groom … may arm GitHub auto-merge" entry gains the low-risk path.
+- `skills/backlog-tick/SKILL.md` — step 1's list of the `decide` line's fields gains `lowRiskAutoMerge`, and step 4's final message carries the execute's
+  `low-risk:` and `auto-merge:` lines in its closing paragraph.
 - `docs/subsystems/skills.md` (execute flags), the tick docs, and the board docs that describe the launch sheet and Settings.
