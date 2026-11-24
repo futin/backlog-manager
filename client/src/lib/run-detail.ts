@@ -78,6 +78,10 @@ export interface DetailRow {
    *  caller anyway, so nothing downstream has to remember the distinction —
    *  it just must not be erased before that function sees it. */
   usage?: RunSessionUsage[];
+  /** The headless session that worked this item (#611), or `null` — before dispatch, for an item skipped before it, and for an archived run file that
+   *  carries no key at all (`?? null` at both mapping sites, so a missing key never reaches the JSX as `undefined`). The detail sheet hangs the item's
+   *  `Subagents` disclosure on it, so an item with no session draws none. */
+  sessionId: string | null;
 }
 
 export function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
@@ -93,6 +97,7 @@ export function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[]
       branch: q.branch,
       assumptions: q.assumptions ?? [],
       usage: q.usage,
+      sessionId: q.sessionId ?? null,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: null }
     };
   });
@@ -111,6 +116,7 @@ export function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
       branch: q.branch,
       assumptions: q.assumptions ?? [],
       usage: q.usage,
+      sessionId: q.sessionId ?? null,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: last.tail }
     };
   });

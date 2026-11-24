@@ -482,6 +482,27 @@ sentence (`last 12 ticks: 9 ok, 3 failed`) standing in for it, so a screen reade
 
 Stage names sit under the dot at 11 `--ink2`, durations under those at 12/500. Under **700** px each of the seven columns is floored at 64 px — the widest word, `dispatched`, measures 53 px at 11 — and the track scrolls sideways inside itself, as the Matrix does (§8.11), rather than clipping the words (#474). A `×N` fix-loop badge is an 11/500 pill on the `fixing` node — on the node it counts, because the number is a property of that stage and nowhere else. Under the track, the verification line: a `✓` or `✕` glyph, the command in an inline code span (`--ink` on `--steel`, 4 px corner, inheriting the face — §8.1 deletes the monospace default and this span is the reason the fill has to carry the distinction), and the summary at 12 `--ink2`.
 
+#### 8.4.4 Subagent list
+
+`SubagentDisclosure` and `SubagentList` (`client/src/components/ui/SubagentList.tsx`, #611) list one session's subagents where the board already draws that
+session: each History detail item row with a session id (not on a remote run, not while agents are off; an ended item keeps it — its subagents are the
+post-mortem), and the same component under the facts of §8.9's Jira session card. The words are the spec's copy table
+(`docs/superpowers/specs/2026-11-24-subagent-visibility-design.md`), all of them in `client/src/lib/subagents.ts`.
+
+- **The disclosure** is a quiet 12/500 `--ink2` text button, `Subagents` after a right chevron that turns down when open — never a chip, because it opens a
+  reading and launches nothing, and never with a count: a closed one has fetched nothing, so it has nothing to count.
+- **Open**, the body sits under a `--hairline` rule: a header line at 12 `--ink2` with tabular figures — the summary (`3 subagents · 1 working · 1 blocked ·
+  1 ended`), then the parent's badge as a `Pill`, neutral for `waiting on subagent` and `bad` for `waiting on a blocked subagent`. A failed refresh adds one
+  12 `--red` line under it, `couldn’t refresh — <sentence>`, and the last good list stays. Before the first answer, `loading subagents…`; an empty list,
+  `no subagents`; a first failure, the route's sentence in the list's place — each a 12 `--ink3` line.
+- **A row** wraps on a narrow card: the state `Pill` in its tone (working live, quiet neutral, stuck warn, blocked and killed bad, ended done), a blocked
+  row's reason at 11 `--red` after it, an orphan's `orphan` tag — an 11/500 `--amber-ink` pill on a dashed `--hairline2` ring, `cursor: help`, its title
+  saying why it matters; then the label in `--ink`, taking the slack and ellipsising; then `type · fg|bg · model` and the times in `--ink3` (age, and
+  `last write <duration>` while running, or `ran 4m` once ended); the last tool on its own line at 11 `--ink3`, ellipsised with the full text as its title.
+- **A narrow list** (under 520 px of its own width — a phone, or the session card) breaks every row in the same places, by a container query: the state and
+  the label on the first line, the meta and the times on the second, the tool on the third, with 10 px between rows so each row reads as one block. A wide
+  list keeps the one-line row.
+
 ### 8.5 Archive
 
 Archive reuses the Board's own card and column language (§8.3) rather than drawing a second one — the same `ItemCard`, the same column shape — under the four columns `ArchiveView.tsx`'s own list already names: Refactoring, Ideas, Bugs, Out of scope (`ArchiveView.tsx:80-85`). The column is literally `BoardColumn`, whose `BoardColumnSlug` gained `out-of-scope` as its fifth member for this — the union is the two surfaces' columns put together, and its `RAMP_SLUGS` is the one place that decides which of them carries a hue. There is no fifth Tasks column: `leavesBoard` (`client/src/lib/item-stale.ts`) never lets a task leave the Board at all, so a Tasks column here could only ever stand empty. Three of the four keep the ramp hue §8.2 and §8.3 already set for the type they name — refactors `--amber`, ideas `--mustard`, bugs `--red` — because the tick names a type, and a type does not change once an item goes quiet; out of scope carries none of that ramp, a plain `--ink3` dot, because a rejection is a verdict rather than a type, and giving it an accent would put it in the same vocabulary as the three columns that are still live work.

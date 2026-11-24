@@ -1120,6 +1120,60 @@ export interface DashboardRow {
 }
 
 /**
+ * One subagent a session launched, as the dashboard's `GET /api/sessions/:id` reports it — a hand-copied contract like `DashboardRow`, mirroring `AgentJob` in
+ * claude-agents-dashboard's `shared/types.ts`. The first ten fields are that type's today; the six optional ones after `resumed` are what the dashboard's own
+ * item (futin/claude-agents-dashboard#547) adds, and every one of them is optional here because BM ships first: an older dashboard sends none, and every
+ * derivation over this shape (`subagentState`, `isOrphan`, `waitingOnSubagent` in `shared/agent.ts`) reads an absent field as "proves nothing", never as a
+ * value. Spec: docs/superpowers/specs/2026-11-24-subagent-visibility-design.md, "The dashboard contract".
+ */
+export interface SubagentJob {
+  /** The Task tool_use id — or, on a `resumed` row, the id of the SendMessage call that woke the agent. */
+  id: string;
+  /** `subagent_type`, e.g. `Explore`; `''` when the record omits it. */
+  type: string;
+  description: string;
+  /** `running` = no matching tool_result yet; `done` = result recorded. */
+  status: 'running' | 'done';
+  startedAt: string | null;
+  endedAt: string | null;
+  /** Run time in ms — the transcript's own figure when reported, else `endedAt − startedAt`; null while running or when neither is known. */
+  durationMs: number | null;
+  tokens: number | null;
+  agentId: string | null;
+  toolUses: number | null;
+  /** Present only on a run started by SendMessage waking a stopped subagent. */
+  resumed?: true;
+  /** Background (`run_in_background`) launch; always `true` on a `resumed` row. Absent on an older dashboard, which is not the same as `false`. */
+  background?: boolean;
+  model?: string | null;
+  /** ISO mtime of the subagent's own transcript; null without an `agentId` or a file. */
+  lastWriteAt?: string | null;
+  /** The subagent transcript's newest tool call, `Name(first arg)`, at most 80 chars. */
+  lastTool?: string | null;
+  /** The terminal status of a background/resumed run, `completed` for a sync result; null while running. */
+  endStatus?: 'completed' | 'failed' | 'killed' | 'stopped' | null;
+  /** Why a RUNNING subagent's last transcript entry says it stopped making progress; null when it says nothing of the kind. */
+  blockedReason?: 'rate-limit' | 'rejected' | 'interrupted' | null;
+}
+
+/**
+ * The body of `GET /api/agents/sessions/:id/subagents` — the dashboard's `SessionDetail` with its `id` and `error` dropped (the route answers those as status
+ * codes). `parentLive` is the dashboard item's always-sent `true | false | null`: `false` only when the process table was read and no process carries the
+ * session, `null` when the probe did not run. Absent means an older dashboard. It is deliberately NOT `DashboardRow.processLive`, which is absent for every
+ * session the dashboard does not hold a handle for and would call each of those parents dead.
+ */
+export interface SubagentDetail {
+  /** Newest first, as the dashboard sends them. */
+  agents: SubagentJob[];
+  running: number;
+  finished: number;
+  parentLive?: boolean | null;
+}
+
+/** One subagent's derived state (`subagentState`, `shared/agent.ts`). `stuck` is the spec's addition to the issue's five: running and silent past 20 min. */
+export type SubagentState = 'working' | 'quiet' | 'stuck' | 'blocked' | 'ended' | 'killed';
+
+/**
  * One live Run session on a ticket, as the board draws it (spec §4). `starting` is the window between `reserve` and the dashboard's answer, when the key is
  * claimed but there is no session id yet; `name` is `jiraSessionName(key)`, the title the dispatch gave the session, so the card and the dashboard agree.
  */

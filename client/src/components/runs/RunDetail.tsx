@@ -17,6 +17,7 @@ import { Glyph } from '../ui/Glyphs';
 import type { GlyphName } from '../ui/Glyphs';
 import { Pill } from '../ui/Pill';
 import { SheetHead } from '../ui/Sheet';
+import { SubagentDisclosure } from '../ui/SubagentList';
 import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
 import { StageTrack } from './StageTrack';
@@ -105,6 +106,7 @@ export function RunDetail({
   remote = false,
   machine = null,
   invisibleElsewhere = false,
+  agentsOn = false,
   gate,
   resuming,
   onChanged
@@ -133,6 +135,10 @@ export function RunDetail({
    *  (`runInvisibleElsewhere`, lib/remote-run.ts). Decided by the caller, which
    *  holds the project's source; this sheet only says it. */
   invisibleElsewhere?: boolean;
+  /** #611: the dashboard has agents on (the caller's `useAgents()` answer — this sheet never asks for it itself). Gates each item's `Subagents`
+   *  disclosure: with agents off the subagents route answers 409, so the button could only ever open an error. Defaults to `false`, so a caller that
+   *  forgets draws nothing rather than a disclosure that fails. */
+  agentsOn?: boolean;
   /** task-17: the resume gate, from the same `resumeGate` call every host of
    *  `RunControls` has made — one host today (this sheet's head), and the
    *  prop stays so the component never reaches for a data source itself. */
@@ -672,6 +678,10 @@ export function RunDetail({
                   <span className="run-drawer-item-verify-tail">{row.verify.tail ?? ''}</span>
                 </details>
               )}
+              {/* #611: the item's subagents (DESIGN.md §8.4.4), on a LOCAL run only — a remote run's session lives on another machine's dashboard, which
+                  this server cannot ask — and only while agents are on. An ended item keeps it: its subagents are the post-mortem. Closed, it fetches
+                  nothing, so a long queue of rows costs no requests until one is opened. */}
+              {row.sessionId !== null && !remote && agentsOn && <SubagentDisclosure sessionId={row.sessionId} />}
             </div>
           );
         })}

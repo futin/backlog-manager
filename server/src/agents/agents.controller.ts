@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, Param, Post, Query, UseGuards } from '@nestjs/common';
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
 import { OrchestrateArgsService } from './orchestrate-args.service';
@@ -6,8 +6,11 @@ import { SameOriginPostGuard } from '../origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
+import { readAgentsConfig } from './config.util';
+import { dashboardSessionDetail } from './dashboard-sessions.util';
+import { isSessionId } from '../jira/session-id.util';
 import { isAgentAction } from '../../../shared/agent';
-import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, ItemDispatchResult, AgentsStatus, MergeCheckResult, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
+import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, ItemDispatchResult, AgentsStatus, MergeCheckResult, PauseResult, StopResult, SubagentDetail, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
  * Under /api like every other controller — test/guards/vite-proxy.test.ts asserts it
@@ -522,5 +525,25 @@ export class AgentsController {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
     return this.orchestrateArgs.branches(trimmed);
+  }
+
+  /**
+   * One session's subagents, for the board's `Subagents` disclosure on a Runs item row and a Jira session card (#611, spec
+   * docs/superpowers/specs/2026-11-24-subagent-visibility-design.md, "Server route"). A proxy of home's dashboard `GET /api/sessions/:id`: this server cannot
+   * read `~/.claude` (compose never mounts it) and the dashboard already owns transcript parsing, so a second parser here would drift from the first.
+   *
+   * The order is the spec's and every step answers before the next is attempted: the id is checked with `isSessionId` — first character alphanumeric, so
+   * `.` and `..` can never become a path segment in the dashboard URL — else 400 `not a session id`; agents off is 409 `agents are off`, before any fetch;
+   * then the read, whose 404 is ours too and whose every other failure is a 502 from `dashboardSessionDetail`. No guard: a GET that starts nothing, and it
+   * discloses only what the dashboard would show for an id the caller already holds. No cache — see `dashboardSessionDetail`.
+   */
+  @Get('sessions/:id/subagents')
+  async subagents(@Param('id') id: string): Promise<SubagentDetail> {
+    if (!isSessionId(id)) throw new HttpException({ error: 'not a session id' }, 400);
+    const cfg = readAgentsConfig();
+    if (!cfg.enabled) throw new HttpException({ error: 'agents are off' }, 409);
+    const detail = await dashboardSessionDetail(cfg, id);
+    if (detail === null) throw new HttpException({ error: 'the dashboard has no transcript for this session' }, 404);
+    return detail;
   }
 }

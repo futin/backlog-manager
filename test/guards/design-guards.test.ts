@@ -354,6 +354,7 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-issue-status',
     '.ui-repo',
     '.ui-tree',
+    '.ui-subagents',
     '.chev'
   ];
 

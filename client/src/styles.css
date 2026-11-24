@@ -4945,6 +4945,42 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-glyph-tile[data-tone='amber'] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
 .ui-glyph-tile[data-tone='ink'] { background: var(--ink); color: var(--on-accent) }
 
+/* SubagentList — one session's subagents behind a `Subagents` disclosure (§8.4.4; the same look on §8.9's session card). The toggle is a quiet text button
+   with the chevron, never a chip: it opens a reading, it launches nothing. Open, the body is a hairline-topped list of rows at 12 px — the state pill and its
+   reason or `orphan` tag first, the label taking the slack and ellipsising, then the meta and times in quiet ink with tabular figures, the last tool last. */
+.ui-subagents { display: flex; flex-direction: column; gap: 6px; min-width: 0; container-type: inline-size }
+.ui-subagents-toggle {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 2px 0; border: 0; background: none; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--ink2)
+}
+.ui-subagents-toggle:hover { color: var(--ink) }
+.ui-subagents-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-top: 6px; border-top: 1px solid var(--hairline) }
+.ui-subagents-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink2); font-variant-numeric: tabular-nums }
+.ui-subagents-note { margin: 0; font-size: 12px; color: var(--ink3) }
+.ui-subagents-note.bad { color: var(--red) }
+.ui-subagents-rows { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none }
+.ui-subagents-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; font-size: 12px; color: var(--ink2) }
+.ui-subagents-state { display: inline-flex; align-items: baseline; gap: 6px; flex: none }
+.ui-subagents-reason { font-size: 11px; color: var(--red) }
+.ui-subagents-orphan {
+  padding: 0 6px; border-radius: 999px; border: 1px dashed var(--hairline2); font-size: 11px; font-weight: 500; color: var(--amber-ink); cursor: help
+}
+.ui-subagents-label { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink) }
+.ui-subagents-meta { flex: none; color: var(--ink3) }
+.ui-subagents-times { display: inline-flex; gap: 8px; flex: none; color: var(--ink3); font-variant-numeric: tabular-nums; white-space: nowrap }
+.ui-subagents-tool { flex: 1 1 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink3) }
+/* A narrow list (a phone, or §8.9's session card) breaks each row in a fixed place instead of wherever the words run out: the state and the label on the
+   first line, the label taking what is left; the meta and the times on the second; the tool on the third. The break is a zero-height flex item ordered
+   between the label and the meta, so the markup stays one row and a wide list is untouched. A container query, not a media query, because the same list
+   sits in a wide run drawer and a narrow card on one desktop screen. */
+@container (max-width: 520px) {
+  .ui-subagents-rows { gap: 10px }
+  .ui-subagents-row::after { content: ''; order: 1; flex-basis: 100%; height: 0 }
+  .ui-subagents-label { flex: 1 1 0 }
+  .ui-subagents-meta, .ui-subagents-times { order: 2 }
+  .ui-subagents-tool { order: 3 }
+}
+
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a
    selector is inside this block, and the block sits last in the file: with an

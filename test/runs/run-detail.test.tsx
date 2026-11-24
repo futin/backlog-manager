@@ -59,13 +59,14 @@ function archiveItem(
     questions?: string[];
     branch?: string | null;
     assumptions?: RunQueueItem['assumptions'];
+    sessionId?: string | null;
   } = {}
 ): ArchiveQueueItem {
   return {
     id,
     title: `${id} title`,
     stage,
-    sessionId: null,
+    sessionId: over.sessionId ?? null,
     worktree: null,
     branch: over.branch ?? null,
     pid: null,
@@ -1233,5 +1234,64 @@ describe('RunDetail — item-first restyle', () => {
     const status = document.querySelector('.runs-status');
     expect(status).toHaveTextContent('done');
     expect(screen.getByTestId('run-detail-facts')).not.toContainElement(status as HTMLElement);
+  });
+});
+
+/*
+  #611: each item row with a session id carries a `Subagents` disclosure — on a local run, while the dashboard has agents on. A remote run's session lives
+  on another machine's dashboard, so nothing here could answer for it; with agents off the route is a 409, so the button would only open an error. An ended
+  item keeps its button: its subagents are the post-mortem. Closed, the disclosure fetches nothing, so these cases stub `fetch` only to see what opening asks.
+*/
+describe('RunDetail — subagents per item (#611)', () => {
+  const realFetch = global.fetch;
+  let urls: string[] = [];
+  beforeEach(() => {
+    urls = [];
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    global.fetch = jest.fn((url: string) => {
+      urls.push(url);
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ agents: [], running: 0, finished: 0 }) } as Response);
+    }) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  function withSessions(): OrchestratorArchiveRun {
+    return {
+      ...primarySummary(),
+      queue: [archiveItem('s-1', 'merged', { sessionId: 's-a' }), archiveItem('s-2', 'failed', { sessionId: 's-b' }), archiveItem('s-3', 'skipped')]
+    };
+  }
+  const buttonsIn = (id: string) => within(screen.getByTestId(`run-detail-item-${id}`)).queryAllByRole('button', { name: 'Subagents' });
+
+  it('2. draws one button per item with a session id, and each asks for its own session’s subagents', async () => {
+    render(<RunDetail summary={withSessions()} live={null} agentsOn {...CONTROL_PROPS} />);
+    expect(screen.getAllByRole('button', { name: 'Subagents' })).toHaveLength(2);
+    expect(buttonsIn('s-1')).toHaveLength(1);
+    expect(buttonsIn('s-2')).toHaveLength(1);
+    expect(buttonsIn('s-3')).toHaveLength(0);
+    expect(urls).toEqual([]);
+
+    await act(async () => {
+      buttonsIn('s-1')[0].click();
+    });
+    await act(async () => {
+      buttonsIn('s-2')[0].click();
+    });
+    expect(urls).toEqual(['/api/agents/sessions/s-a/subagents', '/api/agents/sessions/s-b/subagents']);
+  });
+
+  it('3. a remote run draws none, and neither does a local one while agents are off', () => {
+    const { rerender } = render(<RunDetail summary={withSessions()} live={primaryFull()} remote agentsOn {...CONTROL_PROPS} />);
+    expect(screen.queryAllByRole('button', { name: 'Subagents' })).toHaveLength(0);
+    rerender(<RunDetail summary={withSessions()} live={null} agentsOn={false} {...CONTROL_PROPS} />);
+    expect(screen.queryAllByRole('button', { name: 'Subagents' })).toHaveLength(0);
+  });
+
+  it('4. an ended (merged) item keeps its button', () => {
+    render(<RunDetail summary={withSessions()} live={null} agentsOn {...CONTROL_PROPS} />);
+    expect(screen.getByTestId('run-detail-item-s-1')).toHaveTextContent('merged');
+    expect(buttonsIn('s-1')).toHaveLength(1);
   });
 });

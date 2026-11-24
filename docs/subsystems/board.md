@@ -146,6 +146,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Select`               | `.ui-select`      | `value`, `options` (each with an optional `group`, drawn as a native `<optgroup>`), `onChange`, `disabled?`, `label?`, `title?` (a disabled select's sentence) | Settings rows, `WatchdogGroup`'s three ladders, `TickGroup`, both sheets' pickers, the Jira launch sheet, branch section, board sheet, Repositories card and the issue modal's `Move to…` |
 | `NumberField`          | `.ui-number`      | `value`, `min`, `max`, `unit?`, `onCommit`, `label?`, `disabled?`                                | `SuggestCard`'s threshold (Settings › Dashboards) — see below                   |
 | `Switch`               | `.ui-switch`      | `checked`, `onChange`, `label?`, `disabled?`, `onLabel?`, `offLabel?`, `title?`                  | `WatchdogGroup`'s Enabled row, `LaunchSheet`'s toggle, `JiraLaunchSheet`'s toggles, `JiraBranchSection`'s `Open MR when done` |
+| `SubagentDisclosure`, `SubagentList` | `.ui-subagents` | `sessionId` — a `Subagents` toggle, closed by default and fetching nothing; open, `SubagentList` polls `GET /api/agents/sessions/:id/subagents` every 10 s through `useSubagents` and draws the summary, the parent's badge and one row per subagent (#611) | `RunDetail`'s local item rows (agents on), `JiraSessionCard` (agents on) |
 | `Chevron`              | `.chev`           | `dir?: down\|up\|right` (default `down`), `className?` — one 10×10 stroked path, the other two directions rotations of it | `TrackerChip`'s and `JiraChip`'s carets and the Jira board picker's (`up` while the popover is open), `DispatchButton`'s mark (`right`), `JiraRunMenu`'s `Run ▾` caret |
 | `Fact`                 | `.item-fact*`     | `label`, `children` — one label over its value; the call site decides whether it is drawn at all | `ItemModal`, `JiraDetail` (the facts column)                                 |
 | `SettingsRow`, `SettingsGroup` | `.set-row`, `.set-group` | `SettingsRow{name, hint?, children?}`; `SettingsGroup{title, scope, right?, children}` | every Settings card, the Jira Setup cards, `JiraBoardSheet`'s Name & sync rows |
@@ -742,8 +743,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   and window focus, never a poll — the value changes on a person's pick), and `useTimeZone()`: `{ zone, stored, browser, save, saveError }`, `zone` being
   `stored ?? browser`. A component mounted without the provider reads the browser's zone, which is what the jsdom suites rely on.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
-  `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `useJiraSessions`, `useMachines`, `usePullRequests` and `useGitlab` (all through `useRefreshing`, below),
-  and of `useJiraBoard` directly:
+  `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `useJiraSessions`, `useMachines`, `usePullRequests`, `useGitlab` and `useSubagents` (all through
+  `useRefreshing`, below), and of `useJiraBoard` directly:
   one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines`
@@ -767,6 +768,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useTicks.ts` (`TICKS_POLL_MS`, 15 s) — the breaker's read: `{ data, error, saveError, save, reset }` over `lib/ticks.ts`. Mount and window focus, plus
   the 15 s poll only while `live` — the Runs › Ticks page passes `true`, Settings' card `false`. A save or a reset redraws from the POST's own answer, never a
   follow-up GET, and a refused write lands in `saveError`, beside the failed-GET `error`, so a refusal never blanks `data`.
+- `lib/subagents.ts` and `hooks/useSubagents.ts` (#611) — one session's subagents: `fetchSubagents` (the route's own error sentence, `malformed response` for a 200
+  with no `agents` array), the copy table's wording (`subagentSummary`, `subagentRowFacts`, `subagentBadge`, `subagentDuration`) over `shared/agent.ts`'s
+  `subagentState`, `isOrphan` and `waitingOnSubagent`, and the hook — `{ data, error, loading }`, a 10 s poll through `useRefreshing` with `armed` constant
+  `true`, mounted only by an open `SubagentDisclosure`, so closing it stops the poll; a failed read after a good one keeps `data` and sets `error`.
 - `hooks/useMachines.ts` (`MACHINES_POLL_MS`, 60 s) — `GET /api/dashboards/machines`, health and usage per machine, for Settings › Dashboards only: `{ machines,
   reload }`, entered through `useRefreshing` with `armed` constant `true` (the page's mount is the arming), and a failed read keeps the previous answer
   silently.

@@ -8,11 +8,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { useRef, useState } from 'react';
 
+import { JiraSessionCard } from '../../client/src/components/jira/JiraSessionCard';
 import { SessionOpen } from '../../client/src/components/jira/SessionOpen';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { DESKTOP_BUSY_DASHBOARD_TITLE, type OpenButtons } from '../../client/src/lib/jira-sessions';
 import type { JiraSessionState } from '../../shared/jira-sessions';
-import type { DashboardRow } from '../../shared/types';
+import type { DashboardRow, JiraSessionsPayload } from '../../shared/types';
 
 /*
   SessionOpen — the split Open (spec §4.5), the ninth Popover composer. Rendered straight, with `buttons` handed in as `openButtons` would answer, so each
@@ -250,5 +251,49 @@ describe('SessionOpen cleanup (#478)', () => {
     // One Confirm in the file, inside StopConfirm: the two copies cannot drift apart again.
     expect(sessionOpen.match(/<Confirm\b/g)).toHaveLength(1);
     expect(sessionOpen.match(/jira-stop-confirm/g)).toHaveLength(1);
+  });
+});
+
+/*
+  #611: the card carries the same `Subagents` disclosure as a run's item row, under its facts — only while the dashboard has agents on, which is the same
+  `agentsOn` the card already takes for its Stop row. Closed, it fetches nothing, so no fetch stub is needed to see whether it is drawn.
+*/
+describe('JiraSessionCard — subagents (#611)', () => {
+  const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+  function card(agentsOn: boolean) {
+    const link: JiraSessionsPayload['links'][number] = {
+      key: 'PAY-131',
+      sessionId: 's1',
+      how: 'run',
+      action: 'context',
+      name: 'jira PAY-131',
+      repo: '/Users/ada/pay',
+      branch: null,
+      surface: 'dashboard',
+      model: null,
+      effort: null,
+      snapshot: { summary: 'Refund partial captures', type: 'Story', parentKey: null },
+      startedAt: ago(3_600_000),
+      endedAt: null,
+      endReason: null,
+      quietSince: null,
+      reattachedAt: null,
+      state: 'working',
+      row: null,
+      stateSince: ago(3_600_000)
+    };
+    return render(
+      <SettingsProvider>
+        <JiraSessionCard link={link} now={Date.now()} busy={false} onUnlink={() => {}} onStop={() => {}} agentsOn={agentsOn} />
+      </SettingsProvider>
+    );
+  }
+
+  it('5. draws the Subagents button while agents are on, and none while they are off', () => {
+    const on = card(true);
+    expect(within(screen.getByRole('article')).getByRole('button', { name: 'Subagents' })).toBeInTheDocument();
+    on.unmount();
+    card(false);
+    expect(screen.queryByRole('button', { name: 'Subagents' })).toBeNull();
   });
 });

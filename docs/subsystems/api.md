@@ -311,6 +311,11 @@ A route lives in `agents/` when it calls a dashboard — spawn, stop, health, us
 `/api/items/abort` and `/api/dashboards/*` are here; the prefix never decides the module.
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
+- `GET /api/agents/sessions/:id/subagents` (#611) — one session's subagents, proxied fresh from HOME's dashboard `GET /api/sessions/:id`
+  (`dashboardSessionDetail`, `agents/dashboard-sessions.util.ts`, bounded at `SESSION_DETAIL_TIMEOUT_MS`, 8 s) and cached nowhere: this server cannot read
+  `~/.claude` and runs no `ps`, so the dashboard's transcript parse is the one reading. In order: an id `isSessionId` rejects is 400 `not a session id`, agents
+  off is 409 `agents are off` before any fetch, the dashboard's 404 is 404 `the dashboard has no transcript for this session`, and every other failure a 502.
+  Its one reader is the board's `Subagents` disclosure (a Runs item row, a Jira session card), polling every 10 s only while open.
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's and a groom plan's prompt have no
   closing clause: the finish clause is the sheet's picker, not editable text (only a capture's keeps its commit rule in the text). An execute or a groom plan
   carries `launchSurface` (`dashboard` | `desktop`) only while HOME's dashboard `/api/health` says `desktopAvailable: true`; its value is that answer's
