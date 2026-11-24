@@ -703,6 +703,25 @@ describe('SettingsView', () => {
       expect(screen.getByRole('switch', { name: 'fix if it fails' })).toBeDisabled();
     });
 
+    // The alternative to Auto-merge, so its row is never disabled — whatever `prAutoMergeDefault` holds.
+    it('offers the low-risk auto-merge default, never disabled', async () => {
+      renderView();
+      const low = await screen.findByRole('switch', { name: 'auto-merge low-risk PRs' });
+      await openMore('Auto-merge low-risk PRs');
+      expect(screen.getByText('preselects Auto-merge if low-risk on an execute PR launch')).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'Only when the PR is docs-only, tests-only or a patch of at most 3 files and 40 lines — then the session arms auto-merge and fixes failures.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'auto-merge PRs' })).toHaveAttribute('aria-checked', 'false');
+      expect(low).toBeEnabled();
+      await userEvent.click(low);
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').prLowRiskAutoMergeDefault).toBe(true);
+      await userEvent.click(screen.getByRole('switch', { name: 'auto-merge PRs' }));
+      expect(screen.getByRole('switch', { name: 'auto-merge low-risk PRs' })).toBeEnabled();
+    });
+
     // Task 7: the orchestrator's own default, seeding the sheet Task 8 adds —
     // not the per-item launch sheet the two rows above feed. Asserted the
     // same way as those: the row offers both real options (never a blank
@@ -797,6 +816,7 @@ describe('SettingsView', () => {
         'Groom finish',
         'Auto-merge PRs',
         'Fix if it fails',
+        'Auto-merge low-risk PRs',
         'Jira default action',
         'Jira default permission',
         'Dashboard link'
@@ -1020,6 +1040,7 @@ describe('SettingsView', () => {
         'Groom finish',
         'Auto-merge PRs',
         'Fix if it fails',
+        'Auto-merge low-risk PRs',
         'Dashboard link'
       ]);
     });

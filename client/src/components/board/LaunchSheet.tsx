@@ -133,11 +133,16 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   // toggles (and their clause line) before correcting it.
   const [autoMerge, setAutoMerge] = useState(false);
   const [fix, setFix] = useState(false);
+  // "Auto-merge if low-risk" is the alternative to auto-merge and an execute-only choice, but it seeds on the same PR edge as the other two. Its stored value
+  // is never rewritten while Auto-merge is on: the switch is merely DRAWN on and disabled then (display only), so turning Auto-merge back off shows and sends
+  // whatever it held before — unlike Fix, which auto-merge off clears because Fix means nothing alone and this does.
+  const [lowRisk, setLowRisk] = useState(false);
   const [seededPr, setSeededPr] = useState(false);
   if (seededPr !== isPr) {
     setSeededPr(isPr);
     setAutoMerge(isPr && settings.prAutoMergeDefault);
     setFix(isPr && settings.prAutoMergeDefault && settings.prFixDefault);
+    setLowRisk(isPr && settings.prLowRiskAutoMergeDefault);
   }
   // Fix without auto-merge has nothing to wait on, so turning auto-merge off takes fix with it rather than leaving a disabled switch reading on.
   const pickAutoMerge = (v: boolean): void => {
@@ -195,7 +200,16 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           // `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote groom and a capture send none of the four keys: the
           // server 400s a finish on either, and a remote groom's clause is always the commit rule.
           // `reviewer` is `{}` unless an execute's PR pick differs from Settings, so every other launch's body is unchanged.
-          ...(hasFinish ? (finish === 'pr' ? { finish, base, autoMerge, fix: autoMerge && fix, ...reviewer } : { finish }) : {}),
+          ...(hasFinish ? (finish === 'pr' ? {
+                    finish,
+                    base,
+                    autoMerge,
+                    fix: autoMerge && fix,
+                    // Execute only, like the clause: a groom has no low-risk path and the server 400s `true` there, and an in-place launch sends no key.
+                    // The explicit auto-merge wins, so the flag goes out false while it is on whatever the stored value is.
+                    ...(isExecute ? { lowRiskAutoMerge: !autoMerge && lowRisk } : {}),
+                    ...reviewer
+                  } : { finish }) : {}),
           // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
           // picker existed (Review Focus 1).
           ...runOn.request,
@@ -300,7 +314,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               groom draws it too, with no finish to read: the server appends the commit rule to it, and `in-place` is what yields exactly that. */}
           {(isExecute || isGroom) && (
             <div className="sheet-note">
-              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix, ...reviewer })}
+              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix, lowRiskAutoMerge: isExecute && !autoMerge && lowRisk, ...reviewer })}
             </div>
           )}
 
@@ -345,6 +359,18 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 />
                 <span>fix if it fails — the session stays and fixes failing checks and base conflicts</span>
               </div>
+              {isExecute && (
+                <div className="sheet-check">
+                  <Switch
+                    checked={autoMerge || lowRisk}
+                    onChange={setLowRisk}
+                    label="auto-merge if low-risk"
+                    disabled={autoMerge}
+                    title={autoMerge ? 'Auto-merge is on: every PR arms it' : undefined}
+                  />
+                  <span>auto-merge if low-risk — only a docs-only, tests-only or small-patch PR arms auto-merge and fix</span>
+                </div>
+              )}
               <div className="sheet-note">Needs Allow auto-merge on the GitHub repo; checked when the PR opens.</div>
             </>
           )}

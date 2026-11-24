@@ -41,6 +41,7 @@ describe('clampSettings', () => {
       groomDefaultFinish: 'pr',
       prAutoMergeDefault: true,
       prFixDefault: true,
+      prLowRiskAutoMergeDefault: false,
       settingsScope: 'shared',
       contentWidth: 'full',
       jiraDefaultAction: 's_0123abcd',
@@ -241,6 +242,12 @@ describe('groomDefaultFinish and the PR defaults', () => {
   it.each([['true'], [1], [null]])('clamps prFixDefault %p to false, and keeps true', (junk) => {
     expect(clampSettings({ prFixDefault: junk }).prFixDefault).toBe(false);
     expect(clampSettings({ prFixDefault: true }).prFixDefault).toBe(true);
+  });
+
+  it('prLowRiskAutoMergeDefault defaults off, clamps junk to false and keeps true', () => {
+    expect(DEFAULT_SETTINGS.prLowRiskAutoMergeDefault).toBe(false);
+    for (const junk of ['true', 1, null]) expect(clampSettings({ prLowRiskAutoMergeDefault: junk }).prLowRiskAutoMergeDefault).toBe(false);
+    expect(clampSettings({ prLowRiskAutoMergeDefault: true }).prLowRiskAutoMergeDefault).toBe(true);
   });
 
   it('leaves a stored fix-on with auto-merge-off unchanged', () => {
