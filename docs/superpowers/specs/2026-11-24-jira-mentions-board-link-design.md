@@ -70,6 +70,11 @@ and the mentions spec's own premise is that most mentions sit on no tracked boar
 - `JiraMentionsView` reads the context instead of calling the hook. Its "One read per page mount" header becomes "one read for the section": the
   provider is the one caller.
 - `useJiraMentions`'s existing mechanics (one timer, sequence-numbered reads and POST answers, the 15 s draft re-read) are unchanged; only its caller moves.
+- **One new trigger: the status says the cache is newer.** A check started outside the hook — the Jira chip's popover `Sync now` or its Mentions row
+  refresh, which post the sweep themselves and re-read only the shell status (`JiraChip`'s `sweepMentions` → `reload`) — moves the rail count at once while
+  the hook would wait out its own timer (up to ~3 min). Since a lagging marker is an anti-goal, the hook (it already reads `useJiraContext`) re-reads at
+  once when the status payload's `mentions.polledAt` is later than its own payload's `polledAt` — through the same sequence-numbered `reload`, so no second
+  request path. Test: a status update carrying a newer `mentions.polledAt` causes exactly one mentions read; an equal or older one causes none.
 
 ### 2. The mention marker (board → mention)
 
@@ -80,9 +85,12 @@ the ticket's entry in `data.issues`; `dismissed` tickets draw nothing). Accessib
 `click`, `auxclick` and an Enter/Space `keydown` from bubbling, the three `JiraCard`'s own handlers listen for (`JiraCard.tsx`'s `Contained` is the
 pattern), so a keyboard press or middle-click on the marker never opens Detail or the ticket page. Tests cover the keyboard and middle-click cases.
 
-**One home each** (`board.md`: one `components/ui/` home per look, one `lib/` home per derivation): the look is a new `components/ui/MentionMark.tsx` — a
-`<button>` worn as the warn-tone `Pill` (`ui-pill` warn: amber tint, `--amber-ink` word), not `Marker` (a marker is an unfilled word, not a control); the
-words are one `lib/jira-mentions.ts` function returning the `@ N` label and the `title` sentence for a count. All four homes draw `MentionMark`.
+**One home each** (`board.md`: one `components/ui/` home per look, one `lib/` home per derivation): the look is a new `components/ui/MentionMark.tsx`,
+whose header cites `.claude/DESIGN.md` §7 (Chip) and §8.9.7. It is NOT a `Pill` (a `<span>` whose header says nothing in it is clickable) nor a `Marker`
+(an unfilled word): it is `Chip` — already the board's one clickable control family — with a new `ChipVariant`, **`warn`**: the warn pill's amber tint
+and `--amber-ink` word on the `.ui-chip` base, one `.ui-chip-warn` variant rule in the primitives block beside the other `ui-chip-*` variants (so the
+design guard's one-base-rule-per-family holds; no new family). Size 28. `Chip.tsx`'s header and DESIGN.md §7 name the new variant. The words are one
+`lib/jira-mentions.ts` function returning the `@ N` label and the `title` sentence for a count. All four homes draw `MentionMark`.
 
 Where it draws, and nowhere else:
 
@@ -106,12 +114,14 @@ is also never a guess.
 ### 3. Open ticket page (mention → ticket)
 
 The control is worded **`Open ticket page`** everywhere, never `Open ticket` — the modal already has `Open ticket in Jira`, and the two must not read alike.
-- **List row** (`JiraMentionList`): an icon-only `Chip size={28}`, matching its `Open in Jira` neighbour, in the hover action cell before it; glyph: the
-  one Detail's `Open full page ↗` chip uses; `aria-label` and `title` `Open ticket page`. **Card** (`JiraMentionCards`): a text `Chip size={28}`
+- **List row** (`JiraMentionList`): an icon-only `Chip size={28}`, matching its `Open in Jira` neighbour, in the hover action cell before it; glyph:
+  `document` (the ticket's own page — `external`, the arrow out, stays `Open in Jira`'s alone, so the two icon chips side by side never look alike);
+  `aria-label` and `title` `Open ticket page`. **Card** (`JiraMentionCards`): a text `Chip size={28}`
   `Open ticket page`, before `Reply in Jira`. Dismissed rows (Show dismissed on) offer it too — reading the ticket is not answering it.
 - **Mention modal**: the right column's "This ticket is on none of your boards, so the board cannot open it." note is removed. A text chip
-  `Open ticket page` joins `Open ticket in Jira` in that column's chip row, before it, for every ticket; the head's "· on none of your boards" stays (still
-  true, still useful). Its click closes the modal and opens the ticket page. **An unposted edit in the reply box is dropped, exactly as Close and Escape
+  `Open ticket page` takes its place — drawn by the modal itself from `issue.key`, OUTSIDE `TicketFacts` (which, with its `Open ticket in Jira` chip, draws
+  only once the detail read is `ok`), so it is there while the ticket loads and after the read fails too; tests cover the loading and failed states. The
+  head's "· on none of your boards" stays (still true, still useful). Its click closes the modal and opens the ticket page. **An unposted edit in the reply box is dropped, exactly as Close and Escape
   already drop it** (the box's text is local state, `JiraMentionModal`'s draft box); the server-held draft survives and is there on return. No new guard: a
   guard on this one exit and not the other two would be inconsistent.
 - All three call one `onOpenPage(key)` threaded from `JiraView` — its existing `openPage`, which already computes the origin from the current page
@@ -132,9 +142,13 @@ The control is worded **`Open ticket page`** everywhere, never `Open ticket` —
   shown mention's place in it, and `state` is the page's own mapping (`MentionTicketState`: open, dismissed when the ticket is in `dismissed`, `gone` when
   in neither — answered or posted). A shown mention no longer in the order (Dismiss, a posted reply, answered elsewhere) draws no position and no
   neighbours, as the page draws a stop that left its order; a NEW mention arriving mid-walk joins the order and the position recounts.
-- Stacking: opened from a card or row it is the only dialog. Opened from `JiraDetail`'s strip it mounts over the ticket modal and ranks above it by mount
-  order (`useDialogEscape`), so Escape closes the mention modal and leaves the ticket modal up. On the ticket page it opens over the page. The Escape-stack
-  dialog count in `board.md` does not change — it is the same dialog, with a second home.
+- **The mention modal never opens over another modal.** Every `Modal` paints on one tier (scrim z 60, panel z 61, `styles.css`'s `.ui-modal-scrim` /
+  `.ui-modal`), and `over` (62 / 63) is already `JiraReplyEditor`'s, which opens over the mention modal — a ticket modal under a mention modal under a reply
+  editor would need a third tier. So the strip's marker inside `JiraDetail` **swaps** the dialogs: it empties the Detail walk and sets `mentionOpen` in one
+  handler, so the ticket modal closes and the mention modal opens on the same render; Escape or Close then returns to the page beneath (Board or Sessions),
+  not to the ticket modal. Opened from a card, header or row it is the only dialog; on the ticket page it opens over the page. The paint tiers, `ui/Modal.tsx`
+  and the Escape-stack dialog count in `board.md` are all unchanged — it is the same dialog, with more homes. Test: the strip marker in an open `JiraDetail`
+  leaves exactly one dialog mounted, the mention modal.
 - Its **Open ticket page** from `JiraView`: on the ticket page for the same key it only closes; elsewhere it calls `openPage` unchanged, so the origin is the
   page the user is on — `board`, or `sessions` for a `JiraDetail` opened from the Sessions page (my call: `← Sessions` is where that user came from).
 - After a Dismiss, the modal keeps its "Dismissed. It comes back…" footer with Undo (unchanged), and the marker behind it is gone on the same render.
@@ -144,10 +158,13 @@ The control is worded **`Open ticket page`** everywhere, never `Open ticket` —
 - **Rule files that change** (each in the same PR as the code): `board.md` — the client-poller bullet (`useJiraMentions` is called once, by
   `JiraMentionsProvider`, gated on the section being open), the mention modal's homes, and the Jira-pages bullet that lists every link reaching the ticket
   page (it gains the Mentions row, card and modal `Open ticket page`, mirrored in `JiraView`'s header); `DESIGN.md` — the marker under the card and List row sections and
-  §8.9.7's Open ticket page. The mentions spec gets a one-line "Superseded in part by" pointer at its "board cannot open it" note. `invariants.md` needs no change
-  (no new rendered-age cache: the marker shows no age).
+  §8.9.7's Open ticket page, and §7's new `warn` chip variant. The mentions spec gets a one-line "Superseded in part by" pointer at its "board cannot open
+  it" note. `docs/subsystems/invariants.md`'s Escape-stack section ("It opens from the Mentions page and over nothing else") changes to the mention modal's
+  homes and the never-over-another-modal rule (§4); `docs/subsystems/jira.md`'s client paragraph names the provider as `useJiraMentions`' caller. No new
+  rendered-age cache (the marker shows no age), so the five-caches invariant is untouched.
 - **Source guards.** Before pushing, `grep -l` each symbol the diff adds a caller of (`useJiraMentions`, `useJiraMentionsContext`, `JiraMentionModal`,
-  `openPage`) in `test/` and add every hit to the scoped run (CLAUDE.md). If a guard pins `useJiraMentions`' caller list, it moves to the provider.
+  `openPage`, `Chip`) in `test/` and add every hit to the scoped run (CLAUDE.md), plus `test/guards/design-guards.test.ts` for the new chip variant rule.
+  If a guard pins `useJiraMentions`' caller list, it moves to the provider.
 - The board's own poll, `JiraIssue` and every server route are untouched.
 
 ## Left to the builder
