@@ -94,8 +94,8 @@ Success: a question asked of the user on any ticket shows up on the page within 
 - Under the thread, the footer: "You have not commented since this mention." and **Dismiss**, **Draft a reply** (phase 2; absent in phase 1), **Reply in
   Jira** (primary, opens the focused comment). Dismiss swaps the footer for "Dismissed. It comes back if someone mentions you on <KEY> again." with **Undo**.
 - Right column, **Ticket**: status, assignee, reporter, priority, parent, updated, the description's first lines, **Open ticket in Jira**, and — for a ticket
-  on no board — the note "This ticket is on none of your boards, so the board cannot open it." (Superseded in part by `2026-11-24-jira-mentions-board-link-design.md`: the
-  Mentions page now links to the ticket page.)
+  on no board — the note "This ticket is on none of your boards, so the board cannot open it." (Superseded in part by
+  `2026-11-24-jira-mentions-board-link-design.md`: the Mentions page now links to the ticket page.)
 - The modal's data is a fresh read on open (see Routes), never the list's cache: the thread is the point and it must be current.
 
 ## Goals — phase 2 (Draft a reply)

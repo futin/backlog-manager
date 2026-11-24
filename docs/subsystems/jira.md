@@ -273,8 +273,9 @@ the CALLS meter and share the one 429 window; a failure keeps the last rows and 
 `Jira is not being polled` for an unconfigured or `unsupported` site, 429 with the stored `retryAt`), `POST /mentions/dismiss` and `/restore` (the dismissals live in `settings/jira-mentions.json`, `mentions.store.ts`, which
 the server alone writes) and `GET /issue/:key/thread`, the modal's fresh read. `GET /api/jira` carries a `mentions` summary `{ polledAt, count, detail,
 truncated, retryAt }` for the chip's popover row and the rail count. The client is `JiraMentionsView` (List and Cards behind a remembered switch), the
-`JiraMentionModal` (the ninth dialog) and `useJiraMentions`, called once by `JiraMentionsProvider` (mounted by `App`, enabled only while Jira is configured and its
-section is on screen) so the board's `@ N` marks, the Mentions page and the modal (`MentionModalHost`) read one payload; its age prints as `checked 1 min ago` through `checkedAge` in `lib/jira-mentions.ts`.
+`JiraMentionModal` (the ninth dialog) and `useJiraMentions`, called once by `JiraMentionsProvider` (mounted by `App`, enabled only while Jira is configured
+and its section is on screen) so the board's `@ N` marks, the Mentions page and the modal (`MentionModalHost`) read one payload; its age prints as `checked 1
+min ago` through `checkedAge` in `lib/jira-mentions.ts`.
 
 **The reply (phase 2).** The modal's `Draft a reply` starts a read-only session on the built-in `reply` action (`POST /api/agents/dispatch-jira` with `action: 'reply'`,
 mode `none`, no assign, no transition, no edited prompt, a dashboard launch sent one-shot — `oneShot: true`, the dashboard's Close when done, derived from the

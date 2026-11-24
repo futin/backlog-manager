@@ -54,7 +54,7 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * Dismiss and Restore are the hook's, which never reject — a refusal lands in `error` and the band says it in red — and replace the payload on success, so
  * the row leaves (or comes back) from the answer itself, not from a guess made here.
  *
- * The mention modal's WALK is held here** (Task 10; the dialog itself is drawn by `MentionModalHost`, which the board reuses), because its prev/next
+ * **The mention modal's WALK is held here** (Task 10; the dialog itself is drawn by `MentionModalHost`, which the board reuses), because its prev/next
  * walks the order THIS page draws: the List's rows (one per mention, the search applied) or the Cards' cards (one per ticket, `mentionCards` over the
  * same search), Show dismissed applied to both. `opened` is the stop the reader is on — a ticket and a mention — and its place in the order is
  * recomputed on every render (`mentionStepIndex`: by comment id in the List, by key in the Cards), so a poll that reorders or recounts the page moves

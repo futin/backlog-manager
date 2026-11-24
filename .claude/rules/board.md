@@ -14,8 +14,8 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `JiraMentionModal`, and since the reply editor `JiraReplyEditor` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
   again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
-  surfaces themselves: `Modal`'s composers are `ItemModal`, `JiraDetail`, `JiraMentionModal` (hosted by the Mentions page AND, since the board link, by `JiraView` — both through
-  `jira/MentionModalHost.tsx`, one dialog with two homes, never a new one) and `JiraReplyEditor`, `FormSheet`'s are `LaunchSheet`,
+  surfaces themselves: `Modal`'s composers are `ItemModal`, `JiraDetail`, `JiraMentionModal` (hosted by the Mentions page AND, since the board link, by
+  `JiraView` — both through `jira/MentionModalHost.tsx`, one dialog with two homes, never a new one) and `JiraReplyEditor`, `FormSheet`'s are `LaunchSheet`,
   `OrchestrateSheet`,
   `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
   so the four Jira surfaces and the Dashboards sheet joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal
@@ -82,8 +82,8 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   one `popstate` listener restores key, page and origin. `forgetLegacyTicketKey` removes the key an older build persisted. The Board and Sessions pages share
   one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or
   Sessions page, and the issue modal's `Open full page ↗` and a Cmd-, Ctrl- or middle-click on a card, list row or Sessions title, which `JiraView`'s `openPage`
-  turns into a key-store write (with the origin), and the Mentions page's `Open ticket page` (a chip on every List row and Card, a Cmd-, Ctrl- or middle-click on
-  a row's key, and the chip in the mention modal, which closes first and does nothing more on that ticket's own page) — and then
+  turns into a key-store write (with the origin), and the Mentions page's `Open ticket page` (a chip on every List row and Card, a Cmd-, Ctrl- or middle-click
+  on a row's key, and the chip in the mention modal, which closes first and does nothing more on that ticket's own page) — and then
   `onOpenJiraPage('ticket')`) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while
@@ -219,8 +219,9 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `JiraSessionsProvider` with `enabled` = Jira configured AND the Jira section on screen — while false there is no read, no timer and focus is a no-op, the last
   `data` is kept, and the false → true edge reads at once) is the third, the same shape on the same counter, aimed at the mentions
   cache's own clock: ONE timer at `polledAt + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS` floored at `JIRA_STATUS_FLOOR_MS`, none while unconfigured, focus
-  refetching at once, and a POST's answer taking a sequence number so an older GET cannot land over it, plus a re-read whenever the shell status's `mentions.polledAt` is strictly newer
-  than the payload's (a check ran elsewhere, the chip's Sync now), through that same counter. While any ticket in `issues` or `dismissed` carries
+  refetching at once, and a POST's answer taking a sequence number so an older GET cannot land over it, plus a re-read whenever the shell status's
+  `mentions.polledAt` is strictly newer than the payload's (a check ran elsewhere, the chip's Sync now), through that same counter. While any ticket in
+  `issues` or `dismissed` carries
   a reply-draft `session` (phase 2), `nextDelay` caps that same timer at `JIRA_REPLY_REREAD_MS` (15 s) — the 15 s re-read is the one timer shortened, never a
   second one, and it is the same sequence-numbered `reload`, so a POST's answer still wins over an older GET; once no `session` is left it is the cache clock
   again. `useJiraBoard` IS built on `useCoalescedFetch`. Why:
