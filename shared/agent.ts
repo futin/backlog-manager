@@ -942,23 +942,25 @@ export function oneLine(text: string): string {
 }
 
 /**
- * The `--finish` / `--base` / `--auto-merge` / `--fix` token, as one pattern. `AgentsService.dispatch` refuses an execute or groom body containing it (rule 8:
- * the sheet's pickers and checkboxes are the only channel for any of them), and `composePrompt` defuses it inside an item title with `defuseFinishFlags` — two
- * uses of one pattern, so what the refusal would match and what the defuser rewrites cannot drift. A word character or hyphen on either side means a longer
- * word (`--finished`, `--base-ref`, `--fix-up`, `--auto-merged`, `base64`), which is not a flag. Non-global on purpose: `.test` on a global regex carries
+ * The `--finish` / `--base` / `--auto-merge` / `--fix` / `--low-risk-auto-merge` token, as one pattern. `AgentsService.dispatch` refuses an
+ * execute or groom body containing it (rule 8: the sheet's pickers and checkboxes are the only channel for any of them), and `composePrompt`
+ * defuses it inside an item title with `defuseFinishFlags` — two uses of one pattern, so what the refusal would match and what the defuser
+ * rewrites cannot drift. A word character or hyphen on either side means a longer word (`--finished`, `--base-ref`, `--fix-up`, `--auto-merged`,
+ * `base64`), which is not a flag. Non-global on purpose: `.test` on a global regex carries
  * `lastIndex` between calls.
  */
-export const FINISH_FLAG = /(?<![\w-])--(finish|base|auto-merge|fix)(?![\w-])/;
+export const FINISH_FLAG = /(?<![\w-])--(finish|base|auto-merge|fix|low-risk-auto-merge)(?![\w-])/;
 
 /**
  * An item title is free text, and this repo's own history has titles that spell `--base` (`On a --base run the orchestrator's branch -d refuses…`). Left as
- * is, the board's own untouched execute or groom prompt would trip rule 8 on its quoted title and 400 the default dispatch. The `--` of each flag token (all
- * four `FINISH_FLAG` names, `--auto-merge` and `--fix` included) becomes two U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 8
- * nor the skill's flag parser sees a flag. Only the title goes through this — a token a person TYPES into the body is still refused.
+ * is, the board's own untouched execute or groom prompt would trip rule 8 on its quoted title and 400 the default dispatch. The `--` of each flag
+ * token (all five `FINISH_FLAG` names, `--auto-merge`, `--fix` and `--low-risk-auto-merge` included) becomes two U+2011 NON-BREAKING HYPHENs: a
+ * person reads the same title, while neither rule 8 nor the skill's flag parser sees a flag. Only the title goes through this — a token a person
+ * TYPES into the body is still refused.
  *
- * A `REVIEW_FLAG` token (`--review-mode`, `--review-small-max-lines`, …) gets the same swap: the reviewer override is refused in a typed body beside the four
- * finish flags, so a title spelling one would otherwise 400 the board's own untouched prompt — and, unrefused, would reach the skill's parser as a reviewer the
- * person never picked. The swap keeps everything after the `--`, so the visible words are unchanged.
+ * A `REVIEW_FLAG` token (`--review-mode`, `--review-small-max-lines`, …) gets the same swap: the reviewer override is refused in a typed body beside the five
+ * finish flags, so a title spelling one would otherwise 400 the board's own untouched prompt — and, unrefused, would reach the skill's parser as a
+ * reviewer the person never picked. The swap keeps everything after the `--`, so the visible words are unchanged.
  */
 export function defuseFinishFlags(text: string): string {
   return text
@@ -1026,6 +1028,9 @@ export const COMMIT_RULE =
  * `review` (a reviewer override the server has already run through `parseReviewConfig`) appends its `reviewFlags` last inside the same backticks, after
  * `--base` and after `--auto-merge [--fix]`, so the skill's parser reads them with the rest; the prose never names them. Absent, the clause is byte-identical
  * to what it was before the override existed.
+ *
+ * `lowRiskAutoMerge` without `autoMerge` is a third sentence: the same arm-and-fix behaviour, but only if the skill's classifier calls the diff low-risk;
+ * otherwise the run ends as a plain PR run. Beside `autoMerge` it is ignored — the explicit flag wins, and the clause is today's.
  */
 export function finishClause(action: FinishAction, finish: ExecuteFinish, base: string, flags: FinishFlags = {}): string {
   if (finish === 'in-place') return COMMIT_RULE;
@@ -1033,6 +1038,14 @@ export function finishClause(action: FinishAction, finish: ExecuteFinish, base: 
   const fix = autoMerge && flags.fix === true;
   const reviews = action === 'execute' ? 'reviews, ' : '';
   const reviewText = flags.review ? ` ${reviewFlags(flags.review).join(' ')}` : '';
+  if (!autoMerge && flags.lowRiskAutoMerge === true) {
+    // The explicit `--auto-merge` wins, so this form is reached only without it. Same backtick rule as the others: the flag is spelled only inside them.
+    return (
+      `Finish with \`--finish pr --base ${base} --low-risk-auto-merge${reviewText}\`: the skill commits, ${reviews}pushes and opens the PR into ${base}, ` +
+      `then arms GitHub auto-merge and fixes failing checks and conflicts with ${base} only if the PR's diff is docs-only, tests-only or a small patch; ` +
+      'the skill never merges itself.'
+    );
+  }
   if (!autoMerge) {
     return `Finish with \`--finish pr --base ${base}${reviewText}\`: the skill commits, ${reviews}pushes and opens the PR into ${base}, and never merges.`;
   }

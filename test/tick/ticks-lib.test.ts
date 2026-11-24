@@ -133,12 +133,22 @@ describe('fetchers', () => {
     global.fetch = realFetch;
   });
 
-  const payload: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [proj('a')] };
+  const payload: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'default' }, projects: [proj('a')] };
   function stub(body: unknown, ok = true, status = 200): jest.Mock {
     const fn = jest.fn(() => Promise.resolve({ ok, status, json: () => Promise.resolve(body) } as Response));
     global.fetch = fn as unknown as typeof fetch;
     return fn;
   }
+
+  it.each([
+    ['lacks lowRiskAutoMerge', undefined],
+    ['carries "true"', 'true']
+  ])('fetchTicks rejects a payload whose config %s', async (_l, v) => {
+    const config = { ...payload.config, ...(v === undefined ? {} : { lowRiskAutoMerge: v }) } as Record<string, unknown>;
+    if (v === undefined) delete config.lowRiskAutoMerge;
+    stub({ ...payload, config });
+    await expect(fetchTicks()).rejects.toThrow();
+  });
 
   it('fetchTicks GETs /api/ticks and returns the payload', async () => {
     const fn = stub(payload);

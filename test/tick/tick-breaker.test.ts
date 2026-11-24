@@ -98,18 +98,41 @@ describe('readTickFile / writeTickFile', () => {
   const onDisk = (file: string): unknown => JSON.parse(readFileSync(file, 'utf8'));
 
   describe('readTickFile', () => {
+    it('reads lowRiskAutoMerge: false when the file is missing or the key is absent, and true only for a literal true', () => {
+      expect(readTickFile(join(dir, 'nope.json'))).toMatchObject({ lowRiskAutoMerge: false });
+      expect(readTickFile(withFile({}))).toMatchObject({ lowRiskAutoMerge: false });
+      expect(readTickFile(withFile({ lowRiskAutoMerge: true }))).toMatchObject({ lowRiskAutoMerge: true });
+      expect(readTickFile(withFile({ lowRiskAutoMerge: false }))).toMatchObject({ lowRiskAutoMerge: false });
+      for (const raw of ['true', 1, null, [true]]) expect(readTickFile(withFile({ lowRiskAutoMerge: raw }))).toMatchObject({ lowRiskAutoMerge: false });
+    });
     it('an absent file is the default', () => {
-      expect(readTickFile(join(dir, 'nope.json'))).toEqual({ ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'default' });
+      expect(readTickFile(join(dir, 'nope.json'))).toEqual({
+        ok: true,
+        haltAfter: 3,
+        maxPlans: 3,
+        maxPrs: 2,
+        lowRiskAutoMerge: false,
+        resetAt: {},
+        source: 'default',
+      });
     });
 
     it('a file is read, haltAfter clamped and non-integers read as 3', () => {
-      expect(readTickFile(withFile({ haltAfter: 5 }))).toEqual({ ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
+      expect(readTickFile(withFile({ haltAfter: 5 }))).toEqual({
+        ok: true,
+        haltAfter: 5,
+        maxPlans: 3,
+        maxPrs: 2,
+        lowRiskAutoMerge: false,
+        resetAt: {},
+        source: 'file',
+      });
       expect(readTickFile(withFile({ haltAfter: 0 }))).toMatchObject({ haltAfter: 1 });
       expect(readTickFile(withFile({ haltAfter: 42 }))).toMatchObject({ haltAfter: 10 });
       expect(readTickFile(withFile({ haltAfter: '7' }))).toMatchObject({ haltAfter: 3 });
       expect(readTickFile(withFile({ haltAfter: 2.5 }))).toMatchObject({ haltAfter: 3 });
       // a file with no haltAfter at all is still a file
-      expect(readTickFile(withFile({}))).toEqual({ ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
+      expect(readTickFile(withFile({}))).toEqual({ ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {}, source: 'file' });
     });
 
     // PINNED: the same rows as `CAP_CLAMP` in `tick-breaker.test.mjs`, so the board and `tick.mjs decide` read a hand-edited cap the same way.
@@ -170,36 +193,45 @@ describe('readTickFile / writeTickFile', () => {
   });
 
   describe('writeTickFile', () => {
+    it('writes lowRiskAutoMerge, carries it through other patches, and lets a later false replace a true', () => {
+      const file = withFile({ maxPrs: 5 });
+      writeTickFile({ lowRiskAutoMerge: true }, file);
+      expect(onDisk(file)).toMatchObject({ maxPrs: 5, lowRiskAutoMerge: true });
+      writeTickFile({ maxPrs: 4 }, file);
+      expect(onDisk(file)).toMatchObject({ maxPrs: 4, lowRiskAutoMerge: true });
+      writeTickFile({ lowRiskAutoMerge: false }, file);
+      expect(onDisk(file)).toMatchObject({ maxPrs: 4, lowRiskAutoMerge: false });
+    });
     it('from absent, a resetAt-only patch creates the file with haltAfter 3', () => {
       const file = join(dir, 'settings', 'tick.json');
       writeTickFile({ resetAt: { '/p': T(1) } }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: { '/p': T(1) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: { '/p': T(1) } });
     });
 
     it('from absent, a haltAfter-only patch writes an empty resetAt', () => {
       const file = join(dir, 'tick.json');
       writeTickFile({ haltAfter: 5 }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 5, maxPlans: 3, maxPrs: 2, resetAt: {} });
+      expect(onDisk(file)).toEqual({ haltAfter: 5, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: {} });
     });
 
     it('patching haltAfter keeps an existing resetAt', () => {
       const file = withFile({ haltAfter: 3, resetAt: { '/p': T(1), '/q': T(2) } });
       writeTickFile({ haltAfter: 7 }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 7, maxPlans: 3, maxPrs: 2, resetAt: { '/p': T(1), '/q': T(2) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 7, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: { '/p': T(1), '/q': T(2) } });
     });
 
     it('patching one resetAt key keeps the others, and the file’s haltAfter', () => {
       const file = withFile({ haltAfter: 6, resetAt: { '/p': T(1), '/q': T(2) } });
       writeTickFile({ resetAt: { '/p': T(9) } }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 3, maxPrs: 2, resetAt: { '/p': T(9), '/q': T(2) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, resetAt: { '/p': T(9), '/q': T(2) } });
     });
 
     it('patching one cap keeps haltAfter, resetAt and the other cap', () => {
       const file = withFile({ haltAfter: 6, maxPrs: 4, resetAt: { '/p': T(1) } });
       writeTickFile({ maxPlans: 4 }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 4, maxPrs: 4, resetAt: { '/p': T(1) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 4, maxPrs: 4, lowRiskAutoMerge: false, resetAt: { '/p': T(1) } });
       writeTickFile({ maxPrs: 1 }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 4, maxPrs: 1, resetAt: { '/p': T(1) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 4, maxPrs: 1, lowRiskAutoMerge: false, resetAt: { '/p': T(1) } });
     });
 
     it('clamps an out-of-range cap to the nearest bound', () => {
@@ -251,7 +283,7 @@ describe('readTickFile / writeTickFile', () => {
     it('writes a trailing newline and 2-space JSON, like the other settings files', () => {
       const file = join(dir, 'tick.json');
       writeTickFile({ haltAfter: 4 }, file);
-      expect(readFileSync(file, 'utf8')).toBe('{\n  "haltAfter": 4,\n  "maxPlans": 3,\n  "maxPrs": 2,\n  "resetAt": {}\n}\n');
+      expect(readFileSync(file, 'utf8')).toBe('{\n  "haltAfter": 4,\n  "maxPlans": 3,\n  "maxPrs": 2,\n  "lowRiskAutoMerge": false,\n  "resetAt": {}\n}\n');
     });
   });
 });

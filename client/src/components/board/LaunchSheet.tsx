@@ -47,8 +47,8 @@ import type { BacklogItem, ExecuteFinish, ItemDispatchResult, LaunchSurface, Per
  *
  * A `groom` on the home machine picks its finish the same way, seeded from its own Settings default; a groom sent to another machine has no finish at all
  * (the server 400s one) and draws only the clause line, which then reads the commit rule the server appends. Under PR, for either action, two Switches —
- * auto-merge, and fix-if-it-fails beneath it — ride as booleans beside `finish`/`base` and change the clause line as they flip. They are the §8.2/§8.6 Switch
- * row the remote-control toggle already uses.
+ * auto-merge, and fix-if-it-fails beneath it — ride as booleans beside `finish`/`base` and change the clause line as they flip; an execute under PR draws a
+ * third, "auto-merge if low-risk", beneath them, the alternative to auto-merge. They are the §8.2/§8.6 Switch row the remote-control toggle already uses.
  *
  * An execute or a groom on the home machine may open in the Claude desktop app instead of the dashboard's headless `claude`: an "Open in" Dashboard |
  * Desktop control, the §8.2/§8.6 pill `Segmented`, drawn only when the plan carries `launchSurface` — home's dashboard said `desktopAvailable` — and
@@ -133,11 +133,16 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   // toggles (and their clause line) before correcting it.
   const [autoMerge, setAutoMerge] = useState(false);
   const [fix, setFix] = useState(false);
+  // "Auto-merge if low-risk" is the alternative to auto-merge and an execute-only choice, but it seeds on the same PR edge as the other two. Its stored value
+  // is never rewritten while Auto-merge is on: the switch is merely DRAWN on and disabled then (display only), so turning Auto-merge back off shows and sends
+  // whatever it held before — unlike Fix, which auto-merge off clears because Fix means nothing alone and this does.
+  const [lowRisk, setLowRisk] = useState(false);
   const [seededPr, setSeededPr] = useState(false);
   if (seededPr !== isPr) {
     setSeededPr(isPr);
     setAutoMerge(isPr && settings.prAutoMergeDefault);
     setFix(isPr && settings.prAutoMergeDefault && settings.prFixDefault);
+    setLowRisk(isPr && settings.prLowRiskAutoMergeDefault);
   }
   // Fix without auto-merge has nothing to wait on, so turning auto-merge off takes fix with it rather than leaving a disabled switch reading on.
   const pickAutoMerge = (v: boolean): void => {
@@ -191,11 +196,24 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           remoteControl,
           // An execute, and a groom on home, always name their finish, even untouched — the server appends the closing clause from it, so an absent key
           // would read as in-place whatever the sheet showed. `base`, `autoMerge` and `fix` ride only under PR: a base or a toggle picked and then
-          // abandoned must not reach an in-place launch, which the server refuses; under PR both booleans are always present, and `fix` is sent as
-          // `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote groom and a capture send none of the four keys: the
-          // server 400s a finish on either, and a remote groom's clause is always the commit rule.
+          // abandoned must not reach an in-place launch, which the server refuses; under PR `autoMerge` and `fix` are always present (and, for an
+          // execute, `lowRiskAutoMerge`), and `fix` is sent as `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote
+          // groom and a capture send none of the five keys: the server 400s a finish on either, and a remote groom's clause is always the commit rule.
           // `reviewer` is `{}` unless an execute's PR pick differs from Settings, so every other launch's body is unchanged.
-          ...(hasFinish ? (finish === 'pr' ? { finish, base, autoMerge, fix: autoMerge && fix, ...reviewer } : { finish }) : {}),
+          ...(hasFinish
+            ? finish === 'pr'
+              ? {
+                  finish,
+                  base,
+                  autoMerge,
+                  fix: autoMerge && fix,
+                  // Execute only, like the clause: a groom has no low-risk path and the server 400s `true` there, and an in-place launch sends no key. The
+                  // explicit auto-merge wins, so the flag goes out false while it is on whatever the stored value is.
+                  ...(isExecute ? { lowRiskAutoMerge: !autoMerge && lowRisk } : {}),
+                  ...reviewer
+                }
+              : { finish }
+            : {}),
           // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
           // picker existed (Review Focus 1).
           ...runOn.request,
@@ -300,7 +318,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               groom draws it too, with no finish to read: the server appends the commit rule to it, and `in-place` is what yields exactly that. */}
           {(isExecute || isGroom) && (
             <div className="sheet-note">
-              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix, ...reviewer })}
+              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, {
+                autoMerge,
+                fix,
+                lowRiskAutoMerge: isExecute && !autoMerge && lowRisk,
+                ...reviewer
+              })}
             </div>
           )}
 
@@ -327,8 +350,9 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             </div>
           )}
 
-          {/* The PR finish's two Switches, the remote-control row's §8.2/§8.6 shape. Fix is disabled, not hidden, while auto-merge is off: it only means
-              something once GitHub is waiting to merge, and a dead control with its reason in `title` says that where a missing one would not. */}
+          {/* The PR finish's Switches (a third, "auto-merge if low-risk", for an execute), the remote-control row's §8.2/§8.6 shape. Fix is disabled, not
+              hidden, while auto-merge is off: it only means something once GitHub is waiting to merge, and a dead control with its reason in `title` says that
+              where a missing one would not. */}
           {isPr && (
             <>
               <div className="sheet-check">
@@ -345,6 +369,18 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 />
                 <span>fix if it fails — the session stays and fixes failing checks and base conflicts</span>
               </div>
+              {isExecute && (
+                <div className="sheet-check">
+                  <Switch
+                    checked={autoMerge || lowRisk}
+                    onChange={setLowRisk}
+                    label="auto-merge if low-risk"
+                    disabled={autoMerge}
+                    title={autoMerge ? 'Auto-merge is on: every PR arms it' : undefined}
+                  />
+                  <span>auto-merge if low-risk — only a docs-only, tests-only or small-patch PR arms auto-merge and fix</span>
+                </div>
+              )}
               <div className="sheet-note">Needs Allow auto-merge on the GitHub repo; checked when the PR opens.</div>
             </>
           )}

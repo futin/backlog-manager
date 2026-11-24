@@ -58,6 +58,8 @@ an omitted --max-prs / --max-plans is tick.json's maxPrs / maxPlans (Settings �
 
 // Three hours: comfortably above any sane job `timeout:`, so a lock this old belongs to a tick the dashboard killed (spec, "A tick the dashboard killed").
 const DEFAULT_LOCK_TTL_MIN = 180;
+// The floor for appending `--low-risk-auto-merge`: the default TTL, which covers an execute's wait of up to 45 minutes with room to spare.
+const LOW_RISK_MIN_LOCK_TTL_MIN = 180;
 const DEFAULT_BASE = 'main';
 
 // The stack check is the one request with a deadline of its own: a tracker tick with the stack down must say `idle: stack down` promptly, not hang a
@@ -484,8 +486,22 @@ async function cmdDecide(argv) {
     if (pick === null) executeWhy = 'no ready bug or task';
   }
   if (pick !== null) {
-    const args = `${pick.id} --finish pr${opts.base === null ? '' : ` --base ${opts.base}`} ${MARKER}`;
-    return act(dir, ctx, base, now, opts, caps, say, { kind: 'execute', id: pick.id, reason: `execute ${pick.id}`, skill: 'backlog-execute', args });
+    // The low-risk auto-merge flag rides only an execute, and only when the lock TTL can outlast the wait it starts: an armed execute holds this lock for up to
+    // 45 minutes after opening its PR, so a job that passed a shorter `--lock-ttl` would see the lock recovered under a live session. The field tells the
+    // skill (and the board's log) which of the three it got — `true`, `false` (setting off) or the veto sentence — and exists on no other verdict.
+    let lowRisk = false;
+    if (settings.lowRiskAutoMerge) {
+      lowRisk = opts.lockTtl >= LOW_RISK_MIN_LOCK_TTL_MIN ? true : `off: lock TTL ${opts.lockTtl} min < ${LOW_RISK_MIN_LOCK_TTL_MIN}`;
+    }
+    const args = `${pick.id} --finish pr${opts.base === null ? '' : ` --base ${opts.base}`}${lowRisk === true ? ' --low-risk-auto-merge' : ''} ${MARKER}`;
+    return act(dir, ctx, base, now, opts, caps, say, {
+      kind: 'execute',
+      id: pick.id,
+      reason: `execute ${pick.id}`,
+      skill: 'backlog-execute',
+      args,
+      extra: { lowRiskAutoMerge: lowRisk }
+    });
   }
 
   // 6. Groom, when the plan-review pile has room.
@@ -530,7 +546,7 @@ function act(dir, ctx, base, now, opts, caps, say, unit) {
     if (!writeLock(dir, lock)) return say('busy', 'another tick');
     recordCaps(dir, unit.kind, caps, now);
   }
-  return say(unit.kind, unit.reason, { id: unit.id, skill: unit.skill, args: unit.args });
+  return say(unit.kind, unit.reason, { id: unit.id, skill: unit.skill, args: unit.args, ...unit.extra });
 }
 
 // Step 4, each signal with its own reason, first match wins. `null` when nothing is in the pipeline.

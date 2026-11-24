@@ -10,6 +10,9 @@ import {
   deriveAction,
   dispatchBlock,
   dispatchGate,
+  FINISH_FLAG,
+  defuseFinishFlags,
+  reviewFlags,
   finishClause,
   EXECUTE_HELD_REASON,
   IN_REVIEW_NO_PR_REASON,
@@ -872,6 +875,14 @@ describe('inReviewBlock', () => {
     expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { autoMerge: true, fix: true }));
   });
 
+  /* Same seam for the third sentence: §1 quotes it so a session can tell `--low-risk-auto-merge` came from the board's "auto-merge if low-risk" pick. */
+  it('pr-mode.md quotes the low-risk auto-merge sentence', () => {
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { lowRiskAutoMerge: true }));
+    // §9: the low-risk line sits above the PR URL, which stays last — `backlog-tick` records an execute `ok` only when the message ends with it.
+    expect(prMode).toContain('The PR URL stays the message\'s last line');
+  });
+
   /* The procedure's load-bearing literals: the one line a not-allowed repo gets (a person greps the final message for it), the two soft bounds the spec
      states in the file, the `--auto --<method>` spelling that arms rather than merges, and the force-push ban the fix loop's merge-of-base relies on. */
   it('auto-merge.md names the exact not-allowed line, the 45-minute and 3-round bounds, and forbids force-push', () => {
@@ -899,6 +910,24 @@ describe('inReviewBlock', () => {
     expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
     expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
     expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
+  });
+
+  /* The low-risk branch's doors and literals. The classifier call, each `low-risk:` line a person or the tick greps for, SKILL.md's flag and mode line, and
+     auto-merge.md's third caller: reword any one and the board's "auto-merge if low-risk" pick silently stops meaning what its sheet says. */
+  it('backlog-execute pins the low-risk branch: classifier call, every low-risk line, the flag, the mode line and the third caller', () => {
+    const dir = join(__dirname, '..', '..', 'skills', 'backlog-execute');
+    const read = (f: string) => readFileSync(join(dir, f), 'utf8').replace(/\s+/g, ' ');
+    const prMode = read('references/pr-mode.md');
+    expect(prMode).toContain('node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/tools/low-risk.mjs" --base <base>');
+    expect(prMode).toContain('low-risk: no — <reason> — PR left open for review');
+    expect(prMode).toContain('low-risk: not checked — no PR');
+    expect(prMode).toContain('low-risk: not checked — classifier call denied — PR left open for review');
+    expect(prMode).toContain('low-risk: not checked — classifier failed:');
+    expect(prMode).toContain('low-risk: <category> (<files> files, <lines> lines) — arming auto-merge');
+    const skill = read('SKILL.md');
+    expect(skill).toContain('--low-risk-auto-merge');
+    expect(skill).toContain(', auto-merge if low-risk');
+    expect(read('references/auto-merge.md').split('## ')[0]).toContain('--low-risk-auto-merge');
   });
 
   /* Groom's half of the same seam. Its sentence differs from execute's by "reviews, " (no reviewer runs on a groom PR), so a groom pr-mode.md that copied
@@ -1161,6 +1190,31 @@ describe('finishClause', () => {
     );
   });
 
+  /* The third form: GitHub auto-merge armed only if the classifier calls the diff low-risk. The sentence is pinned literally, not rebuilt from the function. */
+  it('low-risk auto-merge is its own sentence, and its flag sits inside the backticks', () => {
+    expect(finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --low-risk-auto-merge`: the skill commits, reviews, pushes and opens the PR into main, then arms GitHub ' +
+        "auto-merge and fixes failing checks and conflicts with main only if the PR's diff is docs-only, tests-only or a small patch; the skill never merges itself."
+    );
+  });
+
+  it('low-risk auto-merge puts the review flags after its own flag, in the auto-merge form\'s order', () => {
+    const review = DEFAULT_REVIEW_CONFIG;
+    const clause = finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true, review });
+    expect(clause).toContain(`\`--finish pr --base main --low-risk-auto-merge ${reviewFlags(review).join(' ')}\``);
+  });
+
+  it('the explicit --auto-merge wins over low-risk auto-merge', () => {
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, lowRiskAutoMerge: true })).toBe(finishClause('execute', 'pr', 'main', { autoMerge: true }));
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true, lowRiskAutoMerge: true })).toBe(
+      finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true })
+    );
+  });
+
+  it('low-risk auto-merge is ignored for in-place, as auto-merge is', () => {
+    expect(finishClause('execute', 'in-place', 'main', { lowRiskAutoMerge: true })).toBe(COMMIT_RULE);
+  });
+
   it('fix alone is ignored', () => {
     expect(finishClause('execute', 'pr', 'main', { fix: true })).toBe(EXEC_PR);
     expect(finishClause('groom', 'pr', 'main', { fix: true })).toBe(GROOM_PR);
@@ -1172,7 +1226,17 @@ describe('finishClause', () => {
      assert something. */
   it('flags only inside the backticks', () => {
     const review = DEFAULT_REVIEW_CONFIG;
-    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }, { review }, { autoMerge: true, review }, { autoMerge: true, fix: true, review }];
+    const flagSets = [
+      {},
+      { lowRiskAutoMerge: true },
+      { lowRiskAutoMerge: true, review },
+      { autoMerge: true },
+      { autoMerge: true, fix: true },
+      { fix: true },
+      { review },
+      { autoMerge: true, review },
+      { autoMerge: true, fix: true, review },
+    ];
     for (const action of ['execute', 'groom'] as const) {
       for (const flags of flagSets) {
         const clause = finishClause(action, 'pr', 'main', flags);
@@ -1183,6 +1247,20 @@ describe('finishClause', () => {
         expect(clause.slice(0, open) + clause.slice(close + 1)).not.toContain('--');
       }
     }
+  });
+});
+
+describe('FINISH_FLAG and --low-risk-auto-merge', () => {
+  it('matches the flag as a whole token only', () => {
+    expect(FINISH_FLAG.test('x --low-risk-auto-merge y')).toBe(true);
+    expect(FINISH_FLAG.test('x --low-risk-auto-merge-ish')).toBe(false);
+    expect(FINISH_FLAG.test('pre--low-risk-auto-merge')).toBe(false);
+  });
+
+  it('defuseFinishFlags swaps its hyphens like the other finish flags', () => {
+    const out = defuseFinishFlags('a --low-risk-auto-merge b');
+    expect(out).not.toContain('--low-risk-auto-merge');
+    expect(out).toBe('a \u2011\u2011low-risk-auto-merge b');
   });
 });
 

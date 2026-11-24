@@ -49,7 +49,9 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
   moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
   `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and the execute skill): the board's Run, the server's `plan`/`dispatch` ladder
   (`planReviewBlock`, always after `inReviewBlock`), the orchestrator's queue and `backlog-execute`'s own refusal. An outsider-filed tracker item carries a rung between those two, `unvettedBlock` (`UNVETTED_REASON`, #341), lifted only by a groom's pinned `body` write. A tick never merges, never commits a groom,
-  never promotes an idea, never rejects, never asks and never leaves anything running. `decide --peek` runs the same ladder with dry-run's lock semantics (no
+  never promotes an idea, never rejects, never asks and never leaves anything running — save an execute that carries `--low-risk-auto-merge`, which may leave an
+  auto-merge armed on its own PR (GitHub merges it, not the tick) and may wait up to 45 minutes for it while holding the lock, which is why `decide` appends the
+  flag only when `--lock-ttl` is at least 180. `decide --peek` runs the same ladder with dry-run's lock semantics (no
   lock, no stale-lock claim, no `state.json`), writes `last-decide.json` only on the final `idle`, and exits `10` for `idle`/`busy`; a tracker lock carries
   the health answer's `bootedAt`, and `record … failed` on a tracker project under its own lock stores `released` (no hash) when health is down or its
   `bootedAt` differs from the lock's, at most once in a row (`environment twice: ` → `failed`). Why:

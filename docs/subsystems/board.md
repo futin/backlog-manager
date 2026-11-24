@@ -212,7 +212,9 @@ A dispatch control — on the card and again in the modal — opens a launch she
 picker (`In place` / `PR`, seeded on every open from the `executeDefaultFinish` setting, default `In place`, never from the last launch) and, under PR, a
 **Base** select (the project's local branches, seeded to the literal `main` and never stored; a failed branch fetch leaves `main` alone) and two Switches,
 `auto-merge` and `fix if it fails` (seeded from `prAutoMergeDefault` and `prFixDefault` each time the finish becomes PR, cleared on leaving it; Fix is disabled,
-not hidden, while Auto-merge is off, and turning Auto-merge off takes Fix with it). A groom's sheet draws the same Finish/Base/toggle rows, seeded from
+not hidden, while Auto-merge is off, and turning Auto-merge off takes Fix with it). An **execute** sheet under PR draws a third Switch, `auto-merge if low-risk`
+(seeded from `prLowRiskAutoMergeDefault`; shown checked and disabled while Auto-merge is on, and sent as `lowRiskAutoMerge` only when Auto-merge is off). A
+groom's sheet draws the same Finish/Base/toggle rows, seeded from
 `groomDefaultFinish`, but only for a groom run on home: a remote groom has no finish (the server 400s one, and its clause is always the commit rule), so
 the rows wait for `useRunOn`'s `loading` to clear — until the offers answer `runOn` reads home, and a suggested remote landing a moment later would take a
 Finish the person had already touched away. Below the editable body a read-only line shows the closing clause exactly as the server will append it, tracking
@@ -479,9 +481,10 @@ status with no `interval` (an older API). A pick posts `POST /api/gitlab/sync` t
 The `Backlog tick` card (`TickGroup`) sits under the watchdog in the same column, because both are machine-wide controls — a value written to a file on the host
 — where the left column is the host report. It is three `Select`s of 1–10: the number of failed ticks in a row that halt a project (`haltAfter`, default 3), and
 the two caps a tick job applies when its prompt carries no flag (#378) — **Plans awaiting review** (`maxPlans`, default 3) and **Open execute PRs** (`maxPrs`,
-default 2), each hint naming the `--max-plans` / `--max-prs` flag that still wins. Each pick posts only its own key to `settings/tick.json` through `POST
+default 2) — and a fourth row, a Switch, **Auto-merge low-risk PRs** (`lowRiskAutoMerge`, default off), for the flag ticked executes carry; each cap's hint
+naming the `--max-plans` / `--max-prs` flag that still wins. Each pick posts only its own key to `settings/tick.json` through `POST
 /api/ticks/config`, and the card is drawn from the POST's own answer; it mounts `useTicks({ live: false })`, so it never polls. When the server reports `source:
-"unreadable"` all three are disabled and the first hint names the file, because every write would be a 409; a refused save renders one red line under the
+"unreadable"` all four are disabled and the first hint names the file, because every write would be a 409; a refused save renders one red line under the
 controls while every value shown stays the one the server holds.
 
 The `Time zone` card (`TimeZoneGroup`, #241) sits under the tick breaker, the third host control in that column: one `Select` over the platform's zones

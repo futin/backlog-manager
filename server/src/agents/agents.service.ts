@@ -453,8 +453,10 @@ export class AgentsService {
     // All the SHAPE rules run before the item lookup — they need only the body — and the one that needs git (the base proof) runs after every 409, so a
     // reader told "this item's next step is groom" is not first told their branch is wrong.
     //   1. a finish outside the vocabulary; 2. a finish on anything but an execute or a groom; 3. a finish on a groom sent to another machine;
-    //   4. `autoMerge` or `fix` that is not a boolean; then, on the DERIVED finish, 5. a base without `pr` and `pr` without a base; 6. `autoMerge: true` or
-    //   `fix: true` beside a finish other than `pr` (a `false` is an untouched toggle and is accepted anywhere); 7. `fix: true` without `autoMerge: true`.
+    //   4. `autoMerge`, `fix` or `lowRiskAutoMerge` that is not a boolean; then, on the DERIVED finish, 5. a base without `pr` and `pr` without a base;
+    //   6. `autoMerge: true` or `fix: true` beside a finish other than `pr` (a `false` is an untouched toggle and is accepted anywhere); 7. `fix: true`
+    //   without `autoMerge: true`; 7c. `lowRiskAutoMerge: true` on anything but an execute, then beside a finish other than `pr` (the action rule first, so a
+    //   groom hears "only to execute" rather than a finish rule it could not satisfy either; `false` is accepted anywhere, as the other toggles are).
     if (req.finish !== undefined && !isExecuteFinish(req.finish)) {
       throw new HttpException({ error: 'finish must be in-place or pr' }, 400);
     }
@@ -469,6 +471,9 @@ export class AgentsService {
     }
     if (req.fix !== undefined && typeof req.fix !== 'boolean') {
       throw new HttpException({ error: 'fix must be a boolean' }, 400);
+    }
+    if (req.lowRiskAutoMerge !== undefined && typeof req.lowRiskAutoMerge !== 'boolean') {
+      throw new HttpException({ error: 'lowRiskAutoMerge must be a boolean' }, 400);
     }
     // The base rules run on the DERIVED finish, so a remote execute with no `finish` is held to `pr`'s own rule — a base is required — rather than to a
     // second copy of it.
@@ -486,6 +491,14 @@ export class AgentsService {
     }
     if (req.fix === true && req.autoMerge !== true) {
       throw new HttpException({ error: 'fix requires autoMerge' }, 400);
+    }
+    //   7c. `lowRiskAutoMerge: true` — an execute-only opt-in (a groom has no low-risk path), and only under a PR finish, where there is a PR to arm. Checked
+    //      beside `autoMerge`/`fix`, not against them: with `autoMerge: true` the explicit flag wins in `finishClause`, so the pair is accepted.
+    if (req.lowRiskAutoMerge === true && req.action !== 'execute') {
+      throw new HttpException({ error: 'lowRiskAutoMerge applies only to execute' }, 400);
+    }
+    if (req.lowRiskAutoMerge === true && finish !== 'pr') {
+      throw new HttpException({ error: 'lowRiskAutoMerge applies only to finish pr' }, 400);
     }
     //   7a. A `review` (the sheet's Reviewer picker) on anything but an execute whose DERIVED finish is `pr` — a remote execute derives `pr` without sending
     //      `finish`, so it qualifies. Only that path runs `backlog-reviewer` and reads the flags: an in-place execute has no review step the skill's flags
@@ -508,9 +521,10 @@ export class AgentsService {
     if (req.surface === 'desktop' && !m.home) {
       throw new HttpException({ error: `the desktop app opens only on this machine, not on ${m.label}` }, 400);
     }
-    //   8. An execute or groom body carrying a `--finish`, `--base`, `--auto-merge` or `--fix` token. The pickers and checkboxes are the only channel for any
-    //      of them: the clause appended below is built from validated values alone, so a typed `--finish pr` under an In place pick would reach the skill
-    //      beside `COMMIT_RULE` (which carries no token) and push, a typed `--base develop` beside the clause's own `--base main` would leave the session
+    //   8. An execute or groom body carrying a `--finish`, `--base`, `--auto-merge`, `--fix` or `--low-risk-auto-merge` token. The pickers
+    //      and checkboxes are the only channel for any of them: the clause appended below is built from validated values alone, so a typed
+    //      `--finish pr` under an In place pick would reach the skill beside `COMMIT_RULE` (which carries no token) and push, a typed
+    //      `--base develop` beside the clause's own `--base main` would leave the session
     //      two bases, and a typed `--auto-merge` under a plain PR pick would arm a merge nobody chose. The skill reads the token as the signal wherever it
     //      appears in the trigger, and the board's own clause spells it inside backticks, so a body that quotes, backticks or parenthesises the token
     //      (`--finish pr`, "--finish pr", (--base x)) steers the session as surely as a bare one. The pattern therefore asks only that no word character or
@@ -519,7 +533,10 @@ export class AgentsService {
     //      refused.
     if ((req.action === 'execute' || req.action === 'groom') && FINISH_FLAG.test(prompt)) {
       throw new HttpException(
-        { error: "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge and --fix from the prompt" },
+        {
+          error:
+            "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge, --fix and --low-risk-auto-merge from the prompt"
+        },
         400
       );
     }
@@ -652,7 +669,7 @@ export class AgentsService {
       // in `COMMIT_RULE`, so one trailing copy is stripped first: the in-place clause puts the same bytes back, and a PR finish does not end up with a
       // "do not push" the clause then contradicts. An execute is NOT stripped — its existing "doubled, harmless" case stays. Capture keeps its
       // `COMMIT_RULE` inside the text and goes out unchanged.
-      prompt: appendFinishClause(prompt, action, finish, base, { autoMerge: req.autoMerge, fix: req.fix, review }),
+      prompt: appendFinishClause(prompt, action, finish, base, { autoMerge: req.autoMerge, fix: req.fix, lowRiskAutoMerge: req.lowRiskAutoMerge, review }),
       name: sessionName(item),
       permissionMode: req.permissionMode,
       maxPermission: status.spawnMaxPermission,
