@@ -52,14 +52,31 @@ import { WorktreeRow } from './JiraWorktreeRow';
  * under the add row in the server's words and changes nothing locally: the typed path stays in the field and a refused `×` removes no row — the card only
  * ever draws what the status says is stored. A landed write reloads the status even if this page has gone (`reload` is the shell's, which outlives it),
  * for the reason `JiraBoardSheet`'s save does.
+ *
+ * **After a landed path write the card waits for the status** (#587), the `JiraSkillsGroup` ↑/↓ way: `reload()` is not awaited and `busy` clears first, so
+ * without the wait a second `×` or `Add` would build its list from the status drawn BEFORE the write and overwrite it on the server — resurrecting the path
+ * just removed or dropping the one just added. Every control that issues a path write (each `×`, the project `Select`, the path field, `Add`, and Enter in
+ * the field) is held while the context still holds the `data` object that was on screen when the write landed; a new object ends the hold, and so does a
+ * failed status read, so a dead reload cannot lock the card for good — unless the status was ALREADY unreadable when the write landed, in which case the
+ * error is not the reload's and the hold lasts until a read succeeds (`useJira`'s floor retry or a focus). A path's defaults `Save` is not held: it posts
+ * that one path's two values, never a derived list, so it has nothing stale to send.
  */
 export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
-  const { data, reload } = useJiraContext();
+  const { data, error: unreadable, reload } = useJiraContext();
   const mounted = useMountedRef();
   const [project, setProject] = useState('');
   const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The `data` object on screen when the last path write LANDED, and whether the status was readable then. While the context still holds that very object
+  // the reload has not answered, and the lists drawn are the pre-write ones — see the header's "waits for the status" paragraph (#587). The refs are the
+  // latest render's, read when the POST answers rather than when it was sent, so a poll that landed mid-write does not end the hold before the reload it
+  // triggers has answered. A failed read ends the hold only when the status was readable at landing: `useJira` keeps `error` set until a read succeeds, so
+  // an error that PREDATES the write is not the reload failing, and letting it through would leave the race open exactly while the status is flaky.
+  const [wroteAgainst, setWroteAgainst] = useState<{ data: JiraStatusPayload | null; readable: boolean } | null>(null);
+  const latest = useRef({ data, readable: !unreadable });
+  latest.current = { data, readable: !unreadable };
+  const held = wroteAgainst !== null && data === wroteAgainst.data && !(unreadable && wroteAgainst.readable);
 
   const repos = data?.repos ?? {};
   const names = new Map((data?.projects ?? []).map((p) => [p.key, p.name]));
@@ -84,6 +101,8 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
     setError(null);
     try {
       const answer = await postJson('/api/jira/repos', { project: key, paths });
+      // Set in the same continuation as the `finally`'s `setBusy(false)`, so the two batch into one render and no frame draws the card enabled and unheld.
+      if (answer.ok && mounted.current) setWroteAgainst(latest.current);
       if (answer.ok) reload();
       if (!mounted.current) return answer.ok;
       if (!answer.ok) setError(errorOf(answer.body, `the repositories were not saved (HTTP ${answer.status})`));
@@ -114,7 +133,7 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
 
   async function add(): Promise<void> {
     const typed = path.trim();
-    if (project === '' || typed === '') return;
+    if (held || project === '' || typed === '') return;
     if (await write(project, [...listOf(repos, project), typed]) && mounted.current) setPath('');
   }
 
@@ -137,8 +156,11 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
               projectName={names.get(key)}
               path={p}
               home={home}
-              busy={busy}
-              onRemove={() => void write(key, paths.filter((q) => q !== p))}
+              busy={busy || held}
+              defaultsBusy={busy}
+              onRemove={() => {
+                if (!held) void write(key, paths.filter((q) => q !== p));
+              }}
               own={first ? { trees: kept === null ? [] : repoWorktrees(p, kept), liveKeys, stored: data?.repoDefaults?.[p], onSave: saveDefaults } : null}
             />
           );
@@ -152,20 +174,20 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
         />
       ))}
       <div className="set-row jira-setup-add">
-        <Select label="Jira project" value={project} options={options} disabled={projects.list === null || busy} onChange={setProject} />
+        <Select label="Jira project" value={project} options={options} disabled={projects.list === null || busy || held} onChange={setProject} />
         <input
           className="set-text jira-setup-add-path"
           type="text"
           aria-label="Repository path"
           placeholder="~/work/payments-api"
           value={path}
-          disabled={busy}
+          disabled={busy || held}
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void add();
           }}
         />
-        <Chip size={28} disabled={busy || project === '' || path.trim() === ''} onClick={() => void add()}>
+        <Chip size={28} disabled={busy || held || project === '' || path.trim() === ''} onClick={() => void add()}>
           Add
         </Chip>
       </div>
@@ -217,6 +239,7 @@ function RepoRow({
   path,
   home,
   busy,
+  defaultsBusy,
   onRemove,
   own
 }: {
@@ -224,7 +247,10 @@ function RepoRow({
   projectName: string | undefined;
   path: string;
   home: string | null;
+  /** Disables the `×`: a write is in flight, or a landed path write is waiting for the status (#587). */
   busy: boolean;
+  /** Disables the defaults fields and `Save`: a write in flight only — a defaults write posts one path's own values, so the path-list hold does not apply. */
+  defaultsBusy: boolean;
   onRemove: () => void;
   own: {
     trees: readonly JiraWorktree[];
@@ -251,7 +277,7 @@ function RepoRow({
           ×
         </button>
       </div>
-      {own !== null && <RepoDefaults path={path} home={home} stored={own.stored} busy={busy} onSave={own.onSave} />}
+      {own !== null && <RepoDefaults path={path} home={home} stored={own.stored} busy={defaultsBusy} onSave={own.onSave} />}
       {own !== null && open && count > 0 && (
         <div className="jira-setup-trees">
           <div className="jira-setup-trees-head">Open worktrees beside this checkout</div>

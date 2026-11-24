@@ -408,7 +408,10 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at
   mount, debounces the root search (`JIRA_ROOT_SEARCH_DEBOUNCE_MS`, 300 ms) and the JQL check (`JIRA_JQL_CHECK_DEBOUNCE_MS`, 500 ms), leaves validation to the
   server, and on any answer but a 200 stays open with the server's sentence. `JiraReposGroup` sends a project's whole list per write, the typed path trimmed
-  but otherwise as typed — the server alone normalises. Since the repo/branch work each distinct path's first row also carries its defaults — a base field
+  but otherwise as typed — the server alone normalises. After a landed path write it holds every path-writing control (`×`, the project select, the path
+  field, `Add`) until `GET /api/jira` answers with a new object or fails — a failure only when the status was readable when the write landed — so a second
+  write cannot build its list from the pre-write status and undo the first (#587); a path's defaults `Save` is not held. Since the repo/branch work each
+  distinct path's first row also carries its defaults — a base field
   (placeholder `e.g. develop`, the branches offered once the row's one `/refs` read lands), a pattern field (`{key}-{slug}`, `patternProblem` as a hint that
   never blocks) and `Save` to `/repo-defaults` — and an unreadable repo says `branches unavailable — <path> <reason>` with both fields still usable.
   The base has a never-blocking hint too, `defaultBaseProblem`'s `base is a branch name, without origin/`, which the route also refuses with: the tool adds

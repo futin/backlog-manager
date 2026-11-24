@@ -27,7 +27,9 @@ import { formatZonedClock, startOfZonedDay, zonedParts } from './time-zone';
  *
  * **The window is for the Ended group, and only the Ended group** (§7.2): a live session is never hidden by age, however long ago it started — a session that
  * has been running for ten days is the one a person most needs to see — and an ended row is judged on `endedAt` alone, never on when it started, so a session
- * that ran for a week and finished an hour ago is "an hour ago".
+ * that ran for a week and finished an hour ago is "an hour ago". An ended row whose `endedAt` does not parse is judged on `since` instead, and one where
+ * neither parses is never windowed out and sorts after every dated row (#587): reading it as epoch 0 hid it from every bounded window, and the Board's own
+ * rule (`isStale`) is that an unparseable stamp reads as fresh, never as gone.
  */
 
 export type ListChip = 'all' | 'needs-you' | 'working' | 'ended';
@@ -84,11 +86,6 @@ export interface ListRow {
   /** When this server first saw the session in this state; a reservation's is its `startedAt`. */
   since: string;
 }
-
-const ms = (iso: string | null): number => {
-  const t = iso === null ? NaN : Date.parse(iso);
-  return Number.isNaN(t) ? 0 : t;
-};
 
 /**
  * What `snapshot.type` (a bare name) says about a type's glyph: Jira's own sub-task and epic names. The snapshot kept no level or flag, so this is a reading
@@ -236,8 +233,26 @@ function runOptionLabel(key: string, skills: readonly { id: string; name: string
   return skill.group === 'review' ? `Review the MR · ${skill.name}` : skill.name;
 }
 
-/** The ended group's order key: the end, or the state's own stamp for an `ended` link the store left without one. */
-const endedAtOf = (r: ListRow): number => ms(r.endedAt ?? r.since);
+/**
+ * The ended group's window and order key: the first of the end and the state's own stamp that PARSES, or `null` when neither does. The fallback is by
+ * parse, not by presence (#587): `endedAt ?? since` fell through only on `null`, so a garbage `endedAt` never tried `since`, and the old reader took
+ * the garbage as epoch 0 — older than every bounded window, so the row silently left 24 h, 7 d and 30 d and showed only under `All`.
+ */
+const endedAtOf = (r: ListRow): number | null => {
+  for (const stamp of [r.endedAt, r.since]) {
+    const t = stamp === null ? NaN : Date.parse(stamp);
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+};
+
+/** Ended order: dated rows newest first, every undated row after them, ties by id. */
+const endedOrder = (a: ListRow, b: ListRow): number => {
+  const ta = endedAtOf(a);
+  const tb = endedAtOf(b);
+  const byTime = ta === tb ? 0 : ta === null ? 1 : tb === null ? -1 : tb - ta;
+  return byTime || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+};
 
 export interface ListView {
   live: ListRow[];
@@ -275,7 +290,11 @@ export function applyListFilters(
   const kept = rows.filter((r) => {
     if (filters.repo !== null && projectLabel(r.repo) !== filters.repo) return false;
     if (filters.run !== null && runKey(r) !== filters.run) return false;
-    if (r.ended && span !== null && now - endedAtOf(r) > span) return false;
+    if (r.ended && span !== null) {
+      // An undated ended row is kept in every window: an unparseable stamp reads as fresh, never as hidden — the Board's `isStale` rule.
+      const end = endedAtOf(r);
+      if (end !== null && now - end > span) return false;
+    }
     if (needle === '') return true;
     return [r.key, r.issue.summary, r.repo, projectLabel(r.repo), r.branch ?? ''].some((f) => f.toLowerCase().includes(needle));
   });
@@ -293,7 +312,7 @@ export function applyListFilters(
   );
   return {
     live: shown.filter((r) => !r.ended).sort(deckOrder),
-    ended: shown.filter((r) => r.ended).sort((a, b) => endedAtOf(b) - endedAtOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    ended: shown.filter((r) => r.ended).sort(endedOrder),
     counts,
     repos,
     runs,

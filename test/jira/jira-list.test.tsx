@@ -735,3 +735,27 @@ describe('applyListFilters run options name a review skill', () => {
     expect(view.runs.map((r) => r.label).sort()).toEqual(['Groom ticket', 'Review the MR · Check MR']);
   });
 });
+
+describe('applyListFilters: an ended row whose stamps do not parse (#587)', () => {
+  // An unparseable `endedAt` used to read as epoch 0, so `now - 0` exceeded every bounded span and the row showed only under `All`. It must stay in every
+  // window and sort after the dated rows; a garbage `endedAt` beside a good `since` falls back to `since` and is windowed on it.
+  const ended = (id: string, endedAt: string | null, since: string) =>
+    ({ id, key: id, state: 'ended', ended: true, issue: { summary: '' }, link: null, repo: '/r', branch: null, endedAt, since }) as never;
+  const at = (window: '24h' | '7d' | '30d' | 'all', rows: never[]) =>
+    applyListFilters(rows, { ...DEFAULT_LIST_FILTERS, window }, '', [], Date.now());
+
+  it('keeps an undated ended row under every window, counts it, and sorts it after a dated one', () => {
+    const rows = [ended('PAY-2', 'garbage', 'also garbage'), ended('PAY-1', daysAgoStamp(0), daysAgoStamp(0))];
+    for (const window of ['24h', '7d', '30d', 'all'] as const) {
+      const view = at(window, rows);
+      expect(view.ended.map((r) => r.id)).toEqual(['PAY-1', 'PAY-2']);
+      expect(view.counts.ended).toBe(2);
+    }
+  });
+
+  it('falls back to `since` when `endedAt` does not parse', () => {
+    const rows = [ended('PAY-3', 'garbage', daysAgoStamp(10))];
+    expect(at('7d', rows).ended).toEqual([]);
+    expect(at('30d', rows).ended.map((r) => r.id)).toEqual(['PAY-3']);
+  });
+});

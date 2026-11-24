@@ -1249,7 +1249,8 @@ export function isIssueDetail(value: unknown): value is JiraIssueDetail {
 export async function fetchJiraDetail(key: string): Promise<JiraIssueDetail> {
   const res = await fetch(`/api/jira/issue/${encodeURIComponent(key)}`);
   if (!res.ok) throw new Error(await failureOf(res));
-  const body: unknown = await res.json();
+  // A body that does not parse (a proxy's HTML page answering 200) reads as `null` and so falls to the guard's sentence, never the parser's own (#587).
+  const body: unknown = await res.json().catch(() => null);
   if (!isIssueDetail(body)) throw new Error('malformed response');
   return body;
 }
@@ -1319,7 +1320,7 @@ export async function fetchJiraRefs(repo: string, key: string | null): Promise<J
   if (key !== null) query.set('key', key);
   const res = await fetch(`/api/jira/refs?${query.toString()}`);
   if (!res.ok) throw new Error(await failureOf(res));
-  const body = (await res.json()) as Partial<JiraRepoRefs> | null;
+  const body = (await res.json().catch(() => null)) as Partial<JiraRepoRefs> | null;
   if (typeof body !== 'object' || body === null || typeof body.repo !== 'string' || typeof body.available !== 'boolean') throw new Error('malformed response');
   return body as JiraRepoRefs;
 }
@@ -1328,7 +1329,7 @@ export async function fetchJiraRefs(repo: string, key: string | null): Promise<J
 export async function fetchJiraWorktrees(): Promise<JiraWorktreesPayload> {
   const res = await fetch('/api/jira/worktrees');
   if (!res.ok) throw new Error(await failureOf(res));
-  const body = (await res.json()) as Partial<JiraWorktreesPayload> | null;
+  const body = (await res.json().catch(() => null)) as Partial<JiraWorktreesPayload> | null;
   if (typeof body !== 'object' || body === null || !Array.isArray(body.worktrees) || !Array.isArray(body.unavailable)) throw new Error('malformed response');
   return body as JiraWorktreesPayload;
 }
@@ -1702,7 +1703,7 @@ export async function stopJira(key: string, sessionId: string): Promise<void> {
 export async function fetchJiraSessions(open: boolean): Promise<JiraSessionsPayload> {
   const res = await fetch(open ? '/api/jira/sessions?open=1' : '/api/jira/sessions');
   if (!res.ok) throw new Error(await failureOf(res));
-  const body: unknown = await res.json();
+  const body: unknown = await res.json().catch(() => null);
   if (typeof body !== 'object' || body === null || !Array.isArray((body as { links?: unknown }).links)) throw new Error('malformed response');
   return body as JiraSessionsPayload;
 }
