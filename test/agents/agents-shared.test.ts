@@ -12,6 +12,7 @@ import {
   dispatchGate,
   finishClause,
   EXECUTE_HELD_REASON,
+  IN_REVIEW_NO_PR_REASON,
   IN_REVIEW_REASON,
   inReviewBlock,
   itemLadderBlock,
@@ -832,6 +833,17 @@ describe('inReviewBlock', () => {
     expect(inReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
   });
 
+  /* The label held while no PR that references the issue is open (ixray #214): the mapper sets `inReviewNoPr` beside `inReview`, and the sentence must stop
+     claiming a PR exists. The board and server say the precise one; the skills' hand copies below keep `IN_REVIEW_REASON`, because they read the label alone. */
+  it('says no open PR references the item when the label is held without one', () => {
+    expect(inReviewBlock(fakeItem({ source: 'github', inReview: true, inReviewNoPr: true }))).toBe('in review, but no open PR references this item');
+    expect(IN_REVIEW_NO_PR_REASON).toBe('in review, but no open PR references this item');
+  });
+
+  it('is null for inReviewNoPr without inReview — the label is what blocks, never the flag alone', () => {
+    expect(inReviewBlock(fakeItem({ source: 'github', inReviewNoPr: true }))).toBeNull();
+  });
+
   /* `orchestrate.mjs` cannot import this module (a plugin skill's `tools/` is a standalone copy of what was pushed), so its gate carries a hand-kept
      copy of the sentence. This is what keeps the "one string everywhere" constraint mechanical rather than a promise. */
   it('is the same sentence the orchestrator gate carries by hand', () => {
@@ -1243,7 +1255,8 @@ describe('itemLadderBlock', () => {
     ['unvetted over plan-review', { unvetted: true, planReview: true }, null, UNVETTED_REASON],
     ['held over unvetted and plan-review', { unvetted: true, planReview: true }, held, EXECUTE_HELD_REASON],
     ['in-review over unvetted and plan-review', { inReview: true, unvetted: true, planReview: true }, null, IN_REVIEW_REASON],
-    ['in-review over held', { inReview: true, unvetted: true, planReview: true }, held, IN_REVIEW_REASON]
+    ['in-review over held', { inReview: true, unvetted: true, planReview: true }, held, IN_REVIEW_REASON],
+    ['in-review-no-pr over unvetted and plan-review', { inReview: true, inReviewNoPr: true, unvetted: true, planReview: true }, null, IN_REVIEW_NO_PR_REASON]
   ])('%s', (_name, flags, executeHeld, expected) => {
     expect(itemLadderBlock(fakeItem(flags), executeHeld)).toBe(expected);
   });

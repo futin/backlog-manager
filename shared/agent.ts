@@ -511,11 +511,19 @@ export function runClaimBlock(item: BacklogItem, runs: OrchestratorRunsPayload['
 }
 
 /**
- * The in-review guard's one sentence (spec decision 9), and the global constraint that it is ONE string everywhere: the board's Run button, the server's
- * plan/dispatch ladder, the orchestrator's gate reason and execute's own refusal. `orchestrate.mjs` and the execute skill carry hand-kept copies — a plugin
- * skill's `tools/` is a standalone copy of what was pushed and cannot import this file — so a change here is a change in those copies too.
+ * The in-review guard's sentence while a PR that references the issue is open (spec decision 9). The board and the server say the PRECISE one of two: this,
+ * or `IN_REVIEW_NO_PR_REASON` below when the mapper found no open PR. The skills' copies keep this one for both cases — `orchestrate.mjs`'s gate reason and
+ * execute's own refusal read only the label and cannot tell the two apart, and a plugin skill's `tools/` is a standalone copy of what was pushed that cannot
+ * import this file — so a change here is a change in those hand-kept copies too.
  */
 export const IN_REVIEW_REASON = 'a PR is open for this item';
+
+/**
+ * The in-review guard's sentence while NO open PR references the issue (`BacklogItem.inReviewNoPr`, ixray #214): nothing referenced it, the latest one
+ * closed unmerged or merged into a non-default base. The label then guards work no PR carries — unpushed on some machine, or lost — and saying a PR is open
+ * sent a person looking for one that did not exist. Board and server only; the skills keep `IN_REVIEW_REASON` (above).
+ */
+export const IN_REVIEW_NO_PR_REASON = 'in review, but no open PR references this item';
 
 /**
  * Why this item cannot be dispatched because a PR for it is open, or null. A tracker issue carries `inReview` while its `in-review` label is on: execute in
@@ -528,7 +536,8 @@ export const IN_REVIEW_REASON = 'a PR is open for this item';
  * flag — its nearest guard is a new tree's execute branch or directory, `EXECUTE_HELD_REASON` below — so this reads the flag alone and does not re-check the source.
  */
 export function inReviewBlock(item: BacklogItem): string | null {
-  return item.inReview === true ? IN_REVIEW_REASON : null;
+  if (item.inReview !== true) return null;
+  return item.inReviewNoPr === true ? IN_REVIEW_NO_PR_REASON : IN_REVIEW_REASON;
 }
 
 /**
@@ -559,7 +568,7 @@ export function unvettedBlock(item: BacklogItem): string | null {
 }
 
 /**
- * The plan-review guard's one sentence, and — like `IN_REVIEW_REASON` — ONE string everywhere: the board's Run button, the server's plan/dispatch ladder, the
+ * The plan-review guard's one sentence, and — like `UNVETTED_REASON` — ONE string everywhere: the board's Run button, the server's plan/dispatch ladder, the
  * orchestrator's gate reason and backlog-tick's own skip reason. `orchestrate.mjs` carries a hand-kept copy (a plugin skill's `tools/` is a standalone copy
  * of what was pushed and cannot import this file), pinned to this constant by a jest twin test, so a change here is a change in that copy too.
  */

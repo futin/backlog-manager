@@ -250,6 +250,17 @@ describe('DispatchButton', () => {
     expect(document.getElementById(String(describedBy))).toHaveTextContent('a PR is open for this item');
   });
 
+  /* ixray #214: the label held while no PR that references the issue is open. The sentence must not claim a PR exists. */
+  it('disables with the no-open-PR reason when the item carries inReviewNoPr', () => {
+    render(<DispatchButton item={fakeItem({ source: 'github', inReview: true, inReviewNoPr: true })} status={READY} onDispatch={() => {}} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('in review, but no open PR references this item'));
+    expect(btn.getAttribute('title')).not.toContain('a PR is open for this item');
+    const describedBy = btn.getAttribute('aria-describedby');
+    expect(document.getElementById(String(describedBy))).toHaveTextContent('in review, but no open PR references this item');
+  });
+
   it('dispatches nothing when an in-review button is clicked', async () => {
     const onDispatch = jest.fn();
     render(<DispatchButton item={fakeItem({ source: 'github', inReview: true })} status={READY} onDispatch={onDispatch} />);
