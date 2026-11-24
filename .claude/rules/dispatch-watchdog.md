@@ -14,12 +14,13 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **Dispatch derives the action; it never accepts one.** `deriveAction` (`shared/agent.ts`) is the single implementation for the board's label and the server's
   validation; dispatch re-scans the file and 409s on disagreement. The prompt is the only client field taken outright
-  (one exception: an execute's or a groom's finish clause is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix`/`lowRiskAutoMerge` fields — plus, for an
-  execute whose derived finish is `pr` alone, `reviewFlags` of a `review` that `parseReviewConfig` accepted, inside the backticks after `--auto-merge [--fix]`
-  (`review` anywhere else, groom included, is a 400) — and an execute or groom body spelling `--finish`, `--base`, `--auto-merge`, `--fix`, `--low-risk-auto-merge` or a `--review-`
-  flag (`REVIEW_FLAG`) is a 400; `defuseFinishFlags` swaps both kinds of token in an item title); unknown `model`/`effort` drop rather than
-  reject; the controller rebuilds the body field by field and checks `action` with `isAgentAction`, never a hand-written comparison chain. `AgentAction` has
-  three members and ONE check runs ahead of all of them: `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a
+  (one exception: an execute's or a groom's finish clause is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix`/`lowRiskAutoMerge` fields
+  — plus, for an execute whose derived finish is `pr` alone, `reviewFlags` of a `review` that `parseReviewConfig` accepted, inside the backticks after
+  `--auto-merge [--fix]` (`review` anywhere else, groom included, is a 400) — and an execute or groom body spelling `--finish`, `--base`, `--auto-merge`,
+  `--fix`, `--low-risk-auto-merge` or a `--review-` flag (`REVIEW_FLAG`) is a 400; `defuseFinishFlags` swaps both kinds of token in an item
+  title); unknown `model`/`effort` drop rather than reject; the controller rebuilds the body field by field and checks `action` with
+  `isAgentAction`, never a hand-written comparison chain. `AgentAction` has three members and ONE check runs ahead of all of them: `capture` is
+  derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a
   `done/` item still derives `null`; capture spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of
   `out-of-scope/`. **Nothing here asks what an item's `source` is** — task-45's `source !== 'files' → null` first line was removed by task-46's dispatch lift,
   and re-adding it would hide the control for every tracker item again. `findItem` is a one-line delegate to `ItemsService.find`, so a `gh:<owner>/<repo>#<n>`
@@ -79,8 +80,9 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a skill's whose placeholders fill past it, or any prompt a long repo path pushes over, is a 400
   `prompt too long`). **Item `dispatch` is the exception to both**:
   its prompt is the launch sheet's, edited by a human, and is taken outright — save an execute's or a groom's finish clause, which dispatch appends from
-  validated `finish`/`base`/`autoMerge`/`fix`/`lowRiskAutoMerge` (a body spelling any of the five flags is a 400; a groom body's one trailing `COMMIT_RULE` is stripped first;
-  `autoMerge`/`fix` are accepted only with finish `pr`, and `fix` only with `autoMerge`; `lowRiskAutoMerge: true` only on an execute with finish `pr` (the explicit `autoMerge` wins beside it); a groom sent to another machine has no finish, a 400).
+  validated `finish`/`base`/`autoMerge`/`fix`/`lowRiskAutoMerge` (a body spelling any of the five flags is a 400; a groom body's one trailing `COMMIT_RULE` is
+  stripped first; `autoMerge`/`fix` are accepted only with finish `pr`, and `fix` only with `autoMerge`; `lowRiskAutoMerge: true` only on an execute with finish
+  `pr` (the explicit `autoMerge` wins beside it); a groom sent to another machine has no finish, a 400).
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-and-jira-spawn-prompts-are-composed-server-side)
 - **`agents/` reads the GitLab poller's cache and calls GitLab never.** `AgentsModule` imports `GitlabModule` for `JiraDispatchService`'s review checks
   (`GitlabPollerService.findMr` / `reposFor`, from memory, no request). The edge runs agents → gitlab and never back, like agents → jira; `GitlabModule` imports

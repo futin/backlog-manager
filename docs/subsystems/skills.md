@@ -269,7 +269,7 @@ project whose stack is down — or whose tracker cache the tool cannot trust yet
 `tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick, 1–10), else 2 / 3 — the flag always wins (#378). `tick.json`'s
 boolean `lowRiskAutoMerge`
 (default off, no CLI flag: it is a policy, not a cap) makes `decide` append `--low-risk-auto-merge` to an execute's args and print a `lowRiskAutoMerge` field on
-that verdict.
+every execute verdict: `true`, `false`, or `"off: lock TTL <n> min < 180"`.
 
 **A tracker project's index is believed only once the poller has read its repo.** The server's cache is in memory and per repo, so after every restart
 `/api/items` lists no rows for a project until that repo's first sync lands — and an empty list read as it stands is `nothing to do`. So `decide` also reads

@@ -342,10 +342,11 @@ recovers nothing it cannot prove.
 ## `tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced
 
 **The tick breaker** (spec: [2026-10-22-tick-breaker-design.md](../superpowers/specs/2026-10-22-tick-breaker-design.md)).
-`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "maxPlans": <int>, "maxPrs": <int>, "lowRiskAutoMerge": <bool>,
-"resetAt": { "<abs
-main-checkout path>": "<ISO>" } }` — how many failed ticks in a row halt a project, the two caps a tick job applies when its prompt carries no flag (#378), and
-when a person last Reset each one. It is the fourth file the server owns under `settings/` and it keeps the
+`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is
+`{ "haltAfter": <int>, "maxPlans": <int>, "maxPrs": <int>, "lowRiskAutoMerge": <bool>, "resetAt": { "<abs main-checkout path>": "<ISO>" } }` — how many failed
+ticks in a row halt a project, the two caps a tick job applies when its prompt carries no flag (#378), whether an execute a tick launches in `pr` mode may arm
+auto-merge on a low-risk diff (`lowRiskAutoMerge`, off by default), and when a person last Reset each one. It is the fourth file the server owns under
+`settings/` and it keeps the
 relationship the other three have with their reader: the server writes it (`writeTickFile`, the only write path, behind `POST /api/ticks/config` and `/reset`),
 and `tick.mjs` reads it (`readTickSettings`) for `decide` and `status`, while the server reads it only to answer `GET /api/ticks` and to merge its own write. It
 lives under `settings/` for the reason `watchdog.json` does, though it is not a watchdog setting: that directory is the one read-write mount the container has,
@@ -1789,18 +1790,18 @@ it reviews, a groom's does not — and today's `COMMIT_RULE` for `in-place`, bui
 proved the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. `flags` is `{ autoMerge, fix, lowRiskAutoMerge }`:
 `lowRiskAutoMerge` (execute only, `pr` only, and the sentence is not drawn beside `autoMerge`) adds
 ` --low-risk-auto-merge` and a classifier-gated sentence; `autoMerge` adds ` --auto-merge`
-and an arm-then-wait sentence, `fix` adds ` --fix` and is read only beside `autoMerge`. Both are validated booleans, accepted only with finish `pr` (`fix` only
-with `autoMerge`), so a lone `fix` or a flag under `in-place` is a 400 rather than a clause that lies; `false` is an untouched toggle and is accepted anywhere.
-`flags.review` is the Reviewer picker's override: accepted only for an execute whose DERIVED finish is `pr` (a remote execute's is, with no `finish` sent) —
-any other launch carrying it, groom included, is a 400 — then run through `parseReviewConfig`, and its `reviewFlags` go last inside the backticks, after
-`--base` and `--auto-merge [--fix]`, where the skill's parser reads them; the prose never names one.
+and an arm-then-wait sentence, `fix` adds ` --fix` and is read only beside `autoMerge`. All three are validated booleans, accepted only with finish `pr` (`fix`
+only with `autoMerge`), so a lone `fix` or a flag under `in-place` is a 400 rather than a clause that lies; `false` is an untouched toggle and is accepted
+anywhere. `flags.review` is the Reviewer picker's override: accepted only for an execute whose DERIVED finish is `pr` (a remote execute's is, with no `finish`
+sent) — any other launch carrying it, groom included, is a 400 — then run through `parseReviewConfig`, and its `reviewFlags` go last inside the backticks, after
+`--base` and `--auto-merge [--fix]` or `--low-risk-auto-merge`, where the skill's parser reads them; the prose never names one.
 A groom names its finish only on the home machine — one sent to another machine has none, a 400. The plan's execute and groom prompts carry no closing clause at
 all (`composePrompt` no longer appends `COMMIT_RULE` to a groom; `finishClause` does, byte for byte, under `in-place`), so the sheet's textarea holds the body
 alone and the clause sits read-only below it: deleting ` --finish pr` from an editable box would otherwise silently turn a PR run into an in-place one. For
-the same reason an execute or groom body spelling `--finish`, `--base`, `--auto-merge` or `--fix` (bare, quoted or backticked — a word character or hyphen on
-either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the clause, and so is one spelling a `--review-` flag
-(`REVIEW_FLAG`, which spares `--reviewed` and `--preview-x`); `defuseFinishFlags` swaps either kind of token in an item title for two U+2011s, so the board's
-own untouched prompt never trips the refusal. An old client that sends no `finish` is treated as
+the same reason an execute or groom body spelling `--finish`, `--base`, `--auto-merge`, `--fix` or `--low-risk-auto-merge` (bare, quoted or backticked — a word
+character or hyphen on either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the clause, and so is one spelling a
+`--review-` flag (`REVIEW_FLAG`, which spares `--reviewed` and `--preview-x`); `defuseFinishFlags` swaps either kind of token in an item title for two U+2011s,
+so the board's own untouched prompt never trips the refusal. An old client that sends no `finish` is treated as
 in-place and gets `COMMIT_RULE` appended even if an execute's prompt already ends with it — a doubled sentence, harmless, and never a 400; a groom body's one
 trailing copy is stripped first, so an old tab's groom sends the bytes it always did.
 
@@ -2264,11 +2265,12 @@ work. Each is re-validated against live state before it is used: the repository 
 defaults. And none of them spends: a sticky `max` costs money on every launch it rides, while a repository, a surface or a branch decides only where the work
 happens. Model, effort, permissions and the execute finish are the controls that spend or widen, and they still never come from the last launch, on this
 sheet as on every other.
-
-A groom's sheet is seeded the same way by `groomDefaultFinish` (same default, same `pickOne` clamp), and the two PR toggles beside the picker by
-`prAutoMergeDefault` and `prFixDefault` (booleans, default `false`, clamped by `pickBool`, so a stored string reads as the default). Fix only has meaning once
-auto-merge is on, so Settings disables its row while `prAutoMergeDefault` is off — but the stored `prFixDefault` is left alone, and the sheet sends `fix` only
-with `autoMerge`.
+A groom's sheet is seeded the same way by `groomDefaultFinish` (same default, same `pickOne` clamp), and the PR toggles beside the picker by
+`prAutoMergeDefault`, `prFixDefault` and, for an execute, `prLowRiskAutoMergeDefault` (booleans, default `false`, clamped by `pickBool`, so a stored string
+reads as the default). Fix only has meaning once auto-merge is on, so Settings disables its row while `prAutoMergeDefault` is off — but the stored
+`prFixDefault` is
+left alone, and the sheet sends `fix` only with `autoMerge`. The low-risk row is never disabled by Auto-merge, being the alternative to it, and the sheet draws
+it on only while Auto-merge is off.
 
 `backlog-orchestrate` reaches the same conclusion from the other side. It used to hard-code `--dangerously-skip-permissions` on its headless dispatch, justified
 by a premise the paragraph above disproves — that a prompt inside a headless session is a hang. It now dispatches under `--permission-mode auto` like everything
