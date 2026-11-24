@@ -1,6 +1,7 @@
 import { useTicks } from '../../hooks/useTicks';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { NumberField } from '../ui/NumberField';
+import { Switch } from '../ui/Switch';
 import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../../shared/types';
 
 /**
@@ -117,6 +118,18 @@ export function TickGroup() {
           ladder={PRS_OPTIONS}
           disabled={unreadable}
           onCommit={(v) => void save({ maxPrs: v })}
+        />
+      </SettingsRow>
+      <SettingsRow
+        name="Auto-merge low-risk PRs"
+        hint="ticked executes arm auto-merge and fix when the PR is docs-only, tests-only or a small patch"
+        more="Applies to every execute a tick launches in PR mode on this machine; a person's own launch keeps its own Auto-merge if low-risk pick."
+      >
+        <Switch
+          label="Auto-merge low-risk PRs"
+          checked={config.lowRiskAutoMerge}
+          disabled={unreadable}
+          onChange={(lowRiskAutoMerge) => void save({ lowRiskAutoMerge })}
         />
       </SettingsRow>
       {saveError !== null && (

@@ -12,7 +12,7 @@ import type { TicksPayload } from '../../shared/types';
  */
 
 function payload(haltAfter: number, names: string[] = ['a']): TicksPayload {
-  return { config: { haltAfter, maxPlans: 3, maxPrs: 2, source: 'file' }, projects: names.map((name) => ({ root: `/r/${name}`, name, lock: null, recent: [] })) };
+  return { config: { haltAfter, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'file' }, projects: names.map((name) => ({ root: `/r/${name}`, name, lock: null, recent: [] })) };
 }
 
 type Reply = { ok?: boolean; status?: number; body: unknown };

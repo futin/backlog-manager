@@ -91,7 +91,7 @@ function clampSetting(v: unknown, limits: { min: number; max: number; default: n
 }
 
 export type TickFileRead =
-  | { ok: true; haltAfter: number; maxPlans: number; maxPrs: number; resetAt: Record<string, string>; source: 'default' | 'file' }
+  | { ok: true; haltAfter: number; maxPlans: number; maxPrs: number; lowRiskAutoMerge: boolean; resetAt: Record<string, string>; source: 'default' | 'file' }
   | { ok: false; file: string; error: string };
 
 /**
@@ -113,6 +113,7 @@ export function readTickFile(file: string = tickFile()): TickFileRead {
         haltAfter: TICK_HALT_LIMITS.default,
         maxPlans: TICK_CAP_LIMITS.maxPlans.default,
         maxPrs: TICK_CAP_LIMITS.maxPrs.default,
+        lowRiskAutoMerge: false,
         resetAt: {},
         source: 'default'
       };
@@ -140,6 +141,8 @@ export function readTickFile(file: string = tickFile()): TickFileRead {
     haltAfter: clampSetting(obj.haltAfter, TICK_HALT_LIMITS),
     maxPlans: clampSetting(obj.maxPlans, TICK_CAP_LIMITS.maxPlans),
     maxPrs: clampSetting(obj.maxPrs, TICK_CAP_LIMITS.maxPrs),
+    // A literal `true` only: `"true"`, `1` and a missing key are all the opt-in default, off — a hand edit must not switch auto-merge on by accident.
+    lowRiskAutoMerge: obj.lowRiskAutoMerge === true,
     resetAt,
     source: 'file'
   };
@@ -166,7 +169,7 @@ export class TickFileUnreadable extends Error {
  * that fails leaves the old file as it was with no temp file beside it.
  */
 export function writeTickFile(
-  patch: { haltAfter?: number; maxPlans?: number; maxPrs?: number; resetAt?: Record<string, string> },
+  patch: { haltAfter?: number; maxPlans?: number; maxPrs?: number; lowRiskAutoMerge?: boolean; resetAt?: Record<string, string> },
   file: string = tickFile()
 ): void {
   const current = readTickFile(file);
@@ -175,6 +178,8 @@ export function writeTickFile(
     haltAfter: patch.haltAfter !== undefined ? clampSetting(patch.haltAfter, TICK_HALT_LIMITS) : current.haltAfter,
     maxPlans: patch.maxPlans !== undefined ? clampSetting(patch.maxPlans, TICK_CAP_LIMITS.maxPlans) : current.maxPlans,
     maxPrs: patch.maxPrs !== undefined ? clampSetting(patch.maxPrs, TICK_CAP_LIMITS.maxPrs) : current.maxPrs,
+    // `!== undefined`, never truthiness: a patch of `false` must replace a `true` on file.
+    lowRiskAutoMerge: patch.lowRiskAutoMerge !== undefined ? patch.lowRiskAutoMerge : current.lowRiskAutoMerge,
     resetAt: { ...current.resetAt, ...(patch.resetAt ?? {}) }
   };
   writeJsonAtomic(file, next);

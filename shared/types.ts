@@ -3204,12 +3204,14 @@ export interface TickLock {
 /**
  * `tick.json`, as the board shows it. `source: 'unreadable'` carries all three numbers — `haltAfter`, `maxPlans`, `maxPrs` — at their defaults for display
  * only and the reason in `error`: the file is never replaced while it is in that state, so the numbers on screen are not settings anyone can act on until a
- * person has fixed the file by hand.
+ * person has fixed the file by hand. `lowRiskAutoMerge` is the one boolean beside them: whether an execute a tick launches in `pr` mode arms auto-merge when the
+ * diff classifies as low-risk; absent from the file and in the unreadable state it is `false`, the opt-in default.
  */
 export interface TickConfig {
   haltAfter: number;
   maxPlans: number;
   maxPrs: number;
+  lowRiskAutoMerge: boolean;
   source: 'default' | 'file' | 'unreadable';
   error?: string;
 }

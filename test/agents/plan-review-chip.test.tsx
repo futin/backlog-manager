@@ -131,7 +131,7 @@ describe('BoardView and plan review', () => {
     planReview: true
   };
   const TICKS: TicksPayload = {
-    config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' },
+    config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'default' },
     projects: [
       {
         root: '/abs/alpha',
@@ -271,7 +271,7 @@ describe('BoardView plan-review filter', () => {
           : url.includes('/api/projects')
             ? projects
             : url.includes('/api/ticks')
-              ? ({ config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [] } satisfies TicksPayload)
+              ? ({ config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'default' }, projects: [] } satisfies TicksPayload)
               : { items, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as unknown as typeof fetch;

@@ -10,8 +10,8 @@ import type { TickConfig, TickProject, TickRecentEntry, TicksPayload } from '../
 
 const DAY_MS = 24 * 3_600_000;
 
-/** The numbers the Settings card can set — any subset of them in one write. */
-export type TickConfigPatch = Partial<Pick<TickConfig, 'haltAfter' | 'maxPlans' | 'maxPrs'>>;
+/** The values the Settings card can set — any subset of them in one write. */
+export type TickConfigPatch = Partial<Pick<TickConfig, 'haltAfter' | 'maxPlans' | 'maxPrs' | 'lowRiskAutoMerge'>>;
 
 /**
  * `unwrap`'s `as T` only promises a shape; this makes it true for the fields the Ticks page and the Settings card dereference — the same posture
@@ -25,6 +25,8 @@ function isTicksPayload(data: unknown): data is TicksPayload {
   const c = p.config as TickConfig | undefined;
   if (typeof c !== 'object' || c === null) return false;
   if (typeof c.haltAfter !== 'number' || typeof c.maxPlans !== 'number' || typeof c.maxPrs !== 'number') return false;
+  // The server always sends the flag; a payload without a boolean one is a stale or foreign server, and a toggle bound to `undefined` would lie.
+  if (typeof c.lowRiskAutoMerge !== 'boolean') return false;
   if (!(c.source === 'default' || c.source === 'file' || c.source === 'unreadable')) return false;
   if (!Array.isArray(p.projects)) return false;
   return p.projects.every(

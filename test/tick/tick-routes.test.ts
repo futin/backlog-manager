@@ -58,7 +58,7 @@ describe('the tick breaker routes', () => {
     writeFileSync(file, JSON.stringify(raw, null, 2));
   }
 
-  const readFile = (): { haltAfter: number; maxPlans: number; maxPrs: number; resetAt: Record<string, string> } => JSON.parse(readFileSync(file, 'utf8'));
+  const readFile = (): { haltAfter: number; maxPlans: number; maxPrs: number; lowRiskAutoMerge?: boolean; resetAt: Record<string, string> } => JSON.parse(readFileSync(file, 'utf8'));
   const row = (body: TicksPayload, root: string): TickProject => body.projects.find((p) => p.root === root)!;
 
   beforeEach(() => {
@@ -148,6 +148,7 @@ describe('the tick breaker routes', () => {
         haltAfter: 3,
         maxPlans: 3,
         maxPrs: 2,
+        lowRiskAutoMerge: false,
         source: 'default'
       });
       writeFixture({ haltAfter: 5 });
@@ -155,6 +156,7 @@ describe('the tick breaker routes', () => {
         haltAfter: 5,
         maxPlans: 3,
         maxPrs: 2,
+        lowRiskAutoMerge: false,
         source: 'file'
       });
       writeFileSync(file, '{ not json');
@@ -230,7 +232,7 @@ describe('the tick breaker routes', () => {
     it('writes haltAfter, keeps both resetAt keys byte-equal, and answers the fresh payload', async () => {
       const before = readFile().resetAt;
       const res = await post((await createApp()).getHttpServer(), { haltAfter: 7 }).expect(200);
-      expect((res.body as TicksPayload).config).toEqual({ haltAfter: 7, maxPlans: 3, maxPrs: 2, source: 'file' });
+      expect((res.body as TicksPayload).config).toEqual({ haltAfter: 7, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'file' });
       const after = readFile();
       expect(after.haltAfter).toBe(7);
       expect(JSON.stringify(after.resetAt)).toBe(JSON.stringify(before));
@@ -252,6 +254,8 @@ describe('the tick breaker routes', () => {
       ['a string maxPlans', { maxPlans: '5' }, 'maxPlans must be an integer'],
       ['a float maxPrs', { maxPrs: 2.5 }, 'maxPrs must be an integer'],
       ['one bad key beside a good one', { haltAfter: 4, maxPrs: null }, 'maxPrs must be an integer'],
+      ['a string lowRiskAutoMerge', { lowRiskAutoMerge: 'true' }, 'lowRiskAutoMerge must be a boolean'],
+      ['a numeric lowRiskAutoMerge', { lowRiskAutoMerge: 1 }, 'lowRiskAutoMerge must be a boolean'],
       ['an array body', [1], 'bad body']
     ])('refuses %s with a 400 and leaves the file alone', async (_label, body, error) => {
       const bytes = readFileSync(file, 'utf8');
@@ -260,10 +264,20 @@ describe('the tick breaker routes', () => {
       expect(readFileSync(file, 'utf8')).toBe(bytes);
     });
 
+    it('sets lowRiskAutoMerge alone, true then false, over a file that carries true', async () => {
+      const server = (await createApp()).getHttpServer();
+      const on = await post(server, { lowRiskAutoMerge: true }).expect(200);
+      expect((on.body as TicksPayload).config.lowRiskAutoMerge).toBe(true);
+      expect(readFile().lowRiskAutoMerge).toBe(true);
+      const off = await post(server, { lowRiskAutoMerge: false }).expect(200);
+      expect((off.body as TicksPayload).config.lowRiskAutoMerge).toBe(false);
+      expect(readFile()).toMatchObject({ haltAfter: 5, lowRiskAutoMerge: false });
+    });
+
     it('sets maxPlans alone, keeping haltAfter and resetAt on file', async () => {
       const before = readFile();
       const res = await post((await createApp()).getHttpServer(), { maxPlans: 5 }).expect(200);
-      expect((res.body as TicksPayload).config).toEqual({ haltAfter: 5, maxPlans: 5, maxPrs: 2, source: 'file' });
+      expect((res.body as TicksPayload).config).toEqual({ haltAfter: 5, maxPlans: 5, maxPrs: 2, lowRiskAutoMerge: false, source: 'file' });
       const after = readFile();
       expect(after).toMatchObject({ haltAfter: 5, maxPlans: 5 });
       expect(JSON.stringify(after.resetAt)).toBe(JSON.stringify(before.resetAt));
@@ -271,8 +285,17 @@ describe('the tick breaker routes', () => {
 
     it('sets all three in one body, ignoring an unknown key beside them', async () => {
       const res = await post((await createApp()).getHttpServer(), { maxPlans: 5, maxPrs: 4, haltAfter: 2, foo: 'x' }).expect(200);
-      expect((res.body as TicksPayload).config).toEqual({ haltAfter: 2, maxPlans: 5, maxPrs: 4, source: 'file' });
+      expect((res.body as TicksPayload).config).toEqual({ haltAfter: 2, maxPlans: 5, maxPrs: 4, lowRiskAutoMerge: false, source: 'file' });
       expect(readFile()).not.toHaveProperty('foo');
+    });
+
+    it('answers 409 and leaves the file byte-identical for a lowRiskAutoMerge post over an unreadable file; GET reads it as false', async () => {
+      writeFileSync(file, '{ half');
+      const server = (await createApp()).getHttpServer();
+      await post(server, { lowRiskAutoMerge: true }).expect(409);
+      expect(readFileSync(file, 'utf8')).toBe('{ half');
+      const got = (await request(server).get('/api/ticks').expect(200)).body as TicksPayload;
+      expect(got.config).toMatchObject({ source: 'unreadable', lowRiskAutoMerge: false });
     });
 
     it('answers 409 naming the file, and leaves it byte-identical, when tick.json is unreadable', async () => {
