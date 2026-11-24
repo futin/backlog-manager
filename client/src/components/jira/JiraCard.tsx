@@ -37,8 +37,9 @@ import { OpenChip, SessionOpen } from './SessionOpen';
  * **Everything the card prints comes from `lib/`.** The crumb's words are `crumbText`'s, the age `cardAgeStamp`'s (aged against the page's `now` so every
  * card shares one clock), the ended line `endedLine`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
  *
- * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): in the head, after the key and before the crumb, a `JiraMentionMarkFor` that draws only while the ticket has open mentions
- * and a `MentionOpenContext` opener exists above. Its press is stopped inside `MentionMark`, so it never also opens Detail.
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): in the head, after the key and before the crumb, a `JiraMentionMarkFor`
+ * that draws only while the ticket has open mentions and a `MentionOpenContext` opener exists above. Its press is stopped inside `MentionMark`, so it never
+ * also opens Detail.
  *
  * **The crumb never names the parent** (parent-lanes spec §3.4). The lane the card sits in already says it, so `crumbOf`'s `parent` kind draws nothing here;
  * the precedence — root, then parent, then mine — is unchanged, so a followed root still reads `root` and a parentless issue assigned to me reads

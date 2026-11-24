@@ -553,7 +553,9 @@ describe('JiraTicketBody — Children & comments tab', () => {
 });
 
 describe('JiraTicketBody — the strip’s Mentions cell (Jira mentions <-> board link, Task 5)', () => {
-  const data = mentionsPayload({ issues: [mentionIssue(ISSUE.key, [mention('m2', 'Ivo', 'newer', ISSUE.key, 0.1), mention('m1', 'Mara', 'older', ISSUE.key, 0.2)])] });
+  const data = mentionsPayload({
+    issues: [mentionIssue(ISSUE.key, [mention('m2', 'Ivo', 'newer', ISSUE.key, 0.1), mention('m1', 'Mara', 'older', ISSUE.key, 0.2)])]
+  });
 
   it('draws a Mentions cell holding @ 2 after the Agent cell, and a click calls the opener with the key', () => {
     const open = jest.fn();

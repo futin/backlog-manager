@@ -34,8 +34,9 @@ import { JiraTicketPage } from './JiraTicketPage';
  * It decides one thing: which of the section's four pages (Board, Sessions, Mentions, Setup) is drawn, read from `useJiraPage` — the module store the rail's
  * tree writes. It draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and
  * the in-page links that also land on a page (`Open board` and Sessions' `Open Setup`, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own
- * navigation threaded down from `App`, handed to the pages as given. The Mentions page's `Open ticket page` chips and the mention modal's are the ticket link instead: `openPage(key)` from
- * wherever the dialog was opened (origin `mentions` from the page, `board` or `sessions` from a mark), or just a close when the ticket page already shows that key.
+ * navigation threaded down from `App`, handed to the pages as given. The Mentions page's `Open ticket page` chips and the mention modal's are the ticket link
+ * instead: `openPage(key)` from wherever the dialog was opened (origin `mentions` from the page, `board` or `sessions` from a mark), or just a close when the
+ * ticket page already shows that key.
  *
  * Before a page can draw, the status has to have said `configured: true`, and until then this is where the section stands — `App` holds a stored `jira`
  * section through every answer that is not `configured: false` (spec §6.1's hold-and-fall), so these states are what that hold looks like:
@@ -85,16 +86,16 @@ import { JiraTicketPage } from './JiraTicketPage';
  * The origin is the key store's, beside the key (Jira ticket URL spec), not this component's memory: `App`'s popstate listener has to read it to send a
  * Back press to the page the ticket came from, and a reload re-reads it from the entry's state, so a ticket opened from Sessions says `← Sessions` after a
  * reload and a remount too. A pasted link carries no state and says `← Board`. The address (`?section=jira&ticket=<KEY>`) is `App`'s to load and to keep
- * in step with the screen; nothing here touches it except through the store. The page shares the launch sheet and `nudge` with the board pages and opens
- * no modal.
+ * in step with the screen; nothing here touches it except through the store. The page shares the launch sheet and `nudge` with the board pages and opens no
+ * modal of its own; the mention modal opens over it from its strip's `@ N` (below).
  *
- * **The mention modal's slot is HERE too** (Jira mentions <-> board link, §4; DESIGN.md §8.9.7). `mentionOpen` holds the opened snapshot `{ issue, mention }`, set by
- * an `@ N` mark through `MentionOpenContext` (provided around the pages AND the Detail, so a marker in a card, a lane header, a list row or the Detail's strip all
- * reach the same opener) and cleared with `walk` and `launch` on a page change. `MentionModalHost` draws it after the Detail and before the launch sheet. The
- * board's walk is derived on every render from the live payload — the ticket's current `mentions` (newest first), the shown mention's place in it, and no
- * position or neighbours once that mention has left it (a Dismiss, a posted reply) — so a poll never closes the dialog from under the reader. **It never opens over
- * another modal**: every `Modal` paints on one tier and the reply editor already owns the next, so the opener empties the Detail walk in the same handler that sets
- * the slot — the strip's mark SWAPS the ticket modal for the mention modal, and Escape then returns to the page beneath.
+ * **The mention modal's slot is HERE too** (Jira mentions <-> board link, §4; DESIGN.md §8.9.7). `mentionOpen` holds the opened snapshot `{ issue, mention }`,
+ * set by an `@ N` mark through `MentionOpenContext` (provided around the pages AND the Detail, so a marker in a card, a lane header, a list row or the Detail's
+ * strip all reach the same opener) and cleared with `walk` and `launch` on a page change. `MentionModalHost` draws it after the Detail and before the launch
+ * sheet. The board's walk is derived on every render from the live payload — the ticket's current `mentions` (newest first), the shown mention's place in it,
+ * and no position or neighbours once that mention has left it (a Dismiss, a posted reply) — so a poll never closes the dialog from under the reader. **It
+ * never opens over another modal**: every `Modal` paints on one tier and the reply editor already owns the next, so the opener empties the Detail walk in the
+ * same handler that sets the slot — the strip's mark SWAPS the ticket modal for the mention modal, and Escape then returns to the page beneath.
  */
 type OpenSlot = { issue: JiraIssue; childrenOf: JiraChildrenIndex | null };
 
@@ -140,7 +141,9 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     setMentionOpen({ issue: entry, mention: entry.mentions[0] });
   };
   const liveMentions =
-    mentionOpen === null || mentionsData === null || !mentionsData.configured ? [] : (mentionsData.issues.find((i) => i.key === mentionOpen.issue.key)?.mentions ?? []);
+    mentionOpen === null || mentionsData === null || !mentionsData.configured
+      ? []
+      : (mentionsData.issues.find((i) => i.key === mentionOpen.issue.key)?.mentions ?? []);
   const mentionAt = mentionOpen === null ? -1 : liveMentions.findIndex((x) => x.commentId === mentionOpen.mention.commentId);
   const stepMention = (to: number): void => {
     if (mentionOpen !== null && liveMentions[to] !== undefined) setMentionOpen({ issue: mentionOpen.issue, mention: liveMentions[to] });

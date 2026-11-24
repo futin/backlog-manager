@@ -46,7 +46,18 @@ export function mentionsPayload(over: Partial<JiraMentionsConfigured> = {}): Jir
 
 const ok = () => Promise.resolve({ ok: true } as const);
 export function mentionsState(data: JiraMentionsConfigured | null): JiraMentionsState {
-  return { data, loading: false, error: null, reload: () => {}, sweep: () => Promise.resolve(), checking: false, dismiss: ok, restore: ok, discardDraft: ok, postReply: ok } as JiraMentionsState;
+  return {
+    data,
+    loading: false,
+    error: null,
+    reload: () => {},
+    sweep: () => Promise.resolve(),
+    checking: false,
+    dismiss: ok,
+    restore: ok,
+    discardDraft: ok,
+    postReply: ok
+  } as JiraMentionsState;
 }
 
 /** The mentions context over `data` and an opener spy, around `children`. */

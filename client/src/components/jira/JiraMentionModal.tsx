@@ -383,7 +383,8 @@ export function JiraMentionModal({
             <TicketFacts detail={detail.value} now={now} />
           )}
         </div>
-        {/* Outside TicketFacts so it is there while the read is pending and after it fails: the page does its own read, and a ticket on no board still has one. */}
+        {/* Outside TicketFacts so it is there while the read is pending and after it fails: the page does its own read, and a ticket on no board still
+            has one. */}
         {onOpenPage !== null && (
           <div>
             <Chip

@@ -80,7 +80,17 @@ beforeEach(() => {
           key: 'PAY-1',
           total: 1,
           truncated: false,
-          comments: [{ id: 'm2', author: { accountId: 'acc-Ivo', name: 'Ivo' }, created: daysAgoStamp(0.1), markdown: 'newer question for you', mine: false, mentionsMe: true, open: true }]
+          comments: [
+            {
+              id: 'm2',
+              author: { accountId: 'acc-Ivo', name: 'Ivo' },
+              created: daysAgoStamp(0.1),
+              markdown: 'newer question for you',
+              mine: false,
+              mentionsMe: true,
+              open: true
+            }
+          ]
         })
     })) as never;
 });

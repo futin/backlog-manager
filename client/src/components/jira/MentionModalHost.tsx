@@ -18,8 +18,8 @@ import { JiraMentionModal, type MentionTicketState } from './JiraMentionModal';
  * freshest copy of the issue, the repo picker, the session link and each write. A poll that moves the ticket to Dismissed therefore changes the footer
  * without a remount.
  *
- * `onOpenPage(key)` is the caller's way to the ticket's full page (board link Task 6): the modal's `Open ticket page` chip closes the dialog and then calls it with
- * the shown ticket's key; `null` draws no chip.
+ * `onOpenPage(key)` is the caller's way to the ticket's full page (board link Task 6): the modal's `Open ticket page` chip closes the dialog and then calls it
+ * with the shown ticket's key; `null` draws no chip.
  */
 export function MentionModalHost({
   issue,

@@ -38,9 +38,6 @@ export function LaneChevron({ label, open, locked, onToggle }: { label: string; 
  * JiraLaneHeader — the row above a lane's three cells (parent-lanes spec §3.2; .claude/DESIGN.md §8.9.1; mocks `Board.dc.html`, `BoardDeep.dc.html`). Three
  * kinds, one per `JiraLane['kind']`:
  *
- * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): on the on-board header only, beside its key (an off-board or `No parent` header has no entry of its own to open), a `JiraMentionMarkFor` that draws only while the ticket has open mentions
- * and a `MentionOpenContext` opener exists above. Its press is stopped inside `MentionMark`, so it never also opens Detail.
- *
  * **On the board.** The header issue's card laid out as a row — it was a full card before lanes and loses nothing by becoming a header, which is why the mock's
  * reduced header is not the rule (`00-mock-audit.md`). Type tile, key, title (a button that opens Detail, as the card's face does), `↳ <parent>` when the issue
  * has a kept parent (`FoldMark`, the parent's summary as its title — a lane above, or a parent off the board), the crumb by the card's rule (root or mine;
@@ -55,6 +52,10 @@ export function LaneChevron({ label, open, locked, onToggle }: { label: string; 
  * the failure sentence sits under it on this header alone. Drawing requests nothing.
  *
  * **No parent.** The label, the spread bar and the count.
+ *
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): on the on-board header only, beside its key (an off-board or
+ * `No parent` header has no entry of its own to open). It is a `JiraMentionMarkFor` that draws only while the ticket has open mentions and a
+ * `MentionOpenContext` opener exists above; its press is stopped inside `MentionMark`, so it never also opens Detail.
  *
  * The count and the bar are the view's — the matching issues of the lane's subtree (§3.2, §6.2) — so a folded lane still says what it holds. A header drawn
  * only because its own issue matches a filter has a count of 0 and draws neither: an empty bar and `0 issues` beside a header that plainly matched would

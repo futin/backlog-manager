@@ -1038,8 +1038,8 @@ loaded comment, a muted line takes the fold row's place at the top — `This men
 in the mock). The footer under it: `You have not commented since this mention.`, `Dismiss`
 and `Reply in Jira ↗` (primary); after Dismiss, `Dismissed. It comes back if someone mentions you on <KEY> again.` with `Undo`; a dismissed mention opens
 with `Restore` in Dismiss's place. Right, **Ticket**: status, assignee, reporter, priority, parent, updated, the description's first lines, `Open ticket in
-Jira ↗`, `Open ticket page` (a text `Chip` beside it that closes the modal and goes to the ticket's full page, origin = the page it was opened from; always
-drawn where a caller hosts it, and on that ticket's own page it only closes the dialog), and the no-board note when it applies. Its data is a fresh read on
+Jira ↗`, `Open ticket page` (a text `Chip` under them that closes the modal and goes to the ticket's full page, origin = the page it was opened from; always
+drawn where a caller hosts it, and on that ticket's own page it only closes the dialog). Its data is a fresh read on
 open, never the list's cache, because the thread is the point.
 
 **Where it opens from** (board link). The Mentions page's rows and cards, and the `@ N` mark (§8.9.1) on a board card, lane header or List row and in the

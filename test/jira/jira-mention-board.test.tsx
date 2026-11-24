@@ -116,7 +116,15 @@ beforeEach(() => {
     const thread = /^\/api\/jira\/issue\/([^/]+)\/thread$/.exec(url);
     if (thread !== null) {
       const entry = mentionsAnswer.issues.find((i) => i.key === thread[1]);
-      const comments = (entry?.mentions ?? []).map((x) => ({ id: x.commentId, author: x.author, created: x.created, markdown: x.excerpt, mine: false, mentionsMe: true, open: true }));
+      const comments = (entry?.mentions ?? []).map((x) => ({
+        id: x.commentId,
+        author: x.author,
+        created: x.created,
+        markdown: x.excerpt,
+        mine: false,
+        mentionsMe: true,
+        open: true
+      }));
       return ok({ key: thread[1], total: comments.length, truncated: false, comments });
     }
     if (url.startsWith('/api/jira/issue/')) return ok({ ...issue('PAY-1'), description: '', children: [], transitions: [], boards: [], session: null });
@@ -244,8 +252,22 @@ describe('Open ticket page from the mention modal over the board', () => {
     const at = daysAgoStamp(0);
     sessionLinks = [
       {
-        key: 'PAY-1', sessionId: 's1', how: 'run', action: 'context', name: 'jira run', repo: '/Users/ada/pay', branch: null, surface: 'dashboard', model: null, effort: null,
-        snapshot: { summary: 'Summary of PAY-1', type: 'Task', parentKey: null }, startedAt: at, endedAt: null, endReason: null, quietSince: null, reattachedAt: null,
+        key: 'PAY-1',
+        sessionId: 's1',
+        how: 'run',
+        action: 'context',
+        name: 'jira run',
+        repo: '/Users/ada/pay',
+        branch: null,
+        surface: 'dashboard',
+        model: null,
+        effort: null,
+        snapshot: { summary: 'Summary of PAY-1', type: 'Task', parentKey: null },
+        startedAt: at,
+        endedAt: null,
+        endReason: null,
+        quietSince: null,
+        reattachedAt: null,
         state: 'working', row: null, stateSince: at
       }
     ];

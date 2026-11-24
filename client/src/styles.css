@@ -4270,7 +4270,11 @@ button.rail-count { cursor: pointer }
 .ui-chip-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline2)) }
 /* `warn` (§8.9.7's `@ N` mention mark): the `.ui-pill-warn` pair — `--amber-ink` on a 14% `--amber-solid` tint — so the mark takes no colour of its own. The
    border is the tint's own amber at 45% over the chip hairline, as `danger` does with red, and hover deepens the tint rather than adding a second hue. */
-.ui-chip-warn { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); border-color: color-mix(in srgb, var(--amber-solid) 45%, var(--hairline2)) }
+.ui-chip-warn {
+  color: var(--amber-ink);
+  background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip));
+  border-color: color-mix(in srgb, var(--amber-solid) 45%, var(--hairline2));
+}
 .ui-chip-warn:hover:not(:disabled) { background: color-mix(in srgb, var(--amber-solid) 22%, var(--strip)) }
 /* `Confirm` (bug-53) — the question and its two answers, drawn in the row the clicked control came from rather than floating over it (§8.7: nothing
    else on this board floats but `Popover`'s panels). Full `--ink` for the question rather than `.run-controls-note`'s quiet `--ink2`: that tone says "a state,

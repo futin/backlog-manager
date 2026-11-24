@@ -2944,7 +2944,10 @@ describe('the mention mark', () => {
 
 describe('the mention mark in the List view', () => {
   const data = mentionsPayload({
-    issues: [mentionIssue('PAY-180', [mention('a2', 'Ivo', 'newer', 'PAY-180', 0.1), mention('a1', 'Mara', 'older', 'PAY-180', 0.2)]), mentionIssue('PAY-120', [mention('b1', 'Lukas', 'one', 'PAY-120', 0.3)])]
+    issues: [
+      mentionIssue('PAY-180', [mention('a2', 'Ivo', 'newer', 'PAY-180', 0.1), mention('a1', 'Mara', 'older', 'PAY-180', 0.2)]),
+      mentionIssue('PAY-120', [mention('b1', 'Lukas', 'one', 'PAY-120', 0.3)])
+    ]
   });
   async function mountList() {
     setJiraView('list');

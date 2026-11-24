@@ -43,7 +43,8 @@ function Probe() {
 
 const tree = () => (
   <JiraContext.Provider value={{
-      data: { access, mentions: statusPolled === null ? null : { polledAt: statusPolled, count: 0, detail: null } } as unknown as JiraStatusPayload, loading: false,
+      data: { access, mentions: statusPolled === null ? null : { polledAt: statusPolled, count: 0, detail: null } } as unknown as JiraStatusPayload,
+      loading: false,
       error: false,
       reload: statusReload
     }}>

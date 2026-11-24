@@ -37,7 +37,8 @@ import { useEffect, useRef } from 'react';
  * and joined by construction with nothing here changed.
  *
  * Nine since Jira mentions: `JiraMentionModal` (`components/jira/JiraMentionModal.tsx`) composes `ui/Modal`, its third composer after the item modal and
- * `JiraDetail`, and joined by construction with nothing here changed. It is hosted by the Mentions page and opens over nothing but that page.
+ * `JiraDetail`, and joined by construction with nothing here changed. It is hosted by the Mentions page and by `JiraView` (both through
+ * `MentionModalHost`), opens over the Board, Sessions and the ticket page, and never stacks on the ticket modal (the strip's mark swaps them).
  *
  * Ten since the reply editor: `JiraReplyEditor` (`components/jira/JiraReplyEditor.tsx`) composes `ui/Modal`, its fourth composer, portalled into `.shell`
  * and mounted after the mention modal it opens from, so it ranks above it — joined by construction with nothing here changed.

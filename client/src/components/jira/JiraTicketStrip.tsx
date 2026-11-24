@@ -33,8 +33,9 @@ export type StripDeliveryCell =
  * the strip stay the body's (`JiraTicketBody`): the strip only says which was asked for, so the guard still spans every write the body sends, Stop and Unlink
  * included. The `Move to` panel's open state is the one piece of state here — it is this chip's, and nothing outside it reads it.
  *
- * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): the last cell, `Mentions`, after Agent, drawn only when the mark will be (the index holds the key and an opener exists), so an empty cell never shows; a click on it swaps Detail for the mention modal in `JiraView`, a `JiraMentionMarkFor` that draws only while the ticket has open mentions
- * and a `MentionOpenContext` opener exists above. Its press is stopped inside `MentionMark`, so it never also opens Detail.
+ * **The `@ N` mention mark** (DESIGN.md §8.9.7; Jira mentions <-> board link, Task 5): the last cell, `Mentions`, after Agent, drawn only when the mark will be
+ * (the index holds the key and an opener exists), so an empty cell never shows. It is a `JiraMentionMarkFor`; a press on it is stopped inside `MentionMark`,
+ * and `JiraView` answers it by swapping Detail for the mention modal — the strip sits INSIDE Detail, so the press never also opens it.
  *
  * **The Delivery and Agent cells are read, not derived, here.** `stripDelivery` and `stripAgent` (`lib/jira-strip.ts`) choose the pills, their order and
  * their words; this file draws them. A target pill's click hands its row id (`<project>\u0000<target>`) to `onDelivery`, which selects the Delivery tab and
