@@ -4,9 +4,11 @@ Short design, a small change. Approved approach: "new reason + Lift button".
 
 ## Why
 
-ixray #214 (2026-11-24): the board refused Execute with `a PR is open for this item`, and no PR existed. An in-place execute on 2026-11-20 had put
-`in-review` on the issue — `skills/backlog-execute/SKILL.md` does that on purpose, so nothing executes the item twice while its commit waits to be pushed —
-and its commit, branch `execute/214` and worktree `.worktrees/execute-214` were later lost. The label lifts by itself only when a referencing PR merges into
+ixray #214 (2026-11-24): the board refused Execute with `a PR is open for this item`, and no PR existed. An execute on 2026-11-20 had put `in-review` on
+the issue and left an Outcome comment saying its work was "committed as `8eabe0d` on branch `execute/214` in the worktree `.worktrees/execute-214`. It is not
+pushed." (`skills/backlog-execute/SKILL.md` puts the label on in `in-place` mode on purpose, so nothing executes the item twice while its fix waits to be
+pushed; in-place mode commits only when its prompt asks, and cuts no branch or tree of its own — this session's prompt evidently asked for both.) By
+2026-11-24 that commit, branch and tree no longer existed in the ixray checkout. The label lifts by itself only when a referencing PR merges into
 the default branch (#411, `TrackerPollerService.reviewLifted`), so with no PR it never lifts, and the only way out was a terminal (`backlog.mjs review 214
 off`) that nothing on the board names. Two faults: the sentence is false whenever no PR is open, and the board offers no way out.
 
@@ -16,7 +18,10 @@ off`) that nothing on the board names. Two faults: the sentence is false wheneve
   server's plan/dispatch ladder.
 - The item modal offers **Lift review** for such an item: a confirm, then `POST /api/items/review` with `inReview: false` (the route already exists; its
   remover is documented as "a person saying that PR is gone").
-- The confirm says whether this machine still holds the work: an `execute/<n>` branch or a `.worktrees/execute-<n>` tree in the project's checkout.
+- The confirm says what this machine can prove: whether an `execute/<n>` branch or a `.worktrees/execute-<n>` tree exists in the project's checkout. Those
+  names prove PRESENCE only. Their absence proves nothing: an in-place execute that ran in the main checkout leaves its fix uncommitted there under no name,
+  and work on another machine leaves nothing here at all. The confirm says so in its "not found" text, and Lift stays available in every state — the person
+  decides, the probe only informs.
 
 ## Non-goals and anti-goals
 
@@ -37,21 +42,44 @@ off`) that nothing on the board names. Two faults: the sentence is false wheneve
 
 - **Derivation (server).** `TrackerPollerService` gains the question "is a PR referencing this issue open?" — `decidingPull(...) === 'open'`, the same index
   `reviewLifted` reads. `mapIssue` sets a new optional flag on `BacklogItem` (true-or-absent, like `inReview`; name is the builder's) when `inReview` holds and
-  no referencing PR is open: no PR references it, or the latest closed one did not merge into the default branch. A poll's lag can show a just-opened PR's item
-  with the new reason for up to one poll; acceptable, the item stays blocked either way.
-- **Reason (shared).** A new constant beside `IN_REVIEW_REASON` in `shared/agent.ts`, wording roughly `in review, but no open PR references this item`
-  (builder may tune, must stay one sentence). `inReviewBlock` returns it when the new flag is set, else `IN_REVIEW_REASON`; `itemLadderBlock`'s order is
-  unchanged.
-- **Local hold (server).** A read-only, unguarded GET under `/api/items/...` answering whether `refs/heads/execute/<n>` or `.worktrees/execute-<n>` exists in
-  the project's checkout — the `executeHeldBlock` names, via `runGit`, per request, memoised nowhere, never mapped onto the item. A git failure or timeout
-  answers "unknown", never "not held". Tracker items only.
-- **Lift (client).** A component in the item modal beside `PlanApprove`, same shape (#367): shown only for an open item carrying the new flag; `Lift review` →
-  `ui/Confirm` inline, whose text carries the local-hold answer ("execute/214 is still on this machine — push it first" vs "no execute branch or worktree for
-  this item here; lift only if the work is gone or lives on another machine") → the POST → a `review lifted` note and a board re-read. A refusal prints the
-  server's sentence. The card's chip stays a disabled Execute with the new reason (no second control on the card).
+  no referencing PR is open. That covers every non-open `decidingPull` answer: no PR references it (`null`), the latest closed one did not merge, merged into
+  a non-default branch, or merged with its base not learned yet (`reviewLifted` is false there, so `inReview` holds, and no PR is open, so the flag is set).
+  `mapIssue` takes the answer as a new trailing parameter whose default is "a PR is open" — a caller with no poller keeps today's sentence and draws no Lift —
+  and both callers in `github.source.ts` (the list mapping and the single-item find) pass the poller's answer.
+- **Lag.** The PR index is the poller's, so a PR opened after the last sync shows the new reason and the Lift until the repo's next sync — its interval
+  (15 s / 1 m / 5 m), and never while sync is off or the repo sleeps on a rate limit. Every `pr`-mode execute passes through this window: it adds the label
+  after the push and then opens the PR. A Lift inside it removes the guard while a PR is in fact open. Accepted, because it takes a person's click past a
+  confirm, and a re-execute on the same machine still stops at `pr-mode.md` §2's refusal of an existing `execute/<n>` branch or tree.
+- **Reason (shared).** A new constant beside `IN_REVIEW_REASON` in `shared/agent.ts`, exactly `in review, but no open PR references this item`.
+  `inReviewBlock` returns it when the new flag is set, else `IN_REVIEW_REASON`; `itemLadderBlock`'s order is unchanged. `IN_REVIEW_REASON`'s "ONE string
+  everywhere" comment (`shared/agent.ts`) and `docs/subsystems/invariants.md`'s statement of it become "the board and server say the precise one; the skills'
+  copies keep `IN_REVIEW_REASON`" — the skills read only the label and cannot tell the two cases apart.
+- **Local hold (server).** `GET /api/items/held?project=<name>&id=<id>`, read-only and unguarded like `GET /api/items/claim`, answering
+  `{ branch: boolean | null, tree: boolean }` for `refs/heads/execute/<n>` and `<project path>/.worktrees/execute-<n>` — the `executeHeldBlock` names, per
+  request, memoised nowhere, never mapped onto the item. Input gate: blank `project` or `id` is a 400 naming it; the project goes through
+  `ItemsService.writerFor` + `writable` like `claim` (unregistered 404, files 400, unsupported 400); `id` (`#214`, `214` or the project's URN) becomes `<n>`
+  through `issueNumberFor`, a 400 when it does not parse. The branch read is `runGit(['-C', path, 'for-each-ref', '--format=%(refname)',
+  'refs/heads/execute/<n>'])`: non-empty output is `true`, `''` is `false`, `null` (git failed or timed out) is `null` — never "not held". `show-ref --verify
+  --quiet` cannot be used: it exits non-zero on a missing ref, which `runGit` cannot tell from a failure. The tree is `existsSync`. The new call site joins
+  `.claude/rules/items.md`'s `runGit` call-site list (`null` → `branch: null`) and gets a case in `test/server/git-run.test.ts`.
+- **Lift (client).** A component in the item modal beside `PlanApprove`, same shape (#367): shown only for an open item carrying the new flag. Chip
+  `Lift review` (title `remove the in-review label so this item can be executed again`) → `ui/Confirm` inline, `acceptLabel="Lift review"`,
+  `dismissLabel="Keep in review"`. Opening the confirm fires the GET once; its text is one of, with `<id>` the item id and `<n>` its number:
+  - pending: `Checking this machine for execute/<n>…`
+  - held (branch or tree true): `execute/<n> still holds work for <id> on this machine — push it and open a PR instead. Lift anyway?`
+  - not found (branch false, tree false): `No execute/<n> branch or worktree here. Work left uncommitted in a checkout, or on another machine, does not show
+    up — lift only once you know it is gone or pushed.`
+  - unknown (branch null with tree false, or the GET failed): `Could not check this machine for execute/<n>. Lift only once you know the work is gone or
+    pushed.`
+
+  Accept is enabled in every state, pending included, and always does the same thing: `POST /api/items/review` `{ project, id, inReview: false }` → the note
+  `review lifted` in place of the chip and a board re-read (`onLifted`, as `onApproved`). A refusal prints the server's sentence verbatim and the chip comes
+  back. The card's chip stays a disabled Execute with the new reason (no second control on the card).
 
 ## Left to the builder
 
-Flag and component names, exact wording of the reason and confirm text, the GET route's path and payload shape, and where the poller question lives (a new
-method or a widened `reviewLifted`). Update `.claude/rules/` and `docs/subsystems/` text that states the in-review reason, and the tests that pin
-`IN_REVIEW_REASON`'s readers.
+Flag and component names, and where the poller question lives (a new method or a widened `reviewLifted`). Text to update besides code: the
+`.claude/rules/` and `docs/subsystems/` passages that state the in-review reason; `.claude/rules/board.md`'s list of `ui/Confirm` openers;
+`ItemModal.tsx`'s header comment on the modal's writes; `.claude/rules/items.md`'s `runGit` call-site list and its note on the one read beside the write
+routes; the "ONE string everywhere" statements named above; and the tests that pin `IN_REVIEW_REASON`'s readers (`test/agents/agents-shared.test.ts`,
+`test/tracker/tracker-dispatch.test.ts`, `test/tracker/tracker-map.test.ts`, `test/tracker/tracker-review-lift.test.ts`).
