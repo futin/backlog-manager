@@ -589,7 +589,7 @@ describe('POST /api/agents/dispatch', () => {
     const exec = (over: Record<string, unknown> = {}) => post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md'), ...over });
     /** The token refusal, byte for byte (the plan's Global Constraints). */
     const TOKEN_REFUSAL =
-      "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge and --fix from the prompt";
+      "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge, --fix and --low-risk-auto-merge from the prompt";
     const GROOM_PROMPT = 'Use the backlog-manager:backlog-groom skill on bug-1.';
     /** A groom twin of `exec`: bug-1 is the ungroomed bug, so its derived action is groom. */
     const groom = (over: Record<string, unknown> = {}) =>
@@ -678,6 +678,47 @@ describe('POST /api/agents/dispatch', () => {
       const sent = stubDashboard();
       await exec({ finish: 'pr', base: 'main', autoMerge: true }).expect(201);
       expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main', { autoMerge: true }));
+    });
+
+    it('execute pr with lowRiskAutoMerge ends with the low-risk sentence; with autoMerge and fix too, today\'s auto-merge-and-fix sentence; absent, the plain pr one', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await exec({ finish: 'pr', base: 'main', lowRiskAutoMerge: true }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true }));
+      expect(spawnedPrompt(sent)).toContain('--low-risk-auto-merge');
+      const sent2 = stubDashboard();
+      await exec({ finish: 'pr', base: 'main', lowRiskAutoMerge: true, autoMerge: true, fix: true }).expect(201);
+      expect(spawnedPrompt(sent2)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }));
+      expect(spawnedPrompt(sent2)).not.toContain('--low-risk-auto-merge');
+      const sent3 = stubDashboard();
+      await exec({ finish: 'pr', base: 'main' }).expect(201);
+      expect(spawnedPrompt(sent3)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main'));
+    });
+
+    it('400s a non-boolean lowRiskAutoMerge, then true on a groom (only to execute), then true beside a non-pr finish (only to finish pr)', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await exec({ lowRiskAutoMerge: 'yes' }).expect(400, { error: 'lowRiskAutoMerge must be a boolean' });
+      await groom({ finish: 'pr', base: 'main', lowRiskAutoMerge: true }).expect(400, { error: 'lowRiskAutoMerge applies only to execute' });
+      await groom({ lowRiskAutoMerge: true }).expect(400, { error: 'lowRiskAutoMerge applies only to execute' });
+      await exec({ finish: 'in-place', lowRiskAutoMerge: true }).expect(400, { error: 'lowRiskAutoMerge applies only to finish pr' });
+      await exec({ lowRiskAutoMerge: true }).expect(400, { error: 'lowRiskAutoMerge applies only to finish pr' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('accepts lowRiskAutoMerge false on a groom and under in-place: an untouched toggle', async () => {
+      const sent = stubDashboard();
+      await groom({ lowRiskAutoMerge: false }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(GROOM_PROMPT + ' ' + COMMIT_RULE);
+      const sent2 = stubDashboard();
+      await exec({ finish: 'in-place', lowRiskAutoMerge: false }).expect(201);
+      expect(spawnedPrompt(sent2)).toBe(good.prompt + ' ' + COMMIT_RULE);
+    });
+
+    it('400s a typed --low-risk-auto-merge in an execute prompt with the five-flag refusal', async () => {
+      const sent = stubDashboard();
+      await exec({ prompt: 'Use the skill on bug-2 with --low-risk-auto-merge.' }).expect(400, { error: TOKEN_REFUSAL });
+      expect(spawned(sent)).toBeUndefined();
     });
 
     it('400s a finish on a capture item (rule 2)', async () => {

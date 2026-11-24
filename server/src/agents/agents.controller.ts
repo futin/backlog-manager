@@ -97,6 +97,8 @@ export class AgentsController {
       base: body.base,
       autoMerge: body.autoMerge,
       fix: body.fix,
+      // `lowRiskAutoMerge` rides unvalidated like `autoMerge`: the service's non-boolean check, then its execute-only and finish-`pr`-only checks (7c).
+      lowRiskAutoMerge: body.lowRiskAutoMerge,
       // Unvalidated here as well: which machines exist is the settings file's answer, read per request by the service (`unknown machine "<x>"`). Absent is
       // home, and the client omits it for home, so a home launch reaches the service exactly as it did before multi-dashboard.
       machine: body.machine,

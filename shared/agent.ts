@@ -953,10 +953,10 @@ export const FINISH_FLAG = /(?<![\w-])--(finish|base|auto-merge|fix|low-risk-aut
 /**
  * An item title is free text, and this repo's own history has titles that spell `--base` (`On a --base run the orchestrator's branch -d refuses…`). Left as
  * is, the board's own untouched execute or groom prompt would trip rule 8 on its quoted title and 400 the default dispatch. The `--` of each flag token (all
- * four `FINISH_FLAG` names, `--auto-merge` and `--fix` included) becomes two U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 8
+ * five `FINISH_FLAG` names, `--auto-merge`, `--fix` and `--low-risk-auto-merge` included) becomes two U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 8
  * nor the skill's flag parser sees a flag. Only the title goes through this — a token a person TYPES into the body is still refused.
  *
- * A `REVIEW_FLAG` token (`--review-mode`, `--review-small-max-lines`, …) gets the same swap: the reviewer override is refused in a typed body beside the four
+ * A `REVIEW_FLAG` token (`--review-mode`, `--review-small-max-lines`, …) gets the same swap: the reviewer override is refused in a typed body beside the five
  * finish flags, so a title spelling one would otherwise 400 the board's own untouched prompt — and, unrefused, would reach the skill's parser as a reviewer the
  * person never picked. The swap keeps everything after the `--`, so the visible words are unchanged.
  */
