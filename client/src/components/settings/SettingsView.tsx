@@ -495,6 +495,19 @@ function DispatchGroup() {
         />
       </SettingsRow>
 
+      {/* Never disabled by the Auto-merge row above: it is the alternative to Auto-merge, not something that needs it. */}
+      <SettingsRow
+        name="Auto-merge low-risk PRs"
+        hint="preselects Auto-merge if low-risk on an execute PR launch"
+        more="Only when the PR is docs-only, tests-only or a patch of at most 3 files and 40 lines — then the session arms auto-merge and fixes failures."
+      >
+        <Switch
+          label="auto-merge low-risk PRs"
+          checked={settings.prLowRiskAutoMergeDefault}
+          onChange={(prLowRiskAutoMergeDefault) => update({ prLowRiskAutoMergeDefault })}
+        />
+      </SettingsRow>
+
       {jiraSkills !== null && (
         <SettingsRow
           name="Jira default action"

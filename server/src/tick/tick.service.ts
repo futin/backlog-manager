@@ -18,8 +18,8 @@ import type { TickConfig, TickLastDecide, TickLock, TickProject, TickRecentEntry
  * `recent` and are never stored; a Reset is a `resetAt` timestamp, nothing else.
  */
 
-/** The settable numbers in `tick.json`, as `POST /api/ticks/config` hands them on. */
-export type TickConfigPatch = Partial<Pick<TickConfig, 'haltAfter' | 'maxPlans' | 'maxPrs'>>;
+/** The settable values (the three numbers and the low-risk flag) in `tick.json`, as `POST /api/ticks/config` hands them on. */
+export type TickConfigPatch = Partial<Pick<TickConfig, 'haltAfter' | 'maxPlans' | 'maxPrs' | 'lowRiskAutoMerge'>>;
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -120,8 +120,8 @@ export class TickService {
     // never replaced while it is in that state, and `config.source` says so.
     const haltAfter = file.ok ? file.haltAfter : TICK_HALT_LIMITS.default;
     const caps = file.ok
-      ? { maxPlans: file.maxPlans, maxPrs: file.maxPrs }
-      : { maxPlans: TICK_CAP_LIMITS.maxPlans.default, maxPrs: TICK_CAP_LIMITS.maxPrs.default };
+      ? { maxPlans: file.maxPlans, maxPrs: file.maxPrs, lowRiskAutoMerge: file.lowRiskAutoMerge }
+      : { maxPlans: TICK_CAP_LIMITS.maxPlans.default, maxPrs: TICK_CAP_LIMITS.maxPrs.default, lowRiskAutoMerge: false };
     const resetAt = file.ok ? file.resetAt : {};
     // `file.error` alone is a bare `e.message` ("Unexpected token …") with no path, and the Settings card shows this string as its hint — so name the file here,
     // in the `<path>: <reason>` style this service already uses for a state.json error, and leave `readTickFile` returning the reason alone.
@@ -172,8 +172,8 @@ export class TickService {
   }
 
   /**
-   * `POST /api/ticks/config` — any non-empty subset of the three numbers, already validated by the controller; a key the patch does not carry keeps its value
-   * on file. Throws `TickFileUnreadable` (the controller's 409) and writes nothing in that case.
+   * `POST /api/ticks/config` — any non-empty subset of the three numbers and the boolean, already validated by the controller; a key the patch does not carry
+   * keeps its value on file. Throws `TickFileUnreadable` (the controller's 409) and writes nothing in that case.
    */
   setConfig(patch: TickConfigPatch): TicksPayload {
     writeTickFile(patch, tickFile());

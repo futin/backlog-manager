@@ -29,7 +29,7 @@ const AGENTS_STATUS: AgentsStatus = {
 };
 
 function payload(haltAfter: number, over: Partial<TicksPayload['config']> = {}): TicksPayload {
-  return { config: { haltAfter, maxPlans: 3, maxPrs: 2, source: 'file', ...over }, projects: [] };
+  return { config: { haltAfter, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'file', ...over }, projects: [] };
 }
 
 function respond(status: number, body: unknown): Promise<Response> {
@@ -126,6 +126,30 @@ describe('TickGroup', () => {
     expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPrs: 3 });
   });
 
+  it('draws the Auto-merge low-risk PRs row and posts exactly {lowRiskAutoMerge: true} when it is switched on', async () => {
+    const fn = stubFetch({ get: payload(3), post: () => ({ status: 200, body: payload(3, { lowRiskAutoMerge: true }) }) });
+    render(<TickGroup />);
+
+    expect(await screen.findByText('Auto-merge low-risk PRs', { selector: '.set-name' })).toBeInTheDocument();
+    expect(screen.getByText('ticked executes arm auto-merge and fix when the PR is docs-only, tests-only or a small patch')).toBeInTheDocument();
+    const sw = await screen.findByRole('switch', { name: 'Auto-merge low-risk PRs' });
+    expect(sw).not.toBeChecked();
+    await userEvent.click(sw);
+
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Auto-merge low-risk PRs' })).toBeChecked());
+    expect(posts(fn)).toHaveLength(1);
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ lowRiskAutoMerge: true });
+  });
+
+  it('posts {lowRiskAutoMerge: false} when it is switched off', async () => {
+    const fn = stubFetch({ get: payload(3, { lowRiskAutoMerge: true }), post: () => ({ status: 200, body: payload(3) }) });
+    render(<TickGroup />);
+
+    await userEvent.click(await screen.findByRole('switch', { name: 'Auto-merge low-risk PRs' }));
+    await waitFor(() => expect(posts(fn)).toHaveLength(1));
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ lowRiskAutoMerge: false });
+  });
+
   it('shows the refusal and keeps every old value on a 409', async () => {
     stubFetch({ get: payload(3), post: () => ({ status: 409, body: { error: 'tick.json unreadable' } }) });
     render(<TickGroup />);
@@ -149,6 +173,7 @@ describe('TickGroup', () => {
       expect(screen.getByRole('button', { name: `Increase ${l}` })).toBeDisabled();
       expect(screen.getByRole('button', { name: `Decrease ${l}` })).toBeDisabled();
     }
+    expect(screen.getByRole('switch', { name: 'Auto-merge low-risk PRs' })).toBeDisabled();
     expect(
       screen.getByText('/home/me/.backlog-manager/settings/tick.json: Unexpected token } in JSON at position 12 — fix or remove the file by hand.')
     ).toBeInTheDocument();

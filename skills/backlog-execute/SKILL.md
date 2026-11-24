@@ -89,6 +89,11 @@ trigger, once, before `show`:
   without the PR. With either present the mode line names them — `finish mode: pr → PR into <base>, auto-merge, fix`, each flag only when present — and
   `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` is read in full where pr-mode.md §8 says, never earlier. Generic "merge" wording
   in a prompt arms nothing.
+- **`--low-risk-auto-merge` is read in the same pass**, from the same place, and refused the same way: without `--finish pr` → stop and name that rule; never
+  fall back to a mode without the flag, nor to one without the PR. It is an opt-in to `--auto-merge --fix` that pr-mode.md §8 grants only when its classifier
+  (`tools/low-risk.mjs`) calls the PR's diff low-risk. Beside `--auto-merge` it is redundant, not an error: the explicit flag wins, the classifier never runs,
+  and the mode line says `auto-merge` as today. Carried alone, the mode line is `finish mode: pr → PR into <base>, auto-merge if low-risk`. Under an
+  `[orchestrator-run` marker it is ignored like every finish flag is.
 - **The `--review-*` flags are read in the same pass**, from the same place — typed, or inside the backticks of a board prompt's closing sentence — and only
   beside `--finish pr`: `--review-mode same|split` and the model, effort and line-limit flags that follow it (`--review-model`, `--review-effort`,
   `--review-big-model`, `--review-big-effort`, `--review-small-model`, `--review-small-effort`, `--review-small-max-lines`, the value `default` meaning the
@@ -411,7 +416,8 @@ whatever time was spent and drops `started` along with it, because there's nothi
   and let them stage and commit it themselves — or, under an `[orchestrator-run` marker, list them in the final message instead, because the run commits that
   worktree itself in its next step and no user is reading. The marker overrides `pr` mode too. In `pr` mode (`references/pr-mode.md`) it commits only in the
   tree it cut, or verified clean, for this item; pushes only that tree's own branch, never `<base>` and never with force; and never merges; with
-  `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges (`references/auto-merge.md`).
+  `--auto-merge` — or `--low-risk-auto-merge`, when its classifier calls the diff low-risk — it arms GitHub auto-merge on its own PR and GitHub merges
+  (`references/auto-merge.md`).
 - **Never touches `ideas/`, `refactors/` or `out-of-scope/`.** An idea isn't executable by definition, and neither is a refactor — promoting either into a task
   is `backlog-groom`'s job. A rejected item is closed. If `show` resolves the id into any of those three directories, refuse immediately (see Pick an item
   above). Nothing but this rule enforces the idea and refactor halves of it: `start` used to refuse an idea and no longer does, because grooming one is real

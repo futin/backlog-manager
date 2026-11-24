@@ -1900,6 +1900,19 @@ describe('RunsView history paging (task-16)', () => {
     expect(screen.queryByTestId('runs-list')).not.toBeInTheDocument();
   });
 
+  // #588: RunsView threads App's "open Settings › Shared" callback to the Watchdog page's policy chip — the chip is drawn only when it arrives.
+  it('threads onOpenWatchdogSettings to the Watchdog page’s policy chip', async () => {
+    localStorage.setItem(RUNS_MODE_KEY, JSON.stringify('watchdog'));
+    mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
+    const onOpenWatchdogSettings = jest.fn();
+    render(<OrchestratorRunsProvider><RunsView onOpenWatchdogSettings={onOpenWatchdogSettings} /></OrchestratorRunsProvider>);
+
+    await screen.findByTestId('watchdog-phase');
+    await userEvent.click(screen.getByTestId('watchdog-policy-link'));
+    expect(onOpenWatchdogSettings).toHaveBeenCalledTimes(1);
+  });
+
   // The guard is on the READ, so what this pins is the rendered page — not
   // whether the bad value was rewritten on the way past.
   it('clamps a stored value outside the union back to History', async () => {

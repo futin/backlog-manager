@@ -768,6 +768,84 @@ describe('LaunchSheet', () => {
       expect(body).toMatchObject({ finish: 'pr', autoMerge: true, fix: false });
     });
 
+    describe('auto-merge if low-risk', () => {
+      const LOW = { name: 'auto-merge if low-risk' };
+      const seed = (s: Record<string, unknown>): void =>
+        localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', ...s }));
+
+      it('is seeded from Settings, shows its line and clause, and sends true beside autoMerge false', async () => {
+        seed({ prLowRiskAutoMergeDefault: true });
+        const calls = stub({});
+        await openSheet();
+        const low = screen.getByRole('switch', LOW);
+        expect(low).toHaveAttribute('aria-checked', 'true');
+        expect(low).toBeEnabled();
+        expect(screen.getByText('auto-merge if low-risk — only a docs-only, tests-only or small-patch PR arms auto-merge and fix')).toBeInTheDocument();
+        expect(screen.getByText(finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true }))).toBeInTheDocument();
+        expect(await launchNow(calls)).toMatchObject({ finish: 'pr', autoMerge: false, lowRiskAutoMerge: true });
+      });
+
+      it('setting off seeds it off and sends false', async () => {
+        seed({});
+        const calls = stub({});
+        await openSheet();
+        expect(screen.getByRole('switch', LOW)).toHaveAttribute('aria-checked', 'false');
+        expect(await launchNow(calls)).toMatchObject({ autoMerge: false, lowRiskAutoMerge: false });
+      });
+
+      it('is disabled and drawn on while Auto-merge is on, and the body sends false beside autoMerge true', async () => {
+        seed({ prAutoMergeDefault: true });
+        const calls = stub({});
+        await openSheet();
+        const low = screen.getByRole('switch', LOW);
+        expect(low).toBeDisabled();
+        expect(low).toHaveAttribute('aria-checked', 'true');
+        expect(low).toHaveAttribute('title', 'Auto-merge is on: every PR arms it');
+        expect(await launchNow(calls)).toMatchObject({ autoMerge: true, lowRiskAutoMerge: false });
+      });
+
+      it('keeps its own value under Auto-merge: off stays off, on comes back on', async () => {
+        seed({});
+        stub({});
+        await openSheet();
+        const autoMerge = screen.getByRole('switch', { name: 'auto-merge' });
+        await userEvent.click(autoMerge);
+        await userEvent.click(autoMerge);
+        expect(screen.getByRole('switch', LOW)).toHaveAttribute('aria-checked', 'false');
+
+        await userEvent.click(screen.getByRole('switch', LOW));
+        await userEvent.click(autoMerge);
+        expect(screen.getByRole('switch', LOW)).toHaveAttribute('aria-checked', 'true');
+        await userEvent.click(autoMerge);
+        expect(screen.getByRole('switch', LOW)).toHaveAttribute('aria-checked', 'true');
+        expect(screen.getByRole('switch', LOW)).toBeEnabled();
+      });
+
+      it('In place draws no row and sends no key; back to PR re-seeds from Settings', async () => {
+        seed({ prLowRiskAutoMergeDefault: true });
+        const calls = stub({});
+        await openSheet();
+        await userEvent.click(screen.getByRole('switch', LOW));
+        await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+        expect(screen.queryByRole('switch', LOW)).not.toBeInTheDocument();
+        await userEvent.selectOptions(screen.getByLabelText('Finish'), 'pr');
+        expect(screen.getByRole('switch', LOW)).toHaveAttribute('aria-checked', 'true');
+        await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+        expect(await launchNow(calls)).not.toHaveProperty('lowRiskAutoMerge');
+      });
+
+      it('a groom with a PR finish draws no row and sends no key', async () => {
+        seed({ groomDefaultFinish: 'pr', prLowRiskAutoMergeDefault: true });
+        const calls = stub({ plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
+        await openSheet();
+        expect(screen.getByRole('switch', { name: 'auto-merge' })).toBeInTheDocument();
+        expect(screen.queryByRole('switch', LOW)).not.toBeInTheDocument();
+        const body = await launchNow(calls);
+        expect(body).toMatchObject({ action: 'groom', finish: 'pr' });
+        expect(body).not.toHaveProperty('lowRiskAutoMerge');
+      });
+    });
+
     it('turning Auto-merge off clears Fix', async () => {
       localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', prAutoMergeDefault: true, prFixDefault: true }));
       const calls = stub({});

@@ -72,6 +72,45 @@ describe('NumberField', () => {
     expect(screen.getByRole('spinbutton', { name: 'Stale after' })).toHaveValue(365);
   });
 
+  /* #588 — the free input committed `Number(typed)` unconditionally, and `Number('') === 0`: clearing the box (or leaving text a `type="number"` input reports
+     as `''`) and tabbing away committed a 0 nobody typed — SuggestCard's Threshold (min 1) POSTed `threshold: 0`. An empty or non-number blur commits nothing
+     and the box goes back to the value it holds. */
+  it('commits nothing for a cleared box, and re-seeds it to the held value', async () => {
+    const onCommit = jest.fn();
+    render(<NumberField value={30} min={1} max={365} onCommit={onCommit} label="Stale after" />);
+
+    await userEvent.clear(screen.getByRole('spinbutton', { name: 'Stale after' }));
+    await userEvent.tab();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole('spinbutton', { name: 'Stale after' })).toHaveValue(30);
+  });
+
+  it('commits nothing for text the number input reports as empty (a lone minus), and re-seeds', async () => {
+    const onCommit = jest.fn();
+    render(<NumberField value={30} min={1} max={365} onCommit={onCommit} label="Stale after" />);
+
+    const field = screen.getByRole('spinbutton', { name: 'Stale after' });
+    await userEvent.clear(field);
+    await userEvent.type(field, '-');
+    await userEvent.tab();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole('spinbutton', { name: 'Stale after' })).toHaveValue(30);
+  });
+
+  it('still commits a zero typed on purpose', async () => {
+    const onCommit = jest.fn();
+    render(<NumberField value={30} min={0} max={365} onCommit={onCommit} label="Grace" />);
+
+    const field = screen.getByRole('spinbutton', { name: 'Grace' });
+    await userEvent.clear(field);
+    await userEvent.type(field, '0');
+    await userEvent.tab();
+
+    expect(onCommit).toHaveBeenCalledWith(0);
+  });
+
   it('draws the unit only when given', () => {
     const { rerender } = render(<NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" />);
     expect(document.querySelector('.ui-number-unit')).toBeNull();

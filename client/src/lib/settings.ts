@@ -160,6 +160,12 @@ export interface Settings {
    */
   prFixDefault: boolean;
   /**
+   * Preselects "auto-merge if low-risk" on an execute PR launch. The alternative to Auto-merge, not a refinement of it, so unlike `prFixDefault` it is never
+   * disabled by `prAutoMergeDefault`: the sheet draws it on and disabled while Auto-merge is on, and keeps its own value underneath. A boolean, default off;
+   * the stored value only seeds the sheet.
+   */
+  prLowRiskAutoMergeDefault: boolean;
+  /**
    * Days. How long an open item may go untouched before it leaves the Board
    * for Archive (`client/src/lib/item-stale.ts`).
    *
@@ -217,6 +223,7 @@ export const DEFAULT_SETTINGS: Settings = {
   groomDefaultFinish: 'in-place',
   prAutoMergeDefault: false,
   prFixDefault: false,
+  prLowRiskAutoMergeDefault: false,
   staleDays: 30,
   settingsScope: 'local',
   contentWidth: 'fixed',
@@ -409,6 +416,7 @@ export function clampSettings(raw: unknown): Settings {
     groomDefaultFinish: pickOne(s.groomDefaultFinish, EXECUTE_FINISHES, DEFAULT_SETTINGS.groomDefaultFinish),
     prAutoMergeDefault: pickBool(s.prAutoMergeDefault, DEFAULT_SETTINGS.prAutoMergeDefault),
     prFixDefault: pickBool(s.prFixDefault, DEFAULT_SETTINGS.prFixDefault),
+    prLowRiskAutoMergeDefault: pickBool(s.prLowRiskAutoMergeDefault, DEFAULT_SETTINGS.prLowRiskAutoMergeDefault),
     staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max),
     settingsScope: pickOne(s.settingsScope, SETTINGS_SCOPES, DEFAULT_SETTINGS.settingsScope),
     contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth),

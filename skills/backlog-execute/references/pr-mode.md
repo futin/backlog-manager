@@ -33,8 +33,8 @@ trigger and refused an unknown or doubled `--finish`; this section settles `<bas
   commit and push where nobody asked for it.
 - **It is read once, from the trigger, and never re-read in the new worktree.**
 - **State the mode in one line and ask nothing:** `finish mode: pr → PR into <base>`, followed by `, auto-merge` and `, fix` for each of those flags the
-  trigger carries — `finish mode: pr → PR into <base>, auto-merge, fix` with both. SKILL.md's Finish mode section has already refused a flag that arrived
-  without the ones it needs (`--auto-merge` needs `--finish pr`; `--fix` needs both).
+  trigger carries, or `, auto-merge if low-risk` for `--low-risk-auto-merge` — `finish mode: pr → PR into <base>, auto-merge, fix` with both. SKILL.md's
+  Finish mode section has already refused a flag that arrived without the ones it needs (`--auto-merge` needs `--finish pr`; `--fix` needs both).
 - **A board-dispatched prompt in `pr` mode ends with**
   ``Finish with `--finish pr --base <base>`: the skill commits, reviews, pushes and opens the PR into <base>, and never merges.``
   — the real base in place of `<base>`. That sentence is the trigger's flag, composed server-side from the launch sheet's pickers: its `--finish pr` is the
@@ -45,6 +45,9 @@ trigger and refused an unknown or doubled `--finish`; this section settles `<bas
   — and with Auto-merge alone, the same sentence without ` --fix` inside the backticks and without the ", fixing … meanwhile" clause. The flags count only
   inside the backticks, exactly like `--finish pr`; the prose after the colon describes `references/auto-merge.md` and is no signal of its own. "The skill
   never merges itself" holds: arming auto-merge asks GitHub to merge, and GitHub performs the merge into `<base>`.
+- **With the sheet's "auto-merge if low-risk" pick, it ends instead with**
+  ``Finish with `--finish pr --base <base> --low-risk-auto-merge`: the skill commits, reviews, pushes and opens the PR into <base>, then arms GitHub auto-merge and fixes failing checks and conflicts with <base> only if the PR's diff is docs-only, tests-only or a small patch; the skill never merges itself.``
+  — the same flag-only-inside-the-backticks rule applies. It is `--auto-merge --fix` behind a classifier gate, not a different procedure.
 
 ## 2. Pick the tree
 
@@ -298,6 +301,34 @@ undoes nothing** — the comment and the release still run — and the final mes
 - **The remote rejects the push:** stop and report; never force (above).
 - **`gh` is missing or not authenticated:** report the command (above).
 
+### Last, with `--low-risk-auto-merge`: classify, then arm or leave the PR open
+
+Only when the trigger carries `--low-risk-auto-merge` and **not** `--auto-merge` (beside `--auto-merge` the flag is redundant: the explicit flag wins
+and the classifier never runs), and only once the PR is open and — tracker — the `review <id> on`, `comment` and `stop <id> --keep-started` sequence
+above has run, so no claim is held. **No PR opened:** do not run the classifier; print `low-risk: not checked — no PR`, then
+`auto-merge: not armed — no PR`. Otherwise run the classifier in `<tree>`, after the push, with `<base>` the same base §1 chose:
+
+```bash
+cd <tree> && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/tools/low-risk.mjs" --base <base>
+```
+
+It prints one JSON line, `{ lowRisk, category, reason, files, lines }`, and exits 0 for either verdict — a git failure inside it is a `lowRisk: false` verdict
+whose `reason` is git's error. Exit 2 is a usage error, and any other non-zero exit is a failure of the tool itself. Run it **once**: never again after a fix
+round, because a fix commit changes the diff and a second verdict would not be the one the session armed on.
+
+- **`lowRisk: true`** — print `low-risk: <category> (<files> files, <lines> lines) — arming auto-merge`, then read
+  `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now, in `<tree>`, with `<pr>` the number of the PR this section
+  opened, **exactly as if the trigger had carried `--auto-merge --fix`**: arm, wait, fix. It is the same procedure with the same bounds, and it still never
+  merges itself.
+- **`lowRisk: false`** — print `low-risk: no — <reason> — PR left open for review`, skip `auto-merge.md`, and finish as a plain `--finish pr` run:
+  the PR is open, nothing is armed, and the final message carries no `auto-merge:` line.
+- **The permission layer denies the `node … low-risk.mjs` call** — never retry it another way. Print
+  `low-risk: not checked — classifier call denied — PR left open for review` and finish as above.
+- **The tool exits non-zero, or its stdout is not one JSON line with a boolean `lowRisk`** — print
+  `low-risk: not checked — classifier failed: <first line of its stderr, or "bad output"> — PR left open for review` and finish as above.
+
+Every doubt resolves to "not low-risk, PR left open": arming is the only thing the classifier can unlock, so a failure of the classifier unlocks nothing.
+
 ### Last, with `--auto-merge`: arm it and wait
 
 Only when the trigger carries `--auto-merge`, and only once the PR is open and — tracker — the `review <id> on`, `comment` and `stop <id> --keep-started`
@@ -307,12 +338,15 @@ opened. It arms GitHub auto-merge if the repository allows it, waits for GitHub 
 meanwhile; it never merges itself.
 
 No PR opened — `gh` missing or unauthenticated, a refused or rejected step anywhere above — means there is nothing to arm: skip that file, and the final
-message's auto-merge line says `auto-merge: not armed — no PR`.
+message's auto-merge line says `auto-merge: not armed — no PR`. Under `--low-risk-auto-merge` the classifier is not run either, and the final message's
+`low-risk:` line says `low-risk: not checked — no PR`, with the `auto-merge: not armed — no PR` line after it.
 
 ## 9. Leave the tree, and the final message
 
 The worktree stays where it is: the PR may need follow-up fixes there. The final message carries:
 
+- **with `--low-risk-auto-merge` (and no `--auto-merge`):** the one `low-risk:` line §8 printed, **above** the PR URL. The PR URL stays the message's last line
+  whatever else the message carries, because `backlog-tick` records an execute `ok` only when the message ends with it;
 - the PR URL — or the exact `gh pr create` command and why it was not run;
 - the branch and the absolute worktree path;
 - **tracker:** that `in-review` is on `#<n>` and comes off by itself when the PR merges and closes the issue; that a PR closed without merging leaves it on an
@@ -323,9 +357,9 @@ The worktree stays where it is: the PR may need follow-up fixes there. The final
   running again: an orchestrator run and the board's launch sheet both refuse it with `an execute branch or worktree already holds this item`, and if the PR
   closes without merging, deleting the branch and the worktree frees the item. **In a reused tree** neither name exists, so nothing guards the item: say that an
   orchestrator run or a click on Run would execute it again until the PR merges. Not printed when the auto-merge wait saw the PR merge;
-- **with `--auto-merge`:** the one `auto-merge:` outcome line and every fix commit (`<short sha> <subject>`, or `fix commits: none`), as
-  `references/auto-merge.md` §4 lists them. A merged PR with `Closes #<n>` closed the issue and took `in-review` with it, so the tracker line above becomes
-  "merged and closed"; with `Refs #<n>` the hand steps above still apply.
+- **with `--auto-merge`, a low-risk verdict that armed it, or `--low-risk-auto-merge` with no PR:** the one `auto-merge:` outcome line and every
+  fix commit (`<short sha> <subject>`, or `fix commits: none`), as `references/auto-merge.md` §4 lists them. A merged PR with `Closes #<n>` closed
+  the issue and took `in-review` with it, so the tracker line above becomes "merged and closed"; with `Refs #<n>` the hand steps above still apply.
 
 ## Where each rule comes from
 
@@ -350,3 +384,7 @@ at most two fix rounds, mirroring the orchestrator's loop (§7); `Refs #<n>` for
 `--auto-merge` and `--fix` come from `docs/superpowers/specs/2026-10-24-groom-pr-and-auto-merge-design.md`: legal only beside `--finish pr` (and `--fix`
 only beside `--auto-merge`), refused rather than dropped (§1, SKILL.md's Finish mode); run after the tracker guard is on and the claim released (§8, last);
 the procedure, its bounds and its rulings live in `references/auto-merge.md`, shared with `backlog-groom`'s pr mode.
+
+`--low-risk-auto-merge` comes from `docs/superpowers/specs/2026-11-24-execute-low-risk-auto-merge-design.md`: the same legality as `--auto-merge`
+(only beside `--finish pr`, refused rather than dropped), a classifier verdict in place of the person's tick, and every failure of the classifier
+resolving to a PR left open (§8, last).

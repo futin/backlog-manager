@@ -28,6 +28,7 @@ function mr(over: Partial<GitlabMr>): GitlabMr {
     createdAt: minutesAgo(600),
     updatedAt: minutesAgo(30),
     mergedAt: null,
+    headSha: null,
     pipeline: 'success',
     keys: ['PAY-12'],
     review: null,

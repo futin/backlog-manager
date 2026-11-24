@@ -141,6 +141,8 @@ async function renderMonitor(
     gateFor: (project: string) => { canResume: boolean; blockedReason: string | null };
     resuming: ReadonlySet<string>;
     onChanged: (project: string, kind: RunControlsChange) => void;
+    /** `null` renders the monitor WITHOUT the Settings callback; absent hands it a mock, as Runs always does. */
+    onOpenWatchdogSettings: (() => void) | null;
   }> = {}
 ): Promise<jest.Mock> {
   const fetchMock = stubFetch(watchdog);
@@ -151,6 +153,7 @@ async function renderMonitor(
       gateFor={over.gateFor ?? (() => OPEN_GATE)}
       resuming={over.resuming ?? new Set<string>()}
       onChanged={over.onChanged ?? jest.fn()}
+      onOpenWatchdogSettings={over.onOpenWatchdogSettings === null ? undefined : (over.onOpenWatchdogSettings ?? jest.fn())}
     />
   );
   await flush();
@@ -180,6 +183,23 @@ describe('WatchdogMonitor', () => {
     expect(screen.queryByTestId('watchdog-state-line')).not.toBeInTheDocument();
     expect(screen.queryByTestId('watchdog-rows')).not.toBeInTheDocument();
     expect(screen.queryByTestId('watchdog-events')).not.toBeInTheDocument();
+  });
+
+  // #588: the chip was a focusable `<button>` with no `onClick` — the `›` promises navigation on RunChip and PlanReviewChip, and here it went nowhere. It now
+  // opens Settings › Shared through the callback Runs threads down, and is not drawn at all when no callback reached it, so an inert one cannot ship again.
+  it('the policy chip opens the watchdog settings once when clicked', async () => {
+    const onOpenWatchdogSettings = jest.fn();
+    await renderMonitor(watchdogStatus({ phase: 'off', reason: 'BM_AGENTS off' }), [], jest.fn(), { onOpenWatchdogSettings });
+
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    await user.click(screen.getByTestId('watchdog-policy-link'));
+    expect(onOpenWatchdogSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws no policy chip when no settings callback is threaded', async () => {
+    await renderMonitor(watchdogStatus({ phase: 'off', reason: 'BM_AGENTS off' }), [], jest.fn(), { onOpenWatchdogSettings: null });
+
+    expect(screen.queryByTestId('watchdog-policy-link')).toBeNull();
   });
 
   // --- 2: off — the state line and the config line, and no rows section -----

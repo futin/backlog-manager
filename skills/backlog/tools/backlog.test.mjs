@@ -3719,6 +3719,8 @@ const CLI_SOURCES = {
   'review.mjs': fileURLToPath(new URL('../../backlog-review/tools/review.mjs', import.meta.url)),
   // pr-resolve's CLI. Every subcommand prints one JSON line a headless session reads off a pipe.
   'pr-resolve.mjs': fileURLToPath(new URL('../../pr-resolve/tools/pr-resolve.mjs', import.meta.url)),
+  // backlog-execute's classifier. It prints one JSON verdict line a skill reads off a pipe, so the same truncation guard applies.
+  'low-risk.mjs': fileURLToPath(new URL('../../backlog-execute/tools/low-risk.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3751,6 +3753,7 @@ const ENTRY_SHAPES = {
   'tick.mjs': ['process.exitCode = await main('],
   'review.mjs': ['process.exitCode = main('],
   'pr-resolve.mjs': ['process.exitCode = main('],
+  'low-risk.mjs': ['process.exitCode = main('],
 }
 
 test('every skill CLI ends through process.exitCode, never process.exit', () => {

@@ -493,7 +493,11 @@ interface Selection {
  */
 export const RUNS_PAGE_SIZE = 25;
 
-export default function RunsView() {
+/**
+ * `onOpenWatchdogSettings` is App's "open Settings › Shared" pair, handed to the Watchdog page's `Policy in Settings ›` chip — the reverse of the `Live view`
+ * link Settings' watchdog card carries into this page (#588). Optional so a bare render (a test) draws no chip rather than an inert one.
+ */
+export default function RunsView({ onOpenWatchdogSettings }: { onOpenWatchdogSettings?: () => void } = {}) {
   const { zone } = useTimeZone();
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   // task-21: `starting` rides the same payload and the same poll `liveRuns`
@@ -727,6 +731,7 @@ export default function RunsView() {
              are one control reading one gate, never two that agree. */
           gateFor={(project) => resumeGate(agents, project)}
           resuming={resuming}
+          onOpenWatchdogSettings={onOpenWatchdogSettings}
           onChanged={(project, kind) => {
             if (kind === 'resume') noteResume(project);
             refreshRuns();

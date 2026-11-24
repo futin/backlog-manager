@@ -449,6 +449,14 @@ describe('POST /api/agents/dispatch with a machine', () => {
     expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }));
   });
 
+  it('an execute on Pro with lowRiskAutoMerge: the sent prompt ends with the low-risk clause', async () => {
+    gitInit();
+    await start();
+    await execute({ base: 'main', machine: 'Pro', lowRiskAutoMerge: true }).expect(201);
+    const sent = JSON.parse(spawnsOf(pro)[0].body) as { prompt: string };
+    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main', { lowRiskAutoMerge: true }));
+  });
+
   // A remote execute derives `pr` with no `finish` in the body, so the reviewer override is allowed there on the derived finish — the same derivation the base
   // rules use — and travels to Pro as text inside the clause's backticks. Pro's own review.json applies only when no override is sent.
   it('an execute on Pro with no finish and a review: the sent prompt carries the review flags inside the pr clause', async () => {

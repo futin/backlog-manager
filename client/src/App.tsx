@@ -493,7 +493,17 @@ function AppShell() {
                         {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
                       </>
                     )}
-                    {section === 'runs' && <RunsView />}
+                    {/* The Watchdog page's `Policy in Settings ›` chip is the reverse of Settings' `Live view` link below (#588): the policy card,
+                      `WatchdogGroup`, is on Settings' Shared page, so it is the same `update({ settingsScope })` the deep link above uses, then this
+                      shell's `change` — the scope first, so the lazy Settings view mounts on the page it was sent to. */}
+                    {section === 'runs' && (
+                      <RunsView
+                        onOpenWatchdogSettings={() => {
+                          update({ settingsScope: 'shared' });
+                          change('settings');
+                        }}
+                      />
+                    )}
                     {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
                     {/* Settings' watchdog card carries a `Live view` link to Runs ›
                     Watchdog (DESIGN.md §8.6), and this is what it opens with — the

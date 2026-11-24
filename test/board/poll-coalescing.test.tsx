@@ -75,7 +75,7 @@ function watchdog(phase: WatchdogPhase): WatchdogStatus {
 
 // The tick breaker's page payload. Both `Kind`s answer the same body: `useTicks` has no arming condition beyond `live`, so there is no "quiet" world for the
 // answer to describe — see GATED below.
-const TICKS: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [] };
+const TICKS: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, lowRiskAutoMerge: false, source: 'default' }, projects: [] };
 
 // The GitLab reader's payload. Both `Kind`s answer the same body: `useGitlab` is armed constant `true` (the Sources row needs the status whatever GitLab
 // says), so nothing in its answer can disarm it.

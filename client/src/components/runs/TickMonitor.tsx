@@ -23,7 +23,8 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * (the breaker rule lives in `tick-breaker.util.ts` and nowhere on the client), so no row below recomputes a verdict — it prints one.
  *
  * Why Reset lives on this page and the policy does not: the threshold is edited in Settings › Backlog tick, and a second editor for the same number is a
- * second thing to keep in agreement, so the band carries the same flat, inert `Policy in Settings ›` chip the Watchdog page does. A Reset, by contrast, is an
+ * second thing to keep in agreement, so the band carries a flat `Policy in Settings ›` chip. It is still inert here: the Watchdog page's twin navigates
+ * since #588, through a callback `RunsView` threads to it, and none is threaded to this one yet. A Reset, by contrast, is an
  * act on one project's history and has no home in a settings card.
  *
  * The Reset button's two guards are this component's own, not the hook's. `useTicks.reset` is a bare awaited call; a double-click would fire two POSTs
@@ -88,7 +89,8 @@ export function TickMonitor() {
         title="Runs · Ticks"
         sub={<span data-testid="tick-band-sub">{`${halted.length > 0 ? `${halted.length} halted · ` : ''}${withHistory} with tick history`}</span>}
       >
-        {/* Flat and inert, for the reason the Watchdog page's is: the threshold is read here and edited in one place. */}
+        {/* Flat, and still inert: the threshold is read here and edited in one place. The Watchdog page's chip navigates since #588; this one has no
+            callback yet. */}
         <Chip variant="flat" data-testid="tick-policy-link" title="Settings › Backlog tick">
           Policy in Settings ›
         </Chip>

@@ -85,9 +85,9 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * would have been a second rendering of that table, a second synchronous
  * in-flight guard to keep in agreement (bug-19's layer 1), and a second copy
  * of the 409-is-success rule. The second addition is the `Policy in Settings
- * ›` chip in the band, flat and inert because the policy is read here and
+ * ›` chip in the band, flat because the policy is read here and
  * edited there, and a second editor for the same three numbers is a second
- * thing to keep in agreement.
+ * thing to keep in agreement. It was inert until #588; it now opens Settings › Shared through `onOpenWatchdogSettings`, and is not drawn without it.
  *
  * task-26 (spec §3) kept every one of those joins and rerendered them.
  * The first shape of this surface was deliberately plain — "a monitor read
@@ -107,7 +107,8 @@ export function WatchdogMonitor({
   onSelectRun,
   gateFor,
   resuming,
-  onChanged
+  onChanged,
+  onOpenWatchdogSettings
 }: {
   runs: OrchestratorRunsPayload['runs'];
   onSelectRun: (project: string, runId: string) => void;
@@ -128,6 +129,10 @@ export function WatchdogMonitor({
    *  the union out again here is a second copy of a vocabulary that has now
    *  grown twice. */
   onChanged: (project: string, kind: RunControlsChange) => void;
+  /** Opens Settings › Shared, where the watchdog policy card (`WatchdogGroup`) lives — App's pair, threaded through `RunsView` (#588). Absent, the
+   *  `Policy in Settings ›` chip is not drawn: the `›` promises navigation (RunChip, PlanReviewChip), and a chip that cannot go anywhere was a focusable
+   *  button that did nothing. The Sources card's gated links are the precedent. */
+  onOpenWatchdogSettings?: () => void;
 }) {
   const { zone } = useTimeZone();
   const { status, error } = useWatchdog();
@@ -211,8 +216,8 @@ export function WatchdogMonitor({
 
       {/* §4.7 / DESIGN §8.4.2 — the status band is ONE sheet row: the ring tile, the phase as a word (a `Dot` and `stateWord`), `stateLine` verbatim under it
           as the band's sub (the one sentence two surfaces print about one sweeper, so the countdown is drawn exactly once, in its `next check in 42s` form), the
-          sweep meter under that while armed, and the flat `Policy in Settings ›` chip on the right — flat and inert because the policy is read here and
-          edited there. `watchdog-state` rides this row rather than the policy strip below: it is the sweeper's own reading, as opposed to its settings, and
+          sweep meter under that while armed, and the flat `Policy in Settings ›` chip on the right — flat because the policy is read here and
+          edited there, and a link to where it is edited (`onOpenWatchdogSettings`, #588). `watchdog-state` rides this row rather than the policy strip below: it is the sweeper's own reading, as opposed to its settings, and
           the Runs suite waits on it. `checked N s ago` is not served and is not drawn. */}
       <Sheet className="watchdog-status-sheet">
         <div className="watchdog-status" data-testid="watchdog-state">
@@ -235,9 +240,11 @@ export function WatchdogMonitor({
               </div>
             )}
           </div>
-          <Chip variant="flat" data-testid="watchdog-policy-link" title="Settings › Orchestrator watchdog">
-            Policy in Settings ›
-          </Chip>
+          {onOpenWatchdogSettings && (
+            <Chip variant="flat" data-testid="watchdog-policy-link" title="Settings › Orchestrator watchdog" onClick={onOpenWatchdogSettings}>
+              Policy in Settings ›
+            </Chip>
+          )}
         </div>
       </Sheet>
 

@@ -65,7 +65,15 @@ export function readTickSettings(file = tickSettingsFile()) {
     text = fs.readFileSync(file, 'utf8');
   } catch (e) {
     if (e && e.code === 'ENOENT') {
-      return { ok: true, haltAfter: HALT_DEFAULT, maxPlans: MAX_PLANS_DEFAULT, maxPrs: MAX_PRS_DEFAULT, resetAt: {}, source: 'default' };
+      return {
+        ok: true,
+        haltAfter: HALT_DEFAULT,
+        maxPlans: MAX_PLANS_DEFAULT,
+        maxPrs: MAX_PRS_DEFAULT,
+        lowRiskAutoMerge: false,
+        resetAt: {},
+        source: 'default',
+      };
     }
     return { ok: false, file, error: e instanceof Error ? e.message : String(e) };
   }
@@ -87,6 +95,8 @@ export function readTickSettings(file = tickSettingsFile()) {
     haltAfter: clampHaltAfter(parsed.haltAfter),
     maxPlans: clampSetting(parsed.maxPlans, MAX_PLANS_DEFAULT, CAP_MIN, CAP_MAX),
     maxPrs: clampSetting(parsed.maxPrs, MAX_PRS_DEFAULT, CAP_MIN, CAP_MAX),
+    // Twin of `readTickFile` in server/src/tick/tick-breaker.util.ts: only a literal `true` is on, so a hand-edited `"true"` or `1` never arms a merge.
+    lowRiskAutoMerge: parsed.lowRiskAutoMerge === true,
     resetAt,
     source: 'file'
   };

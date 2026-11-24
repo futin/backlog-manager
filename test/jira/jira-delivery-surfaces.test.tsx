@@ -46,6 +46,7 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     createdAt: ago(120),
     updatedAt: ago(30),
     mergedAt: null,
+    headSha: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
     review: null,
