@@ -17,9 +17,11 @@ import {
   JIRA_CUSTOM_QUERY,
   JIRA_QUERY_PRESETS,
   dispatchJira,
+  fetchJiraDetail,
   fetchJiraProjects,
   fetchJiraPrompt,
   fetchJiraRefs,
+  fetchJiraSessions,
   fetchJiraWorktrees,
   saveRepoDefaults,
   fetchAgeLine,
@@ -1643,6 +1645,21 @@ describe('the branch choice wire', () => {
     await expect(fetchJiraWorktrees()).rejects.toThrow('Jira is not configured');
     answer(200, {});
     await expect(fetchJiraWorktrees()).rejects.toThrow('malformed response');
+  });
+
+  it('a 200 whose body is not JSON rejects with exactly `malformed response`, never the parser\'s SyntaxError (#587)', async () => {
+    // A proxy or an HTML error page answering 200: `res.json()` rejects with `Unexpected token '<'…`, which used to escape as the read's sentence.
+    const html = () => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError("Unexpected token '<'")) });
+    };
+    html();
+    await expect(fetchJiraDetail('PAY-1')).rejects.toThrow(/^malformed response$/);
+    html();
+    await expect(fetchJiraRefs('/r', null)).rejects.toThrow(/^malformed response$/);
+    html();
+    await expect(fetchJiraWorktrees()).rejects.toThrow(/^malformed response$/);
+    html();
+    await expect(fetchJiraSessions(false)).rejects.toThrow(/^malformed response$/);
   });
 
   describe('fetchJiraProjects', () => {

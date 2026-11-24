@@ -604,6 +604,14 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     expect(fact('Status')).toHaveTextContent('In Review');
   });
 
+  it('says `malformed response` for an HTML 200, never the parser\'s `Unexpected token` (#587)', async () => {
+    // A proxy or an HTML error page answering 200: the body does not parse, and the read must fail in the guard's words, not the SyntaxError's.
+    answer = () => ({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON")) }) as Response;
+    mount();
+    expect(await screen.findByText('could not read the ticket — malformed response')).toBeInTheDocument();
+    expect(screen.queryByText(/Unexpected token/)).toBeNull();
+  });
+
   it('does not paint a late answer for the issue the modal has since been reopened on', async () => {
     const resolvers = new Map<string, (r: Response) => void>();
     global.fetch = jest.fn((input: RequestInfo | URL) => new Promise<Response>((resolve) => resolvers.set(String(input), resolve))) as unknown as typeof fetch;

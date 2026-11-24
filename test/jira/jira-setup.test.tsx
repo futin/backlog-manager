@@ -829,6 +829,67 @@ describe('the Repositories card', () => {
 });
 
 /* Per-path defaults (Jira repo/branch, spec §5.1; DESIGN.md §8.9.3): one defaults line under a path's first row, saved through `/api/jira/repo-defaults`. */
+describe('the Repositories card — a landed path write waits for the status (#587)', () => {
+  // `reload()` is not awaited and `busy` clears first, so without the hold a second × or Add would build its list from the PRE-write status and overwrite
+  // the first write on the server — resurrecting a just-removed path or dropping a just-added one.
+  const removeButtons = (): HTMLElement[] => within(reposCard()).getAllByRole('button', { name: /^Remove / });
+  const addButton = (): HTMLElement => within(reposCard()).getByRole('button', { name: 'Add' });
+
+  function holdNextStatusRead(): (payload: Response | Promise<Response>) => void {
+    let release: (r: Response | Promise<Response>) => void = () => {};
+    nextStatusRead = () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    return (r) => release(r);
+  }
+
+  it('after a landed × keeps every × and Add disabled, and Enter sends nothing, until the status answers anew', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay', '/home/ada/pay-2', '/home/ada/pay-3'] } });
+    await renderSetup();
+    await pickProject('OPS');
+    await userEvent.type(addField(), '~/ops');
+    const release = holdNextStatusRead();
+
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay-2' }));
+    await waitFor(() => expect(repoPosts()).toEqual([{ project: 'PAY', paths: ['/home/ada/pay', '/home/ada/pay-3'] }]));
+    // The POST landed and the reload is out: the rows drawn are still the pre-write ones, so every path write waits.
+    await waitFor(() => expect(addButton()).toBeDisabled());
+    for (const b of removeButtons()) expect(b).toBeDisabled();
+    expect(within(reposCard()).getByRole('combobox', { name: 'Jira project' })).toBeDisabled();
+    expect(addField()).toBeDisabled();
+    // Enter in the path field cannot slip past the disabled chip either (the field is disabled; `add()` returns early on its own too).
+    addField().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(repoPosts()).toHaveLength(1);
+
+    await act(async () => release(answer(statusAnswer)));
+    await waitFor(() => expect(addButton()).toBeEnabled());
+    expect(repoHints().filter((h) => h.startsWith('~'))).toEqual(['~/pay', '~/pay-3']);
+    for (const b of removeButtons()) expect(b).toBeEnabled();
+  });
+
+  it('a failed status read after a landed write re-enables the controls rather than locking them', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay', '/home/ada/pay-2'] } });
+    await renderSetup();
+    nextStatusRead = () => answer({ error: 'boom' }, 500);
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay-2' }));
+    await waitFor(() => expect(repoPosts()).toHaveLength(1));
+    await waitFor(() => expect(removeButtons()[0]).toBeEnabled());
+  });
+
+  it('a path\'s defaults Save is not held: it posts one path\'s own values and cannot clobber the list', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay', '/home/ada/pay-2'] } });
+    await renderSetup();
+    holdNextStatusRead();
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay-2' }));
+    await waitFor(() => expect(repoPosts()).toHaveLength(1));
+    await waitFor(() => expect(addButton()).toBeDisabled());
+    expect(removeButtons()[0]).toBeDisabled();
+    await userEvent.type(within(reposCard()).getByLabelText('Default base for ~/pay'), 'develop');
+    expect(within(reposCard()).getByRole('button', { name: 'Save defaults for ~/pay' })).toBeEnabled();
+  });
+});
+
 describe('the Repositories card — a path\'s defaults', () => {
   const defaultsPosts = (): { path: string; base: string | null; namePattern: string | null }[] =>
     posts('/api/jira/repo-defaults').map((p) => JSON.parse(String(p.init?.body)));
