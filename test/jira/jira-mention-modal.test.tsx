@@ -203,6 +203,8 @@ beforeEach(() => {
   localStorage.clear();
   answer = payload();
   unreadable = new Set();
+  onOpenPage.mockReset();
+  detailMode = 'ok';
   refuse = {};
   threadOverride = {};
   holds = [];
@@ -253,7 +255,10 @@ beforeEach(() => {
       return unreadable.has(key) ? res({ error: `${key} is not readable` }, 404) : res(threadOverride[key] ?? THREADS[key]);
     }
     const issue = /^\/api\/jira\/issue\/([^/]+)$/.exec(url);
-    if (issue !== null) return res(DETAILS[decodeURIComponent(issue[1])]);
+    if (issue !== null) {
+      if (detailMode === 'pending') return new Promise<Response>(() => {});
+      return detailMode === 'failed' ? res({ error: 'unreadable' }, 404) : res(DETAILS[decodeURIComponent(issue[1])]);
+    }
     return res({}, 404);
   });
   global.fetch = fetchMock as unknown as typeof fetch;
@@ -275,7 +280,7 @@ const tree = () => {
         <JiraContext.Provider value={status}>
           <JiraSessionsContext.Provider value={{ data: sessions, reload: () => Promise.resolve() }}>
             <JiraMentionsProvider enabled>
-              <JiraMentionsView onOpenJiraPage={() => {}} />
+              <JiraMentionsView onOpenJiraPage={() => {}} onOpenPage={onOpenPage} />
             </JiraMentionsProvider>
           </JiraSessionsContext.Provider>
         </JiraContext.Provider>
@@ -309,6 +314,9 @@ const position = (): string | null => dialog().querySelector('.jira-mention-pos'
 const focused = (): string | null => dialog().querySelector('[data-focused]')?.getAttribute('data-comment-id') ?? null;
 const bodyRows = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>('tbody tr'));
 const NOTE = 'This ticket is on none of your boards, so the board cannot open it.';
+const onOpenPage = jest.fn();
+// The ticket read the next opened dialog gets: its own route answers `pending` (never), `failed` (a 404) or `ok` (the default).
+let detailMode: 'ok' | 'pending' | 'failed';
 
 async function openList() {
   renderPage();
@@ -322,6 +330,32 @@ async function openCards(user: ReturnType<typeof userEvent.setup>) {
 }
 
 const card = (key: string): HTMLElement => document.querySelector<HTMLElement>(`.jira-mentions-card[data-key="${key}"]`)!;
+
+describe('the mention modal — Open ticket page', () => {
+  const chip = (): HTMLElement => within(dialog()).getByRole('button', { name: 'Open ticket page' });
+
+  it.each(['pending', 'failed', 'ok'] as const)('is offered while the ticket read is %s, and the board note is gone', async (mode) => {
+    detailMode = mode;
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(chip()).toBeInTheDocument();
+    expect(within(dialog()).queryByText(/the board cannot open it/)).toBeNull();
+    expect(crumbs()).toContain('on none of your boards');
+  });
+
+  it('a click closes the dialog and then opens the ticket’s page', async () => {
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    await user.click(chip());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onOpenPage).toHaveBeenCalledTimes(1);
+    expect(onOpenPage).toHaveBeenCalledWith('SUP-208');
+  });
+});
 
 describe('the mention modal — opened from the List', () => {
   it('opens SUP-208’s first row by its key, fetching each route once, and walks the rows in display order', async () => {
@@ -337,7 +371,7 @@ describe('the mention modal — opened from the List', () => {
     expect(position()).toBe('Mention 1 of 3');
     expect(focused()).toBe('101');
     expect(within(dialog()).getByRole('heading', { name: SUP.summary })).toBeInTheDocument();
-    expect(within(dialog()).getByText(NOTE)).toBeInTheDocument();
+    expect(within(dialog()).queryByText(NOTE)).toBeNull();
 
     // Mara's mention is the same ticket: the comment refocuses, and nothing is read again.
     await user.click(within(dialog()).getByRole('button', { name: 'Next mention' }));

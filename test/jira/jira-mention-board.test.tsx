@@ -13,7 +13,7 @@ import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { TimeZoneContext } from '../../client/src/hooks/TimeZoneContext';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
-import { syncJiraTicket } from '../../client/src/hooks/useJiraTicketKey';
+import { getJiraTicket, syncJiraTicket } from '../../client/src/hooks/useJiraTicketKey';
 import { JIRA_BOARD_KEY } from '../../client/src/lib/jira';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { daysAgoStamp } from '../helpers/dates';
@@ -86,21 +86,26 @@ const PAY4 = mentionIssue('PAY-4', [mention('m9', 'Lukas', 'one more from Lukas'
 
 const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve('') } as Response);
 let mentionsAnswer: JiraMentionsConfigured;
+// The rail's navigation, handed down by `App`: JiraView asks for the `ticket` page through it and never switches the page store itself.
+const onOpenJiraPage = jest.fn();
+let sessionLinks: unknown[];
 let mentionsGets: number;
 let dismissAnswer: JiraMentionsConfigured | null;
 
 beforeEach(() => {
+  onOpenJiraPage.mockReset();
   localStorage.setItem(JIRA_BOARD_KEY, JSON.stringify({ acme: BOARD.id }));
   window.history.replaceState(null, '', '/');
   act(() => syncJiraTicket('', 'board'));
   setJiraDetailTab('ticket');
   mentionsAnswer = mentionsPayload({ issues: [PAY1, PAY4] });
   mentionsGets = 0;
+  sessionLinks = [];
   dismissAnswer = null;
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === '/api/jira') return ok(STATUS);
-    if (url.startsWith('/api/jira/sessions')) return ok({ links: [], reachable: true, rowsAt: null });
+    if (url.startsWith('/api/jira/sessions')) return ok({ links: sessionLinks, reachable: true, rowsAt: null });
     if (url === '/api/jira/mentions' && init?.method === undefined) {
       mentionsGets += 1;
       return ok(mentionsAnswer);
@@ -128,7 +133,7 @@ async function mount() {
         <JiraProvider>
           <JiraSessionsProvider open>
             <JiraMentionsProvider enabled>
-              <JiraView onOpenJiraPage={jest.fn()} />
+              <JiraView onOpenJiraPage={onOpenJiraPage} />
             </JiraMentionsProvider>
           </JiraSessionsProvider>
         </JiraProvider>
@@ -203,5 +208,71 @@ describe('the mention modal over the board', () => {
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     act(() => setJiraPage('sessions'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+});
+
+describe('Open ticket page from the mention modal over the board', () => {
+  const openPage = async (): Promise<void> => {
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Open ticket page' }));
+  };
+
+  it('from a Board card: the dialog closes, the page is the ticket, origin board', async () => {
+    await mount();
+    await userEvent.click(markOf('Summary of PAY-1', '2 mentions wait for your answer'));
+    await openPage();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onOpenJiraPage).toHaveBeenCalledWith('ticket');
+    expect(getJiraTicket()).toEqual({ key: 'PAY-1', origin: 'board' });
+  });
+
+  it('opened from the strip of the ticket page of the same ticket: it only closes, and the key is unchanged', async () => {
+    await mount();
+    act(() => {
+      syncJiraTicket('PAY-1', 'board');
+      setJiraPage('ticket');
+    });
+    const strip = await screen.findByRole('group', { name: 'Summary' });
+    await userEvent.click(within(strip).getByText('@ 2'));
+    await openPage();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onOpenJiraPage).not.toHaveBeenCalled();
+    expect(getJiraTicket()).toEqual({ key: 'PAY-1', origin: 'board' });
+  });
+
+  it('opened from a Detail on Sessions: the origin is sessions', async () => {
+    await mount();
+    const at = daysAgoStamp(0);
+    sessionLinks = [
+      {
+        key: 'PAY-1', sessionId: 's1', how: 'run', action: 'context', name: 'jira run', repo: '/Users/ada/pay', branch: null, surface: 'dashboard', model: null, effort: null,
+        snapshot: { summary: 'Summary of PAY-1', type: 'Task', parentKey: null }, startedAt: at, endedAt: null, endReason: null, quietSince: null, reattachedAt: null,
+        state: 'working', row: null, stateSince: at
+      }
+    ];
+    act(() => setJiraPage('sessions'));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await userEvent.click(await screen.findByText('Summary of PAY-1'));
+    const strip = await screen.findByRole('group', { name: 'Summary' });
+    await userEvent.click(within(strip).getByText('@ 2'));
+    await openPage();
+    expect(onOpenJiraPage).toHaveBeenCalledWith('ticket');
+    expect(getJiraTicket()).toEqual({ key: 'PAY-1', origin: 'sessions' });
+  });
+});
+
+describe('Open ticket page on the Mentions page, through the section', () => {
+  it('a row’s chip makes the page the ticket, holds PAY-1 and records origin mentions', async () => {
+    await mount();
+    act(() => setJiraPage('mentions'));
+    const row = await waitFor(() => {
+      const r = document.querySelector<HTMLElement>('tbody tr[data-key="PAY-1"]');
+      expect(r).not.toBeNull();
+      return r as HTMLElement;
+    });
+    await userEvent.click(within(row).getByRole('button', { name: 'Open ticket page' }));
+    expect(onOpenJiraPage).toHaveBeenCalledWith('ticket');
+    expect(getJiraTicket()).toEqual({ key: 'PAY-1', origin: 'mentions' });
   });
 });

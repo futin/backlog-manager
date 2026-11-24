@@ -48,6 +48,9 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * has not happened cannot say. A cache whose last check FAILED keeps its rows (Review Focus 2) and the body never says "Nothing waiting" while `detail` is
  * set; only a healthy, stamped, empty answer does.
  *
+ * **`Open ticket page`** (board link Task 6) is `onOpenPage(key)`, `JiraView`'s `openPage` with origin `mentions`: a chip on every List row and Card (dismissed ones too), a
+ * Cmd-, Ctrl- or middle-click on a row's key, and the chip in the modal this page hosts, which closes the dialog first.
+ *
  * Dismiss and Restore are the hook's, which never reject — a refusal lands in `error` and the band says it in red — and replace the payload on success, so
  * the row leaves (or comes back) from the answer itself, not from a guess made here.
  *
@@ -65,7 +68,7 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * sessions poll). Discard and Post reply are the hook's own writes, whose answers replace the payload. The repo picker's list is `replyRepos` over the shell
  * status's `repos` — the ticket's project first — and a `Draft ready` marker on the List row and the card is the List's and the Cards' own (`draft !== null`).
  */
-export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
+export function JiraMentionsView({ onOpenJiraPage, onOpenPage }: { onOpenJiraPage: (p: JiraPage) => void; onOpenPage: (key: string) => void }) {
   const { data, loading, error, checking, sweep, dismiss, restore } = useJiraMentionsContext();
   const access = useJiraContext().data?.access;
   const { zone } = useTimeZone();
@@ -168,6 +171,7 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
             onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
             onRestore={(issue) => void restore(issue.key)}
             onOpen={setOpened}
+            onOpenPage={(issue) => onOpenPage(issue.key)}
           />
         ) : (
           <JiraMentionList
@@ -177,6 +181,7 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
             onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
             onRestore={(issue) => void restore(issue.key)}
             onOpen={setOpened}
+            onOpenPage={(issue) => onOpenPage(issue.key)}
           />
         )
       ) : search.trim() !== '' && (data.issues.length > 0 || (showDismissed && nDismissed > 0)) ? (
@@ -193,7 +198,7 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onPrev={prev === undefined ? null : () => setOpened(prev)}
           onNext={next === undefined ? null : () => setOpened(next)}
           onClose={() => setOpened(null)}
-          onOpenPage={null}
+          onOpenPage={onOpenPage}
         />
       )}
     </div>

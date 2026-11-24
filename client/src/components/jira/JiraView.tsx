@@ -34,7 +34,8 @@ import { JiraTicketPage } from './JiraTicketPage';
  * It decides one thing: which of the section's four pages (Board, Sessions, Mentions, Setup) is drawn, read from `useJiraPage` — the module store the rail's
  * tree writes. It draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and
  * the in-page links that also land on a page (`Open board` and Sessions' `Open Setup`, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own
- * navigation threaded down from `App`, handed to the pages as given.
+ * navigation threaded down from `App`, handed to the pages as given. The Mentions page's `Open ticket page` chips and the mention modal's are the ticket link instead: `openPage(key)` from
+ * wherever the dialog was opened (origin `mentions` from the page, `board` or `sessions` from a mark), or just a close when the ticket page already shows that key.
  *
  * Before a page can draw, the status has to have said `configured: true`, and until then this is where the section stands — `App` holds a stored `jira`
  * section through every answer that is not `configured: false` (spec §6.1's hold-and-fall), so these states are what that hold looks like:
@@ -175,7 +176,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
       {page === 'sessions' ? (
         <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onOpenPage={openPageOn} onRun={run} nudge={nudge} />
       ) : page === 'mentions' ? (
-        <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
+        <JiraMentionsView onOpenJiraPage={onOpenJiraPage} onOpenPage={openPage} />
       ) : page === 'ticket' && !noTicket ? (
         <JiraTicketPage
           origin={origin}
@@ -211,7 +212,12 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onPrev={mentionAt > 0 ? () => stepMention(mentionAt - 1) : null}
           onNext={mentionAt >= 0 && mentionAt < liveMentions.length - 1 ? () => stepMention(mentionAt + 1) : null}
           onClose={() => setMentionOpen(null)}
-          onOpenPage={null}
+          // The modal has already closed itself; the slot is emptied here too so the handler stands alone. On the ticket page of this very ticket there is
+          // nowhere to go, so closing is all it does.
+          onOpenPage={(key) => {
+            setMentionOpen(null);
+            if (page !== 'ticket' || ticketKey !== key) openPage(key);
+          }}
         />
       )}
       {/* Drawn after the modal; it ranks above it because it mounts later — see the header. Keyed by issue so a second launch never inherits the first's form. */}

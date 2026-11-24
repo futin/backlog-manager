@@ -18,7 +18,8 @@ import { JiraMentionModal, type MentionTicketState } from './JiraMentionModal';
  * freshest copy of the issue, the repo picker, the session link and each write. A poll that moves the ticket to Dismissed therefore changes the footer
  * without a remount.
  *
- * `onOpenPage` is accepted for the board's "open the Mentions page" link and is not forwarded yet: the modal has no such prop until Task 6.
+ * `onOpenPage(key)` is the caller's way to the ticket's full page (board link Task 6): the modal's `Open ticket page` chip closes the dialog and then calls it with
+ * the shown ticket's key; `null` draws no chip.
  */
 export function MentionModalHost({
   issue,
@@ -26,7 +27,8 @@ export function MentionModalHost({
   position,
   onPrev,
   onNext,
-  onClose
+  onClose,
+  onOpenPage
 }: {
   issue: JiraMentionIssue;
   mention: JiraMention;
@@ -83,6 +85,7 @@ export function MentionModalHost({
       onDiscard={() => discardDraft(shown.key)}
       onPost={(text) => postReply(shown.key, text)}
       onHandover={(sessionId) => attempt(() => openDesktopJira(sessionId), false)}
+      onOpenPage={onOpenPage === null ? null : () => onOpenPage(shown.key)}
       onClose={onClose}
     />
   );

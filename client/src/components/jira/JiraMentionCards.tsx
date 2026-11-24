@@ -19,7 +19,8 @@ import { Pill } from '../ui/Pill';
  * the NEWEST mention, in a new tab with no referrer, worded `Reply in Jira` here and `Open in Jira` in the List.
  *
  * **Dismiss is the ticket's**, the same `onDismiss(issue)` the List calls, which posts every open id on it. A card whose ticket is dismissed (Show dismissed
- * on) is dimmed and offers `Restore` instead; its link stays.
+ * on) is dimmed and offers `Restore` instead; its link stays. `Open ticket page` (`onOpenPage`, board link Task 6) sits before `Reply in Jira`, on a dismissed
+ * card too, and opens the board's full ticket page for the card's key.
  *
  * **The card's body opens the mention modal** (`onOpen`, Task 10) on the card's ticket and the mention it quotes; a click inside `.jira-mentions-card-acts`
  * is the buttons' own and opens nothing. The summary is a `.jira-mentions-open` button with no handler of its own — its click (Enter or Space included)
@@ -32,7 +33,8 @@ export function JiraMentionCards({
   now,
   onDismiss,
   onRestore,
-  onOpen
+  onOpen,
+  onOpenPage
 }: {
   /** Every visible row — Show dismissed applied, the search NOT: a card quotes its ticket's newest mention whatever the filter matched. */
   rows: readonly JiraMentionRow[];
@@ -44,6 +46,8 @@ export function JiraMentionCards({
   onDismiss: (issue: JiraMentionIssue) => void;
   onRestore: (issue: JiraMentionIssue) => void;
   onOpen: (card: JiraMentionCard) => void;
+  /** Opens the ticket's full page (`Open ticket page`, a text chip before `Reply in Jira`, on a dismissed card too). */
+  onOpenPage: (issue: JiraMentionIssue) => void;
 }) {
   return (
     <div className="jira-mentions-cards" role="list" aria-label="Mentions">
@@ -116,6 +120,9 @@ export function JiraMentionCards({
                     Dismiss
                   </Chip>
                 )}
+                <Chip size={28} onClick={() => onOpenPage(issue)}>
+                  Open ticket page
+                </Chip>
                 <Chip size={28} as="a" href={mention.url} icon={<Glyph name="external" />}>
                   Reply in Jira
                 </Chip>

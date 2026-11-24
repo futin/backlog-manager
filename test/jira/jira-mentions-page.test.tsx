@@ -97,6 +97,7 @@ const res = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400,
 let fetchMock: jest.Mock;
 let answer: JiraMentionsPayload;
 const onOpenJiraPage = jest.fn();
+const onOpenPage = jest.fn();
 
 function renderPage(access: JiraAccess = 'ok') {
   const status = { data: { access, configured: true, site: 'acme.atlassian.net' } as JiraStatusPayload, loading: false, error: false, reload: () => {} };
@@ -105,7 +106,7 @@ function renderPage(access: JiraAccess = 'ok') {
     <TimeZoneContext.Provider value={zone}>
       <JiraContext.Provider value={status}>
         <JiraMentionsProvider enabled>
-          <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
+          <JiraMentionsView onOpenJiraPage={onOpenJiraPage} onOpenPage={onOpenPage} />
         </JiraMentionsProvider>
       </JiraContext.Provider>
     </TimeZoneContext.Provider>
@@ -129,6 +130,7 @@ const posts = (path: string): unknown[] =>
 beforeEach(() => {
   localStorage.clear();
   onOpenJiraPage.mockReset();
+  onOpenPage.mockReset();
   answer = payload();
   fetchMock = jest.fn((url: string) => (url === '/api/jira/mentions' || url.startsWith('/api/jira/mentions/') ? res(answer) : res({}, 404)));
   global.fetch = fetchMock as unknown as typeof fetch;
@@ -421,5 +423,70 @@ describe('Jira › Mentions — the Draft ready marker (phase 2, Task 8)', () =>
     renderPage();
     await settle();
     expect(screen.queryByText('Draft ready')).toBeNull();
+  });
+});
+
+describe('Jira › Mentions — Open ticket page', () => {
+  const rowOf = (key: string): HTMLElement => document.querySelector<HTMLElement>(`tbody tr[data-key="${key}"]`)!;
+
+  it('a List row has the document chip before Open in Jira, and its click hands the ticket over', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    const row = rowOf('PAY-131');
+    const chip = within(row).getByRole('button', { name: 'Open ticket page' });
+    expect(chip).toHaveAttribute('title', 'Open ticket page');
+    expect(chip.querySelector('svg')).not.toBeNull();
+    const link = within(row).getByRole('link', { name: 'Open in Jira' });
+    expect(chip.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(chip);
+    expect(onOpenPage).toHaveBeenCalledWith('PAY-131');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Cmd-, Ctrl- and middle-click on the key open the page and no dialog; a plain click opens the dialog', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    const key = within(rowOf('PAY-131')).getByRole('button', { name: 'PAY-131' });
+    await user.keyboard('{Meta>}');
+    await user.click(key);
+    await user.keyboard('{/Meta}{Control>}');
+    await user.click(key);
+    await user.keyboard('{/Control}');
+    act(() => {
+      key.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    });
+    expect(onOpenPage).toHaveBeenCalledTimes(3);
+    expect(onOpenPage).toHaveBeenLastCalledWith('PAY-131');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(key);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(onOpenPage).toHaveBeenCalledTimes(3);
+  });
+
+  it('a dismissed row offers the chip too', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    await user.click(screen.getByRole('button', { name: 'Show dismissed · 1' }));
+    await user.click(within(rowOf('OPS-9')).getByRole('button', { name: 'Open ticket page' }));
+    expect(onOpenPage).toHaveBeenCalledWith('OPS-9');
+  });
+
+  it('a Card has the text chip before Reply in Jira, a dismissed one too', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    await user.click(screen.getByRole('button', { name: 'Cards' }));
+    await user.click(screen.getByRole('button', { name: 'Show dismissed · 1' }));
+    const card = (key: string): HTMLElement => document.querySelector<HTMLElement>(`.jira-mentions-card[data-key="${key}"]`)!;
+    const chip = within(card('PAY-131')).getByRole('button', { name: 'Open ticket page' });
+    expect(chip.compareDocumentPosition(within(card('PAY-131')).getByRole('link', { name: 'Reply in Jira' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(chip);
+    expect(onOpenPage).toHaveBeenCalledWith('PAY-131');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(within(card('OPS-9')).getByRole('button', { name: 'Open ticket page' }));
+    expect(onOpenPage).toHaveBeenLastCalledWith('OPS-9');
   });
 });
