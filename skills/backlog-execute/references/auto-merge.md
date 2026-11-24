@@ -1,8 +1,9 @@
 # backlog-execute — arm GitHub auto-merge, wait, and fix (`--auto-merge`, `--fix`)
 
-Read this file **in full, once**, when the trigger carries `--auto-merge` — and only after the PR is open and any claim on the item is released. Two
-callers reach it: `backlog-execute`'s `references/pr-mode.md` (§8, last) and `backlog-groom`'s `references/pr-mode.md` (its auto-merge step). A session
-whose trigger has no `--auto-merge` never opens it, and neither does a session under an `[orchestrator-run` marker: no finish mode is read there.
+Read this file **in full, once**, when the trigger carries `--auto-merge` or `--low-risk-auto-merge` — and only after the PR is open and any claim on the item is
+released. Three callers reach it: `backlog-execute`'s `references/pr-mode.md` (§8, last), `backlog-groom`'s `references/pr-mode.md` (its auto-merge step), and
+`backlog-execute` again on a low-risk verdict under `--low-risk-auto-merge` (§8, the classifier branch), which runs it as it would with `--auto-merge --fix`. A session
+whose trigger has neither flag never opens it, and neither does a session under an `[orchestrator-run` marker: no finish mode is read there.
 
 **The skill never merges.** It asks GitHub to merge the PR it opened, once the repository's own requirements are met — and on a repository that requires
 nothing, only once the PR's checks have passed (§1, step 5) — and GitHub performs the only merge into `<base>` — `backlog-orchestrate` stays the only skill

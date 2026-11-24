@@ -342,7 +342,7 @@ recovers nothing it cannot prove.
 ## `tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced
 
 **The tick breaker** (spec: [2026-10-22-tick-breaker-design.md](../superpowers/specs/2026-10-22-tick-breaker-design.md)).
-`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "maxPlans": <int>, "maxPrs": <int>, "resetAt": { "<abs
+`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "maxPlans": <int>, "maxPrs": <int>, "lowRiskAutoMerge": <bool>, "resetAt": { "<abs
 main-checkout path>": "<ISO>" } }` — how many failed ticks in a row halt a project, the two caps a tick job applies when its prompt carries no flag (#378), and
 when a person last Reset each one. It is the fourth file the server owns under `settings/` and it keeps the
 relationship the other three have with their reader: the server writes it (`writeTickFile`, the only write path, behind `POST /api/ticks/config` and `/reset`),
@@ -726,6 +726,11 @@ the skill's own worktree, which is the commit rule's tree and no base's. Every o
 person's later push or approval still lands the PR without the session; not-allowed, refused and the not-armed exits arm nothing. Neither toggle is a trigger by
 itself: `autoMerge`/`fix` are accepted only with finish `pr` (and `fix` only with `autoMerge`), and the clause that carries the flags is composed server-side
 like the finish.
+
+**`--low-risk-auto-merge` is a gate in front of that same procedure, not a second one** (spec: [2026-11-24-execute-low-risk-auto-merge-design.md](../superpowers/specs/2026-11-24-execute-low-risk-auto-merge-design.md)):
+execute only, only beside `--finish pr`, ignored beside an explicit `--auto-merge`. Once the PR is open and any claim released, `tools/low-risk.mjs` classifies the diff
+once; a low-risk verdict runs `auto-merge.md` as `--auto-merge --fix` would, every other outcome (a verdict of no, a denied call, a failed tool, no PR) arms nothing
+and leaves the PR open, because the classifier can only ever unlock arming.
 
 **A Jira Run's push is not a skill's, so it does not contradict this rule** (Jira repo/branch, spec §6). This rule is about this plugin's skills operating on
 backlog items. A Jira Run started with **Open MR when done** ticked is told by its prompt to push its branch and open one merge request once the work is done:
@@ -1777,7 +1782,8 @@ execute finishing with a PR, a validated `review`), after the body, and never tr
 **An execute's or a groom's finish clause is the third server-composed piece, beside the orchestrate trigger's flags and the Jira prompt.**
 `finishClause(action, finish, base, flags)` (`shared/agent.ts`) is the whole of it: ` --finish pr --base <base>` plus its sentence for `pr` — an execute's says
 it reviews, a groom's does not — and today's `COMMIT_RULE` for `in-place`, built from `finish` (a member of `EXECUTE_FINISHES`, else a 400) and a `base` that is
-proved the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. `flags` is `{ autoMerge, fix }`: `autoMerge` adds ` --auto-merge`
+proved the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. `flags` is `{ autoMerge, fix, lowRiskAutoMerge }`: `lowRiskAutoMerge` (execute only, `pr` only, and the sentence is not drawn beside `autoMerge`) adds
+` --low-risk-auto-merge` and a classifier-gated sentence; `autoMerge` adds ` --auto-merge`
 and an arm-then-wait sentence, `fix` adds ` --fix` and is read only beside `autoMerge`. Both are validated booleans, accepted only with finish `pr` (`fix` only
 with `autoMerge`), so a lone `fix` or a flag under `in-place` is a 400 rather than a clause that lies; `false` is an untouched toggle and is accepted anywhere.
 `flags.review` is the Reviewer picker's override: accepted only for an execute whose DERIVED finish is `pr` (a remote execute's is, with no `finish` sent) —

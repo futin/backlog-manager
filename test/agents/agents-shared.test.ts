@@ -910,6 +910,24 @@ describe('inReviewBlock', () => {
     expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
   });
 
+  /* The low-risk branch's doors and literals. The classifier call, each `low-risk:` line a person or the tick greps for, SKILL.md's flag and mode line, and
+     auto-merge.md's third caller: reword any one and the board's "auto-merge if low-risk" pick silently stops meaning what its sheet says. */
+  it('backlog-execute pins the low-risk branch: classifier call, every low-risk line, the flag, the mode line and the third caller', () => {
+    const dir = join(__dirname, '..', '..', 'skills', 'backlog-execute');
+    const read = (f: string) => readFileSync(join(dir, f), 'utf8').replace(/\s+/g, ' ');
+    const prMode = read('references/pr-mode.md');
+    expect(prMode).toContain('node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/tools/low-risk.mjs" --base <base>');
+    expect(prMode).toContain('low-risk: no — <reason> — PR left open for review');
+    expect(prMode).toContain('low-risk: not checked — no PR');
+    expect(prMode).toContain('low-risk: not checked — classifier call denied — PR left open for review');
+    expect(prMode).toContain('low-risk: not checked — classifier failed:');
+    expect(prMode).toContain('low-risk: <category> (<files> files, <lines> lines) — arming auto-merge');
+    const skill = read('SKILL.md');
+    expect(skill).toContain('--low-risk-auto-merge');
+    expect(skill).toContain(', auto-merge if low-risk');
+    expect(read('references/auto-merge.md').split('## ')[0]).toContain('--low-risk-auto-merge');
+  });
+
   /* Groom's half of the same seam. Its sentence differs from execute's by "reviews, " (no reviewer runs on a groom PR), so a groom pr-mode.md that copied
      execute's quote would describe a prompt the board never sends a groom — and the flag sentence is the one a session reads `--auto-merge --fix` out of. */
   it('groom pr-mode.md quotes both groom sentences', () => {
@@ -1206,7 +1224,17 @@ describe('finishClause', () => {
      assert something. */
   it('flags only inside the backticks', () => {
     const review = DEFAULT_REVIEW_CONFIG;
-    const flagSets = [{}, { lowRiskAutoMerge: true }, { lowRiskAutoMerge: true, review }, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }, { review }, { autoMerge: true, review }, { autoMerge: true, fix: true, review }];
+    const flagSets = [
+      {},
+      { lowRiskAutoMerge: true },
+      { lowRiskAutoMerge: true, review },
+      { autoMerge: true },
+      { autoMerge: true, fix: true },
+      { fix: true },
+      { review },
+      { autoMerge: true, review },
+      { autoMerge: true, fix: true, review },
+    ];
     for (const action of ['execute', 'groom'] as const) {
       for (const flags of flagSets) {
         const clause = finishClause(action, 'pr', 'main', flags);
