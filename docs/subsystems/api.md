@@ -83,8 +83,11 @@ reason) or the call. None of those four makes a network request. `FilesSource` h
 function maps them — `answer` (`write-answer.util.ts`), shared by every write route and by `GET /api/items/claim` (#270): `no-token` 503 · `not-found` 404 · `conflict` 409 · `sync-off` 409 · `rate-limited` 429 · anything else 502.
 
 Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
-`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the one READ beside them, unguarded like every other GET,
-answering who holds one item out of the cache; `backlog.mjs stop` needs it because `start` ran in a different process.
+`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is one of the two READS beside them, unguarded like every other GET,
+answering who holds one item out of the cache; `backlog.mjs stop` needs it because `start` ran in a different process. The other is
+`GET /api/items/held?project=&id=` (`localHold`, `items/held.util.ts`): for a tracker item it answers `{ branch, tree }` — whether this machine still has a
+`refs/heads/execute/<n>` (`for-each-ref` through `runGit`, `null` when git could not be asked) and a `.worktrees/execute-<n>` — behind `writable` and the repo
+and id checks, for the item modal's Lift review confirmation to word its sentence by. It decides nothing.
 
 `queue` is the only way the orchestrator driver reaches the advisory `orchestrator:queued` label ([spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md)): `orchestrate.mjs` adds it at `init` and removes
 it on a skip, at `finish` and at `--abort`, while two server paths remove it on their own — a WON `claim` swaps it for `in-progress` in the same step, whoever
@@ -93,8 +96,10 @@ only lock.
 
 `review` is one of the eleven item writes, and its label IS read as exclusion, unlike `queue`'s: `backlog.mjs review <id> on|off` is its one caller, run by
 `backlog-execute` in `pr` mode right after it pushes an item's branch (the claim is released then, and the issue stays open until the PR merges) and by a person
-when a PR closes unmerged. `plan`/`dispatch` refuse a mapped `inReview` item with `a PR is open for this item` (`inReviewBlock`, `shared/agent.ts`), and the
-orchestrator gate turns it `ungroomed` with the same sentence. The label is LIFTED by derivation, never by a write (#411): the mapper drops `inReview` while
+when a PR closes unmerged. `plan`/`dispatch` refuse a mapped `inReview` item with `a PR is open for this item` (`inReviewBlock`, `shared/agent.ts`) — or, when
+the mapper found no open PR referencing it (`inReviewNoPr`, `TrackerPollerService.reviewPullOpen`), `in review, but no open PR references this item`
+(`IN_REVIEW_NO_PR_REASON`) — and the orchestrator gate turns it `ungroomed` with the first sentence, which reads the label alone. A landed `review` REMOVAL
+re-reads the issue into the cache (an add absorbs nothing), so the item modal's Lift review enables the dispatch control on the next board read. The label is LIFTED by derivation, never by a write (#411): the mapper drops `inReview` while
 `TrackerPollerService.reviewLifted` says no PR referencing the issue (`Closes`/`Fixes`/`Resolves`/`Refs #<n>`) is still open and the most recently closed one
 merged into the default branch — the case a `Refs #<n>` PR leaves behind, since it closes nothing. The latest decides, never any: groom's plan PR is an older
 `Refs #<n>` merge into main.

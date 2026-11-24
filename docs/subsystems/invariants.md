@@ -698,7 +698,8 @@ editable body, and a body that spells `--finish` or `--base` is a 400 — a groo
 stops execute rather than falling back to either mode, for the reason an
 `unsupported` source never falls back to `files`. A permission-layer
 denial of a git or `gh` step stops those steps and hands over the remaining commands; it is never retried another way. In a tracker project the pushed item then
-carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` — see [the eleven item-write
+carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` (the board and server as `in review, but no open PR references
+this item` once no open PR references it) — see [the eleven item-write
 routes](#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item).
 
 **Groom's `pr` mode is the same argument applied to a third tree** (the groom-PR spec). A groom used to land on disk only — uncommitted, in the checkout it ran
@@ -1866,7 +1867,9 @@ answer:
   mapped to `inReview: true`. Execute in `pr` mode releases its claim once the branch is pushed, and the issue stays open until the PR merges, so without
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
   the server reads it too, through `itemLadderBlock`, the one home of the order of these rungs — `plan` and `dispatch()` refuse with the same sentence, `a PR is
-  open for this item` — because the label is on the tracker, where
+  open for this item`, or `in review, but no open PR references this item` (`IN_REVIEW_NO_PR_REASON`) when the mapper's `inReviewNoPr` says no open PR
+  references the issue — the label set by an in-place execute, or left by a PR closed unmerged, guards work no PR carries, and saying a PR is open sent a
+  person looking for one that did not exist (ixray #214) — because the label is on the tracker, where
   any machine's spawn can see it. A files item never carries the flag; its guard is the next entry's. **The guard ends when the work lands, label or
   no label** (#411): a partial fix ships as `Refs #<n>`, which closes nothing, so after #362 merged #266 kept its label and read "a PR is open" with none
   open, until a person noticed. The mapper now drops `inReview` while `TrackerPollerService.reviewLifted` holds — a PR whose body references the issue after a
@@ -4301,7 +4304,8 @@ window every gate would read the item as ready and start a second execution of w
 right after a successful push, PR or not; a person runs `review <id> off` when the PR closes unmerged, and a `Refs #<n>` PR merged into the default branch
 lifts the flag by derivation without touching the label (#411, the "A PR for this item is open" rung). Every per-item gate reads the mapped `inReview` flag
 through one sentence, `a PR is open for this item` (`IN_REVIEW_REASON`, `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and execute's skill
-text): the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded 409) and the orchestrator gate, which turns the item `ungroomed` with that
+text) — save that the board and the server say `in review, but no open PR references this item` (`IN_REVIEW_NO_PR_REASON`) while `inReviewNoPr` holds, a
+precision the skills cannot have since they read the label alone: the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded 409) and the orchestrator gate, which turns the item `ungroomed` with that
 reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only, and a files item's guard is what a
 `--finish pr` execute leaves behind, its `execute/<id>` branch or `.worktrees/execute-<id>` tree (#427): `an execute branch or worktree already holds this item`
 (`EXECUTE_HELD_REASON`), read by the server's `plan`/`dispatch` (`executeHeldBlock`, per request, execute only) and the orchestrator gate. It says what is known and
@@ -4326,7 +4330,9 @@ one place (`backlog.mjs plan-review <id> on|off`). Every per-item gate reads the
 `shared/agent.ts`, with a hand-kept copy in `orchestrate.mjs`), always after `inReview`'s. A files project carries the mark as a `plan-review: true` frontmatter
 line instead, so this route, like `review`, is tracker-only.
 
-**Beside the eleven there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
+**Beside the eleven there are two routes that are reads.** `GET /api/items/held` reports a local `execute/<n>` branch and `.worktrees/execute-<n>` for the
+item modal's Lift review confirmation and decides nothing: a branch git could not be asked about is `null`, never `false`, because `false` would read as
+"nothing here" to a person deciding whether work may be lost. `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
 `backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
 rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in
