@@ -535,6 +535,29 @@ describe('reviewPullOpen', () => {
     const { poller: p } = poller([]);
     expect(p.reviewPullOpen('futin/x', 266)).toBe(true);
   });
+
+  /* Final review, 2026-11-24: the repo's state exists from the first line of `syncRepo`, and a cold read absorbs page by page — so a cold pagination that
+     fails after page 1 leaves the issue cached with its open PR (on page 2) never indexed. Until the first successful sync stamps `polledAt`, the index is
+     partial and the answer stays the conservative `true`; once it is stamped, the index is whole and the answer is the index's. */
+  it('stays true while the cold pagination has not finished — the issue on page 1, its PR never read', async () => {
+    const NEXT = '<https://api.github.com/repos/futin/x/issues?page=2>; rel="next"';
+    const { poller: p } = poller([
+      ['/issues?', (n) => (n === 1 ? { status: 200, body: [issue(266)], headers: { link: NEXT } } : { status: 500, body: { message: 'boom' } })]
+    ]);
+    await p.tick();
+    expect(p.issue('futin/x', 266)).toBeDefined();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(true);
+    p.disarm();
+  });
+
+  it('answers from the index once a cold pagination completes — page 2 brings no referencing PR', async () => {
+    const NEXT = '<https://api.github.com/repos/futin/x/issues?page=2>; rel="next"';
+    const { poller: p } = poller([['/issues?', (n) => (n === 1 ? { status: 200, body: [issue(266)], headers: { link: NEXT } } : { status: 200, body: [issue(267)] })]]);
+    await p.tick();
+    expect(p.issue('futin/x', 267)).toBeDefined();
+    expect(p.reviewPullOpen('futin/x', 266)).toBe(false);
+    p.disarm();
+  });
 });
 
 describe('end to end — the #266 shape through GithubSource.list', () => {

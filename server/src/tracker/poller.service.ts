@@ -601,15 +601,17 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   /**
    * Whether a PR that references this issue is OPEN right now — `decidingPull`'s first answer, off the same index `reviewLifted` reads, so the two never
    * disagree about which PRs reference an issue. `mapIssue` reads it to tell `in-review` with a PR open (`IN_REVIEW_REASON`) from `in-review` with none
-   * (`inReviewNoPr`). `true` for a repo this process never synced: the conservative answer keeps today's sentence and offers no Lift, rather than inviting
-   * a person to lift a guard on the strength of an index that does not exist yet.
+   * (`inReviewNoPr`). `true` until this process has finished one sync of the repo: the conservative answer keeps today's sentence and offers no Lift, rather
+   * than inviting a person to lift a guard on the strength of an index that does not exist yet. "Finished" is `polledAt`, not the state's existence —
+   * `syncRepo` creates the state on its first line and a cold read absorbs page by page, so an issue on page 1 is cached while its open PR on page 2 is
+   * not yet indexed, and a cold pagination that fails part-way leaves it so until the next sync succeeds (final review, 2026-11-24).
    *
    * It lags as the index does: a PR opened after the last sync reads as not open until the next one. `pr-mode.md` §8 opens the PR before it adds the label,
    * so a normal execute's label and PR arrive in the same sync; the window is a PR opened by hand later, and a Lift inside it still needs a confirm.
    */
   reviewPullOpen(repo: string, number: number): boolean {
     const state = this.repos.get(repo);
-    if (state === undefined) return true;
+    if (state === undefined || state.polledAt === null) return true;
     return decidingPull(state.pulls, number) === 'open';
   }
 
