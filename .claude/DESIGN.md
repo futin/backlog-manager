@@ -654,8 +654,9 @@ draws again above the table as a `Segmented` — one stored filter, two controls
 
 **The mention mark** (Jira mentions <-> board link, spec `2026-11-24-jira-mentions-board-link-design.md`; §7's `warn` chip, §8.9.7). A ticket with open
 mentions carries an amber `@ N` chip (`MentionMark`, a 28 px `Chip variant="warn"`, the count the ticket's open mentions) in the card's head after the key,
-beside the key on an on-board lane header, and after the title in a List row's Summary cell (a card row and an on-board header row; the `No parent` and
-off-board lane rows have none). It draws nothing for a count of zero, and its press opens the mention modal (§8.9.7) and never Detail: the wrapper stops the
+beside the key on an on-board or off-board lane header (a parent on no board is still asked on, and the modal opens by key; the `No parent` header has no
+key and no mark), and after the title in a List row's Summary cell (a card row and an on-board header row; the `No parent` and off-board List rows have
+none). It draws nothing for a count of zero, and its press opens the mention modal (§8.9.7) and never Detail: the wrapper stops the
 click and Enter/Space that would open the card or row beneath it. Dismissed tickets carry none; the mark reads the shell's one mentions payload, so it is
 absent until a check has stamped.
 

@@ -97,12 +97,15 @@ Where it draws, and nowhere else:
 | Home | Where in it |
 | ---- | ----------- |
 | Board card (`JiraCard`) | In `.jira-card-head`, after the key (before the crumb). |
-| Lane header (`JiraLaneHeader`) — a parent on the board is drawn here, never as a card | Beside the header's key. |
+| Lane header (`JiraLaneHeader`) — a parent on the board is drawn here, never as a card; since the follow-up below, an off-board parent's header too | Beside the header's key. |
 | List row (`JiraIssueList`): card rows AND the board-header row (kind `board`, the parent itself) — not the `none` lane row | In the summary cell, after the title, before `jira-issues-under`. |
 | Summary strip (`JiraTicketStrip`, so both `JiraDetail` and `JiraTicketPage`) | A `Mentions` cell, the strip's last (after `Agent`): `MentionMark` (`@ N`). Absent when N is 0. |
 
 Parents are in on purpose (user, 2026-11-24): a story or epic with children on the board is in no column (DESIGN.md §8.9.1), and questions are often
 asked on exactly those. DESIGN.md §8.9.1's lane-header description gains the marker.
+
+Off-board parents too (user, 2026-11-24, a follow-up to the first build): a parent on no board is still a ticket the user is asked on, and the modal opens
+by key, so the `not on this board` lane header carries the marker beside its key as the on-board one does. The List's off-board header row still has none.
 
 The strip draws wherever the strip draws — including a `JiraDetail` opened from the Sessions page. The Non-goal "Sessions page" means its own rows and deck,
 not the ticket modal it opens.
