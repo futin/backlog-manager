@@ -21,7 +21,6 @@ import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, 
 import { openButtons } from '../../lib/jira-sessions';
 import { renderMarkdown } from '../../lib/markdown';
 import { projectLabel } from '../../lib/project-label';
-import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
 import { Glyph } from '../ui/Glyphs';
@@ -51,7 +50,10 @@ interface PostedReply {
  * (Task 8, mock `ModalDraft.dc.html`) the place a reply is drafted, edited and posted — see **Draft a reply** below.
  *
  * **`Modal`'s split shape, thread on the left.** The head is the Detail dialog's (`.jira-detail-head`: type tile, key, type, project, the board badge, the
- * title as an `h2`) with the walk's `Mention i of N` and its two arrows where Detail has its link out. The facts slot — the LEFT column, and the one that
+ * title as an `h2`), and its right edge is Detail's actions too (`.jira-detail-acts`): the walk's `Mention i of N`, then `Open full page ↗` (closes the
+ * dialog first, then opens the ticket page) and `Open in Jira ↗` (the ticket's own link once the detail read lands, the focused comment's until then). The
+ * walk once had Previous/Next arrows there; nobody stepped with them, so the head now matches the ticket modal's and the walk's only step is the posted
+ * line's `Next mention`. Unlike Detail there is no `Run ▾`: this dialog is about answering a thread, not starting work. The facts slot — the LEFT column, and the one that
  * folds FIRST under 700 px — holds the thread and its footer, because the thread is what the reader came for; the body holds the ticket's facts. The mock
  * gives the thread 1.6 of 2.6 of the width, so the shell is asked for its `lead` weighting rather than Detail's near-even split.
  *
@@ -93,7 +95,7 @@ interface PostedReply {
  *   before its link ends) Open session and Stop ride in the box head, and Redraft is disabled: the server allows one reply session per key.
  * - `replacing` — a newer session is drafting over an older draft: the run card above the old draft, which says it is being replaced and stays postable.
  * - **posted** (local, dropped by a step to another ticket) — the reply joins the thread as `You · just now`, and the footer says it left the list with
- *   `View in Jira` (the server's `posted.url`) and, when there is one, `Next mention` (the header arrow's step). The ticket is `gone` from the answer by then,
+ *   `View in Jira` (the server's `posted.url`) and, when there is one, `Next mention` (the walk's step, `onNext`). The ticket is `gone` from the answer by then,
  *   so the posted line wins over the gone footer.
  * The page's hook re-reads every `JIRA_REPLY_REREAD_MS` while any ticket has a session (`useJiraMentions`), which is what moves these states; nothing here
  * polls.
@@ -105,7 +107,6 @@ export function JiraMentionModal({
   me,
   now,
   position,
-  onPrev,
   onNext,
   onDismiss,
   onRestore,
@@ -128,7 +129,7 @@ export function JiraMentionModal({
   now: number;
   /** `Mention i of N`, or `null` while this mention has left the page's visible order (the dialog keeps showing it; see `JiraMentionsView`). */
   position: { at: number; of: number } | null;
-  onPrev: (() => void) | null;
+  /** The walk's next stop, drawn only as the posted line's `Next mention`; `null` when there is none. */
   onNext: (() => void) | null;
   onDismiss: () => Promise<JiraMentionsWrite>;
   onRestore: () => Promise<JiraMentionsWrite>;
@@ -142,7 +143,7 @@ export function JiraMentionModal({
   onPost: (text: string) => Promise<JiraReplyWrite>;
   /** The dashboard's hand-over to the Desktop app; its outcome goes through `write`, so a refusal is this dialog's alert line like any other write's. */
   onHandover: (sessionId: string) => Promise<JiraMentionsWrite>;
-  /** Opens the ticket's full page (`Open ticket page`, drawn in every detail state); `null` draws no chip. The dialog closes first. */
+  /** Opens the ticket's full page (the head's `Open full page ↗`, drawn in every detail state); `null` draws no chip. The dialog closes first. */
   onOpenPage: (() => void) | null;
   onClose: () => void;
 }) {
@@ -198,6 +199,7 @@ export function JiraMentionModal({
   const type = mentionIssueType(issue.type);
   const noBoard = issue.boards.length === 0;
   const project = detail.status === 'ok' && detail.value !== null ? detail.value.project.name : null;
+  const ticketUrl = detail.status === 'ok' && detail.value !== null ? detail.value.url : mention.url;
 
   const head = (
     <div className="jira-detail-head">
@@ -210,15 +212,26 @@ export function JiraMentionModal({
         {project !== null && project !== '' && <span>{`· ${project}`}</span>}
         {noBoard && <span>· on none of your boards</span>}
       </div>
-      <span className="jira-mention-nav">
+      {/* Detail's actions row (`JiraDetail`'s head), minus `Run ▾`. Both are there while the detail read is pending or failed: the page does its own read,
+          and the comment link reaches the ticket too. */}
+      <div className="jira-detail-acts">
         {position !== null && <span className="jira-mention-pos">{`Mention ${position.at} of ${position.of}`}</span>}
-        <Chip size={28} icon={<Chevron dir="left" />} aria-label="Previous mention" disabled={onPrev === null} onClick={onPrev ?? undefined}>
-          {null}
-        </Chip>
-        <Chip size={28} icon={<Chevron dir="right" />} aria-label="Next mention" disabled={onNext === null} onClick={onNext ?? undefined}>
-          {null}
-        </Chip>
-      </span>
+        {onOpenPage !== null && (
+          <Chip
+            size={28}
+            onClick={() => {
+              onClose();
+              onOpenPage();
+            }}
+          >
+            Open full page ↗
+          </Chip>
+        )}
+        {/* A plain link, not a `Chip as="a"`, for Detail's reason: the chip carries no `target`, and this one opens a new tab with no referrer. */}
+        <a className="jira-detail-out" href={ticketUrl} target="_blank" rel="noreferrer">
+          Open in Jira ↗
+        </a>
+      </div>
       <h2 className="jira-detail-title">{issue.summary}</h2>
     </div>
   );
@@ -383,21 +396,6 @@ export function JiraMentionModal({
             <TicketFacts detail={detail.value} now={now} />
           )}
         </div>
-        {/* Outside TicketFacts so it is there while the read is pending and after it fails: the page does its own read, and a ticket on no board still
-            has one. */}
-        {onOpenPage !== null && (
-          <div>
-            <Chip
-              size={28}
-              onClick={() => {
-                onClose();
-                onOpenPage();
-              }}
-            >
-              Open ticket page
-            </Chip>
-          </div>
-        )}
         {drafts && (
           <>
             <div className="jira-detail-lbl">Draft session</div>
@@ -464,13 +462,8 @@ function TicketFacts({ detail, now }: { detail: JiraIssueDetail; now: number }) 
           </Fact>
         )}
       </dl>
-      {/* The first lines only (`.jira-mention-desc`'s clamp): the whole description is one click away in Jira, and the thread is this dialog's point. */}
+      {/* The first lines only (`.jira-mention-desc`'s clamp): the whole description is one click away (the head's `Open in Jira ↗`), and the thread is this dialog's point. */}
       {detail.description.trim() !== '' && <div className="jira-mention-desc" dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.description) }} />}
-      <span>
-        <Chip size={28} as="a" href={detail.url} icon={<Glyph name="external" />}>
-          Open ticket in Jira
-        </Chip>
-      </span>
     </div>
   );
 }

@@ -212,7 +212,6 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           issue={mentionOpen.issue}
           mention={mentionOpen.mention}
           position={mentionAt < 0 ? null : { at: mentionAt + 1, of: liveMentions.length }}
-          onPrev={mentionAt > 0 ? () => stepMention(mentionAt - 1) : null}
           onNext={mentionAt >= 0 && mentionAt < liveMentions.length - 1 ? () => stepMention(mentionAt + 1) : null}
           onClose={() => setMentionOpen(null)}
           // The modal has already closed itself; the slot is emptied here too so the handler stands alone. On the ticket page of this very ticket there is

@@ -54,13 +54,12 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * Dismiss and Restore are the hook's, which never reject — a refusal lands in `error` and the band says it in red — and replace the payload on success, so
  * the row leaves (or comes back) from the answer itself, not from a guess made here.
  *
- * **The mention modal's WALK is held here** (Task 10; the dialog itself is drawn by `MentionModalHost`, which the board reuses), because its prev/next
+ * **The mention modal's WALK is held here** (Task 10; the dialog itself is drawn by `MentionModalHost`, which the board reuses), because its next step
  * walks the order THIS page draws: the List's rows (one per mention, the search applied) or the Cards' cards (one per ticket, `mentionCards` over the
  * same search), Show dismissed applied to both. `opened` is the stop the reader is on — a ticket and a mention — and its place in the order is
  * recomputed on every render (`mentionStepIndex`: by comment id in the List, by key in the Cards), so a poll that reorders or recounts the page moves
  * `Mention i of N` and never the dialog. A stop that LEFT the order (answered, dismissed with Show dismissed off, filtered out) stays on screen with no
- * position; its neighbours are then the ones around the last place it held (`lastAt`), so Previous is the row that was before it and Next the one that
- * took its place. The ticket's state for the footer is the host's read of the same answer: in `issues`, in `dismissed`, or in neither.
+ * position; its next step (the posted line's `Next mention`) is then the row that took the last place it held (`lastAt`). The ticket's state for the footer is the host's read of the same answer: in `issues`, in `dismissed`, or in neither.
  *
  * **The reply's writes are wired in `MentionModalHost`** (phase 2, Task 8; lifted from here by the board link's Task 4), so the modal stays a view of
  * props: `Draft a reply` and `Redraft` are `dispatchReply` with the launch defaults from Settings, `Stop` is `stopJira`, and each re-reads this page's
@@ -114,7 +113,6 @@ export function JiraMentionsView({ onOpenJiraPage, onOpenPage }: { onOpenJiraPag
 
   const at = opened === null ? -1 : mentionStepIndex(order, opened, byTicket);
   if (at !== -1) lastAt.current = at;
-  const prev = opened === null ? undefined : at !== -1 ? order[at - 1] : order[lastAt.current - 1];
   const next = opened === null ? undefined : at !== -1 ? order[at + 1] : order[lastAt.current];
   // The stop as the page draws it now (a card's quoted mention may have moved under a poll), else as it was opened.
   const shown = opened === null ? null : at !== -1 ? order[at] : opened;
@@ -196,7 +194,6 @@ export function JiraMentionsView({ onOpenJiraPage, onOpenPage }: { onOpenJiraPag
           issue={shown.issue}
           mention={shown.mention}
           position={at === -1 ? null : { at: at + 1, of: order.length }}
-          onPrev={prev === undefined ? null : () => setOpened(prev)}
           onNext={next === undefined ? null : () => setOpened(next)}
           onClose={() => setOpened(null)}
           onOpenPage={onOpenPage}

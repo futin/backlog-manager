@@ -331,8 +331,10 @@ async function openCards(user: ReturnType<typeof userEvent.setup>) {
 
 const card = (key: string): HTMLElement => document.querySelector<HTMLElement>(`.jira-mentions-card[data-key="${key}"]`)!;
 
-describe('the mention modal — Open ticket page', () => {
-  const chip = (): HTMLElement => within(dialog()).getByRole('button', { name: 'Open ticket page' });
+describe('the mention modal — the head’s Open full page ↗ and Open in Jira ↗', () => {
+  const head = (): HTMLElement => dialog().querySelector<HTMLElement>('.jira-detail-head')!;
+  const chip = (): HTMLElement => within(head()).getByRole('button', { name: 'Open full page ↗' });
+  const out = (): HTMLElement => within(head()).getByRole('link', { name: 'Open in Jira ↗' });
 
   it.each(['pending', 'failed', 'ok'] as const)('is offered while the ticket read is %s, and the board note is gone', async (mode) => {
     detailMode = mode;
@@ -341,6 +343,8 @@ describe('the mention modal — Open ticket page', () => {
     await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
     await settle();
     expect(chip()).toBeInTheDocument();
+    expect(out()).toHaveAttribute('target', '_blank');
+    expect(out()).toHaveAttribute('rel', 'noreferrer');
     expect(within(dialog()).queryByText(/the board cannot open it/)).toBeNull();
     expect(crumbs()).toContain('on none of your boards');
   });
@@ -355,10 +359,34 @@ describe('the mention modal — Open ticket page', () => {
     expect(onOpenPage).toHaveBeenCalledTimes(1);
     expect(onOpenPage).toHaveBeenCalledWith('SUP-208');
   });
+
+  it('Open in Jira ↗ is the ticket’s link once the detail lands, and the focused comment’s while it is pending', async () => {
+    const user = userEvent.setup();
+    detailMode = 'pending';
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(out().getAttribute('href')).toContain('focusedCommentId=101');
+    await user.keyboard('{Escape}');
+    detailMode = 'ok';
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(out()).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208');
+  });
+
+  it('the head draws no Previous or Next arrows', async () => {
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(within(head()).queryByRole('button', { name: 'Previous mention' })).toBeNull();
+    expect(within(head()).queryByRole('button', { name: 'Next mention' })).toBeNull();
+    expect(position()).toBe('Mention 1 of 3');
+  });
 });
 
 describe('the mention modal — opened from the List', () => {
-  it('opens SUP-208’s first row by its key, fetching each route once, and walks the rows in display order', async () => {
+  it('opens SUP-208’s first row by its key, fetching each route once', async () => {
     const user = userEvent.setup();
     await openList();
     await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
@@ -373,25 +401,6 @@ describe('the mention modal — opened from the List', () => {
     expect(within(dialog()).getByRole('heading', { name: SUP.summary })).toBeInTheDocument();
     expect(within(dialog()).queryByText(NOTE)).toBeNull();
 
-    // Mara's mention is the same ticket: the comment refocuses, and nothing is read again.
-    await user.click(within(dialog()).getByRole('button', { name: 'Next mention' }));
-    await settle();
-    expect(position()).toBe('Mention 2 of 3');
-    expect(crumbs()).toContain('SUP-208');
-    expect(focused()).toBe('102');
-    expect(gets('/api/jira/issue/SUP-208/thread')).toBe(1);
-    expect(gets('/api/jira/issue/SUP-208')).toBe(1);
-
-    await user.click(within(dialog()).getByRole('button', { name: 'Next mention' }));
-    await settle();
-    expect(position()).toBe('Mention 3 of 3');
-    expect(crumbs()).toContain('PAY-131');
-    expect(crumbs()).not.toContain('on none of your boards');
-    expect(within(dialog()).queryByText(NOTE)).toBeNull();
-    expect(gets('/api/jira/issue/PAY-131/thread')).toBe(1);
-    expect(gets('/api/jira/issue/PAY-131')).toBe(1);
-    expect(within(dialog()).getByRole('button', { name: 'Next mention' })).toBeDisabled();
-    expect(within(dialog()).getByRole('button', { name: 'Previous mention' })).toBeEnabled();
   });
 
   it('opens from the excerpt too, on that row’s mention', async () => {
@@ -402,7 +411,6 @@ describe('the mention modal — opened from the List', () => {
     await settle();
     expect(position()).toBe('Mention 2 of 3');
     expect(focused()).toBe('102');
-    expect(within(dialog()).getByRole('button', { name: 'Previous mention' })).toBeEnabled();
   });
 
   it('a poll under the open modal keeps it on its mention and recounts; a mention that left the order stays shown', async () => {
@@ -429,25 +437,17 @@ describe('the mention modal — opened from the List', () => {
     expect(crumbs()).toContain('SUP-208');
     expect(position()).toBeNull();
     expect(gets('/api/jira/issue/SUP-208/thread')).toBe(1);
-    await user.click(within(dialog()).getByRole('button', { name: 'Previous mention' }));
-    await settle();
-    expect(crumbs()).toContain('PAY-131');
-    expect(position()).toBe('Mention 1 of 1');
   });
 });
 
 describe('the mention modal — opened from the Cards', () => {
-  it('SUP-208’s card opens as Mention 1 of 2, and next is PAY-131', async () => {
+  it('SUP-208’s card opens as Mention 1 of 2', async () => {
     const user = userEvent.setup();
     await openCards(user);
     await user.click(within(card('SUP-208')).getByText(SUP.summary));
     await settle();
     expect(position()).toBe('Mention 1 of 2');
     expect(crumbs()).toContain('SUP-208');
-    await user.click(within(dialog()).getByRole('button', { name: 'Next mention' }));
-    await settle();
-    expect(position()).toBe('Mention 2 of 2');
-    expect(crumbs()).toContain('PAY-131');
   });
 
   it('a card’s own buttons do not open it', async () => {
@@ -480,11 +480,11 @@ describe('the mention modal — opened from the Cards', () => {
     expect(within(ivo).getByText('@Andreja')).toHaveClass('jira-mentions-at');
     expect(within(ivo).getByText('@Petar Novak')).toHaveClass('jira-mentions-at');
 
-    // The ticket column: facts from the fresh detail, its link out, and the board note.
+    // The ticket column: facts from the fresh detail; its link out is the head's `Open in Jira ↗`.
     expect(within(d).getByText('Petar Novak', { selector: 'dd *, dd' })).toBeInTheDocument();
     expect(within(d).getByText('SUP-190 Branch settings issues')).toBeInTheDocument();
-    expect(within(d).getByRole('link', { name: 'Open ticket in Jira' })).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208');
-    expect(within(d).getByRole('link', { name: 'Open ticket in Jira' })).toHaveAttribute('rel', 'noreferrer');
+    expect(within(d).queryByRole('link', { name: 'Open ticket in Jira' })).toBeNull();
+    expect(within(d).getByRole('link', { name: 'Open in Jira ↗' })).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208');
   });
 
   it('Dismiss posts the ticket’s open ids and swaps the footer; Undo restores', async () => {
@@ -681,36 +681,6 @@ describe('the mention modal — the header’s other promises', () => {
     await settle();
     expect(posts('dismiss')).toHaveLength(1);
     expect(posts('restore')).toHaveLength(1);
-  });
-
-  // Dismiss on SUP-208, Next to PAY-131 before the post answers: SUP-208's refusal must not become PAY-131's alert, nor re-enable PAY-131's Dismiss
-  // while PAY-131's own write is out.
-  it('a write that settles after a step to another ticket touches nothing on the ticket now shown', async () => {
-    refuse.dismiss = { status: 400, error: '101 is not an open mention on SUP-208' };
-    const supHeld = hold();
-    const payHeld = hold();
-    holds = [supHeld.promise, payHeld.promise];
-    const user = userEvent.setup();
-    await openCards(user);
-    await user.click(within(card('SUP-208')).getByText(SUP.summary));
-    await settle();
-    const d = dialog();
-    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
-    await user.click(within(d).getByRole('button', { name: 'Next mention' }));
-    await settle();
-    expect(crumbs()).toContain('PAY-131');
-    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
-    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeDisabled();
-
-    await act(async () => supHeld.release());
-    await settle();
-    expect(within(d).queryByRole('alert')).toBeNull();
-    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeDisabled();
-
-    await act(async () => payHeld.release());
-    await settle();
-    expect(within(d).getByRole('alert')).toHaveTextContent('101 is not an open mention on SUP-208');
-    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   });
 
   it('reads both routes again when the same ticket is opened a second time — nothing is cached past the modal', async () => {
