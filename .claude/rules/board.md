@@ -83,7 +83,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or
   Sessions page, and the issue modal's `Open full page ↗` and a Cmd-, Ctrl- or middle-click on a card, list row or Sessions title, which `JiraView`'s `openPage`
   turns into a key-store write (with the origin), and the Mentions page's `Open ticket page` (a chip on every List row and Card, a Cmd-, Ctrl- or middle-click
-  on a row's key, and the chip in the mention modal, which closes first and does nothing more on that ticket's own page) — and then
+  on a row's key, and the mention modal head's `Open full page ↗`, which closes first and does nothing more on that ticket's own page) — and then
   `onOpenJiraPage('ticket')`) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while

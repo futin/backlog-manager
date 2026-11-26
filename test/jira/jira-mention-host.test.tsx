@@ -99,7 +99,7 @@ function host(data: JiraMentionsConfigured, i: JiraMentionIssue, men: JiraMentio
   const el = (d: JiraMentionsConfigured) => (
     <TimeZoneContext.Provider value={{ zone: 'UTC', setZone: () => {} } as never}>
       <JiraMentionsContext.Provider value={ctx(d)}>
-        <MentionModalHost issue={i} mention={men} position={position} onPrev={null} onNext={null} onClose={() => {}} onOpenPage={null} />
+        <MentionModalHost issue={i} mention={men} position={position} onNext={null} onClose={() => {}} onOpenPage={null} />
       </JiraMentionsContext.Provider>
     </TimeZoneContext.Provider>
   );

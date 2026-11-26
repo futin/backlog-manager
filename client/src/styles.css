@@ -2145,7 +2145,6 @@ button.rail-count { cursor: pointer }
 
 /* The mention modal (§8.9.7, mock `ModalA.dc.html`) — `Modal`'s split shape with `lead`, dressed in the Detail dialog's head, labels and panes. What follows
    is only what the mock adds: the walk's position and arrows in the head, the thread card, the amber ask block, the footer and the board note. */
-.jira-mention-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 8px }
 .jira-mention-pos { font-size: 12px; color: var(--ink2); white-space: nowrap }
 .jira-mention-thread { background: var(--strip); border-radius: 12px; padding: 4px 16px; min-width: 0 }
 .jira-mention-more { padding: 10px 0; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 500; color: var(--cyan); cursor: pointer; text-align: left }
@@ -2183,7 +2182,7 @@ button.rail-count { cursor: pointer }
 }
 .jira-mention-done > button { margin-left: auto }
 .jira-mention-ticket { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
-/* The description's first lines: four at 13 px, then cut — the whole of it is one click away (`Open ticket in Jira`). */
+/* The description's first lines: four at 13 px, then cut — the whole of it is one click away (the head's `Open in Jira ↗`). */
 .jira-mention-desc { max-height: calc(4 * 1.45em); overflow: hidden; font-size: 13px; line-height: 1.45; color: var(--ink2); overflow-wrap: anywhere }
 .jira-mention-desc > * { margin: 0 }
 /* Draft a reply (phase 2, mock `ModalDraft.dc.html`) — what the modal's footer becomes while a session drafts, once a draft is ready, and after it posts.

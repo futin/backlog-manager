@@ -13,19 +13,18 @@ import { JiraMentionModal, type MentionTicketState } from './JiraMentionModal';
  * `JiraMentionsView` used to hold inline, lifted so the board can open the same dialog from an `@ N` mark. It reuses `JiraMentionModal`, so the dialog count
  * stays ten: this is a wiring component, not a new dialog.
  *
- * The CALLER owns the stop (which ticket and mention, the position in whatever order it walks, prev/next, close); the host owns everything derived from the
+ * The CALLER owns the stop (which ticket and mention, the position in whatever order it walks, next, close); the host owns everything derived from the
  * live answer, re-read on every render and kept nowhere: the ticket's state (`open` in `data.issues`, `dismissed` in `data.dismissed`, else `gone`), the
  * freshest copy of the issue, the repo picker, the session link and each write. A poll that moves the ticket to Dismissed therefore changes the footer
  * without a remount.
  *
- * `onOpenPage(key)` is the caller's way to the ticket's full page (board link Task 6): the modal's `Open ticket page` chip closes the dialog and then calls it
+ * `onOpenPage(key)` is the caller's way to the ticket's full page (board link Task 6): the modal head's `Open full page ↗` closes the dialog and then calls it
  * with the shown ticket's key; `null` draws no chip.
  */
 export function MentionModalHost({
   issue,
   mention,
   position,
-  onPrev,
   onNext,
   onClose,
   onOpenPage
@@ -33,7 +32,6 @@ export function MentionModalHost({
   issue: JiraMentionIssue;
   mention: JiraMention;
   position: { at: number; of: number } | null;
-  onPrev: (() => void) | null;
   onNext: (() => void) | null;
   onClose: () => void;
   onOpenPage: ((key: string) => void) | null;
@@ -73,7 +71,6 @@ export function MentionModalHost({
       me={data?.configured ? data.me : ''}
       now={now}
       position={position}
-      onPrev={onPrev}
       onNext={onNext}
       // Dismiss is the ticket's, as on the page: every mention the latest answer holds for it.
       onDismiss={() => dismiss(issue.key, shown.mentions.map((x) => x.commentId))}

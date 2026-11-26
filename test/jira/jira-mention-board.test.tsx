@@ -160,15 +160,14 @@ const cardOf = (summary: string): HTMLElement => screen.getAllByText(summary).ma
 const markOf = (summary: string, name: string): HTMLElement => within(cardOf(summary)).getByRole('button', { name });
 
 describe('the mention modal over the board', () => {
-  it('opens on the ticket whose mark was pressed, newest first, and walks its mentions', async () => {
+  it('opens on the ticket whose mark was pressed, newest first, with no arrows to step by', async () => {
     await mount();
     await userEvent.click(markOf('Summary of PAY-1', '2 mentions wait for your answer'));
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(screen.getByText('Mention 1 of 2')).toBeInTheDocument();
     expect(await screen.findByText(/newer question for you/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /next/i }));
-    expect(screen.getByText('Mention 2 of 2')).toBeInTheDocument();
-    expect(await screen.findByText(/older question/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Next mention' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Previous mention' })).toBeNull();
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).toBeNull();
     await userEvent.click(markOf('Summary of PAY-4', '1 mention waits for your answer'));
@@ -189,17 +188,16 @@ describe('the mention modal over the board', () => {
     expect(mentionsGets).toBe(gets);
   });
 
-  it('a newer mention arriving mid-walk joins the order and the position recounts', async () => {
+  it('a newer mention arriving while the dialog is open joins the order and the position recounts', async () => {
     await mount();
     await userEvent.click(markOf('Summary of PAY-1', '2 mentions wait for your answer'));
-    await userEvent.click(screen.getByRole('button', { name: /next/i }));
-    expect(screen.getByText('Mention 2 of 2')).toBeInTheDocument();
-    // The poll answers a third, newest mention: the shown one (m1, the oldest) is now third.
+    expect(screen.getByText('Mention 1 of 2')).toBeInTheDocument();
+    // The poll answers a third, newest mention: the shown one (m2, the newer of the two) is now second.
     mentionsAnswer = mentionsPayload({ issues: [mentionIssue('PAY-1', [mention('m3', 'Zed', 'brand new', 'PAY-1', 0.05), M2, M1]), PAY4] });
     act(() => {
       window.dispatchEvent(new Event('focus'));
     });
-    expect(await screen.findByText('Mention 3 of 3')).toBeInTheDocument();
+    expect(await screen.findByText('Mention 2 of 3')).toBeInTheDocument();
   });
 
   it('the Detail strip’s mark swaps the dialogs: exactly one dialog, the mention modal, and Escape leaves none', async () => {
@@ -268,7 +266,7 @@ describe('the mark on an off-board parent’s lane header', () => {
 
 describe('Open ticket page from the mention modal over the board', () => {
   const openPage = async (): Promise<void> => {
-    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Open ticket page' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Open full page ↗' }));
   };
 
   it('from a Board card: the dialog closes, the page is the ticket, origin board', async () => {
