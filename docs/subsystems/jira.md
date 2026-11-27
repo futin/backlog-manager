@@ -645,8 +645,9 @@ the link store is not touched.
 `JiraLiveReconciler` (`agents/jira-live.service.ts`) reads the dashboard's session list once per tick (`dashboardSessionRows`: `?limit=50&lookback=168`) and
 keeps the rows in the store (`setRows`). The period is `JIRA_RECONCILE_FAST_MS` (15 s) while a Jira page was read in the last 30 s (`GET /sessions?open=1`) and
 `JIRA_RECONCILE_MS` (60 s) otherwise; a read that opens the page (it was closed) tells `JiraLiveService.onPageOpened`'s listener, which clears a pending slow
-timer and re-arms at 15 s. For each live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2 min): a `working` or `question` row clears
-`quietSince`; anything else marks it on the first such tick, and the link ends — `idle`, or `gone` when the list has no row — once the mark is `JIRA_QUIET_MS`
+timer and re-arms at 15 s. For each live link with a session id: a `working` or `question` row clears `quietSince`; any other row marks it on the
+first such tick at any age, and so does no row once the link is older than `JIRA_LIVE_GRACE_MS` (2 min) — the grace covers absence only, so the Run gate opens
+the tick the row first reads Quiet — and the link ends — `idle`, or `gone` when the list has no row — once the mark is `JIRA_QUIET_MS`
 (2 min) old. A list of 50 rows is full and proves nothing about an absent session, which stays live for the 8-hour backstop. An ended link whose row is
 `working` or `question` again is re-attached on its own entry. One `setTimeout`, armed after `confirm` and at boot and pending only while some link is live or
 Setup maps a repo; an unreadable list (`markUnreachable`) or agents off leaves the store as it was. Its comment holds the long form.

@@ -328,13 +328,44 @@ describe('tick — what it leaves alone', () => {
 
   /* Rewritten from "one millisecond short is kept, the full 2 minutes is judged": judged no longer means dropped. The young entry gets no quiet clock at all; the
      one exactly at the grace starts its clock, and is still live. */
-  it('the grace is exact: one millisecond short is not judged, the full 2 minutes is — and starts its quiet clock', async () => {
+  it('the grace on absence is exact: a link with no row one millisecond short is not judged, the full 2 minutes is — and starts its quiet clock', async () => {
     seed('PAY-1', 'sess-1', JIRA_LIVE_GRACE_MS - 1);
     seed('PAY-2', 'sess-2', JIRA_LIVE_GRACE_MS);
     await reconciler.tick();
     expect(Object.keys(live.snapshot())).toEqual(['PAY-1', 'PAY-2']);
     expect(entryOf('PAY-1', 'sess-1')?.quietSince).toBeNull();
     expect(entryOf('PAY-2', 'sess-2')?.quietSince).toBe(iso(T0));
+  });
+
+  /* The grace covers absence only. A young entry whose row the list DOES carry, reading idle, is quiet now: a Run that finished its turn inside its first two
+     minutes showed `Quiet` on the Agent tab (the row) while Run ▾, the board and the list still held it as running until the grace ran out, because the gate's
+     `quietSince` was never stamped before then (2026-11-27, TIMIFY-28671). */
+  it('a young entry whose row reads idle starts its quiet clock at once, and the next Run on the key may start', async () => {
+    seed('PAY-1', 'sess-1', 30_000);
+    list({ id: 'sess-1', status: 'idle' });
+    await reconciler.tick();
+    expect(entryOf('PAY-1', 'sess-1')).toMatchObject({ endedAt: null, quietSince: iso(T0) });
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(true);
+  });
+
+  it('a young entry whose row reads working gets no quiet clock, and still holds the key', async () => {
+    seed('PAY-1', 'sess-1', 30_000);
+    list({ id: 'sess-1', status: 'working' });
+    await reconciler.tick();
+    expect(entryOf('PAY-1', 'sess-1')?.quietSince).toBeNull();
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(false);
+  });
+
+  it('a young entry quiet from its first tick still ends only once its quiet clock is 120 s old', async () => {
+    seed('PAY-1', 'sess-1', 30_000);
+    list({ id: 'sess-1', status: 'idle' });
+    await reconciler.tick();
+    at(T0 + JIRA_QUIET_MS - 1);
+    await reconciler.tick();
+    expect(entryOf('PAY-1', 'sess-1')?.endedAt).toBeNull();
+    at(T0 + JIRA_QUIET_MS);
+    await reconciler.tick();
+    expect(entryOf('PAY-1', 'sess-1')).toMatchObject({ endedAt: iso(T0 + JIRA_QUIET_MS), endReason: 'idle' });
   });
 
   it('a starting entry is never reconciled, however old', async () => {

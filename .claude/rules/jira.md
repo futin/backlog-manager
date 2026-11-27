@@ -157,8 +157,9 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   (`setRows`, memory only; an unreadable list calls `markUnreachable`, agents off returns before any fetch; neither ends a link); the period is
   `JIRA_RECONCILE_FAST_MS` (15 s) while a
   Jira page was read in the last 30 s and `JIRA_RECONCILE_MS` (60 s) otherwise, a `setTimeout` chain armed by `confirm` and at boot, only while some link is
-  live or Setup maps a repo, `unref`'d, never in a request's path, never throwing. For a live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2
-  min): a `working` or `question` row clears `quietSince`; anything else — any other status, or no row in a list shorter than 50 — marks `quietSince` on the
+  live or Setup maps a repo, `unref`'d, never in a request's path, never throwing. For a live link with a session id: a `working` or
+  `question` row clears `quietSince`; anything else — any other status at any age, or, once the link is older than `JIRA_LIVE_GRACE_MS` (2 min), no row in a
+  list shorter than 50 — marks `quietSince` on the
   first such tick and ends the link (`idle`, or `gone` for no row) once that mark is `JIRA_QUIET_MS` (2 min) old, so a session is Quiet for two minutes after
   every finished turn, not only its first; a full 50-row list proves nothing about an absent session, which stays live for the backstop. A `starting` entry is
   never judged, and a verdict applies only to its own `(key, sessionId)`. Then C5: an ENDED link whose row is `working` or `question` again is re-attached — its
