@@ -90,7 +90,7 @@ happened.
 - **A board-started run is visible before its run file exists, from server memory that is never written to disk.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **Item files are read-only to the server and client**; every write goes through the skills, and dispatch writes none — the spawned session runs them.
-  **A TRACKER project's items are what this server writes** (task-46), only through the eleven routes below — never a file, on any path — **plus a Jira
+  **A TRACKER project's items are what this server writes** (task-46), only through the eleven `/api/items/*` write routes — never a file, on any path — **plus a Jira
   issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`, a reply comment, through `/api/jira/mentions/reply`, and an open
   PR's merge, auto-merge and update-branch, through `/api/prs/*`.**
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
@@ -130,7 +130,7 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#merge-mode-is-run-scoped-and-a-malformed-one-is-a-400)
 - **PR mode drains onto a run branch and opens one PR per run.**
   Why: [invariants.md](docs/subsystems/invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)
-- **`merged` is no longer the only success exit.**
+- **`merged` is not the only success exit.**
   Why: [invariants.md](docs/subsystems/invariants.md#merged-is-not-the-only-success-exit--branched-is-its-branch-mode-sibling)
 - **Question mode is run-scoped, and it only ever takes effect in a headless run.**
   Why: [invariants.md](docs/subsystems/invariants.md#question-mode-is-run-scoped-and-it-only-ever-takes-effect-in-a-headless-run)

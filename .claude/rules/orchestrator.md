@@ -132,7 +132,7 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   <prTarget>..<base>` is `0` and `treeHoldingBranch` finds nobody, by `update-ref -d refs/heads/<base> <sha it read>`, never `branch -d`; anything else keeps it
   with one stderr line, and the exit code never changes. Why:
   [invariants.md](docs/subsystems/invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)
-- **`merged` is no longer the only success exit.** `branched` is its branch-mode sibling and a true exit: out of `RUN_CLAIMED_STAGES`, `ATTENTION_RUN_STAGES`
+- **`merged` is not the only success exit.** `branched` is its branch-mode sibling and a true exit: out of `RUN_CLAIMED_STAGES`, `ATTENTION_RUN_STAGES`
   and `MACHINE_STAGES`, in `RECONCILE_TERMINAL_STAGES`, counted as completed by `aggregateRuns`; `test/agents/agents-shared.test.ts`'s `Record<RunStage, true>` literal
   forces the classification. A `branched` stamp does not prove the run that wrote it executed the item. Why:
   [invariants.md](docs/subsystems/invariants.md#merged-is-not-the-only-success-exit--branched-is-its-branch-mode-sibling)
