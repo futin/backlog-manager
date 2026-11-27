@@ -1683,7 +1683,7 @@ test('the classifier denial records the run fact, not the classifier prose', () 
 
 // --- bug-28: the per-item execute session is named ------------------------
 // Every other session this system spawns carries a `-n` display name
-// (`orchestrate <project>`, `bl <project> <id>`, `resume <project>`,
+// (`orchestrate <project>`, `<action> <id> <title>`, `resume <project>`,
 // `watchdog resume <project>` — all composed server-side and sent to the
 // dashboard's POST /api/spawn). The per-item execute session is the one that
 // never goes through that route: the running orchestrator spawns it itself

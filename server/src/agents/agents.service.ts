@@ -670,7 +670,7 @@ export class AgentsService {
       // "do not push" the clause then contradicts. An execute is NOT stripped — its existing "doubled, harmless" case stays. Capture keeps its
       // `COMMIT_RULE` inside the text and goes out unchanged.
       prompt: appendFinishClause(prompt, action, finish, base, { autoMerge: req.autoMerge, fix: req.fix, lowRiskAutoMerge: req.lowRiskAutoMerge, review }),
-      name: sessionName(item),
+      name: sessionName(item, action),
       permissionMode: req.permissionMode,
       maxPermission: status.spawnMaxPermission,
       model: req.model,

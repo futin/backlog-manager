@@ -172,7 +172,7 @@ describe('POST /api/agents/dispatch', () => {
     expect((spawn?.init?.headers as Record<string, string>).authorization).toBe('Bearer s3cret');
     const body = JSON.parse(String(spawn?.init?.body));
     expect(body.project).toBe('-abs-alpha');
-    expect(body.name).toBe('bl alpha bug-2');
+    expect(body.name).toBe('execute bug-2 a known bug');
     expect(body.permissionMode).toBe('acceptEdits');
     expect(body.remoteControl).toBe(true);
     // The client's prompt, byte for byte, then the finish clause — not a `toContain` on some phrase both the sent prompt and a server-recomposed one
