@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -47,5 +49,19 @@ describe('Select', () => {
     render(<Select value="all" options={OPTIONS} onChange={jest.fn()} label="Project" disabled />);
 
     expect(screen.getByRole('combobox', { name: 'Project' })).toBeDisabled();
+  });
+
+  /*
+    A native `<select>` is as wide as its longest option, and Settings › Local's Jira default action lists every run skill on the machine by name, so one
+    long name made it 380 px and pushed the page sideways at 375 px (#616). Under the phone break `.set-control` is a row flex container, and a flex item's
+    automatic minimum size is its content width — only a definite max size clamps it. jsdom does no layout, so the rule's source is the only thing a jest
+    test can pin: the base `.ui-select` rule must cap the control at its container's width.
+  */
+  it('never grows past its container, however long an option is', () => {
+    const css = readFileSync(join(__dirname, '../../client/src/styles.css'), 'utf8');
+    const rule = css.match(/^\.ui-select \{([^}]*)\}/m);
+
+    expect(rule).not.toBeNull();
+    expect(rule![1]).toMatch(/(^|[;{\s])max-width: 100%;/);
   });
 });
