@@ -165,9 +165,9 @@ whole manifest, and you may raise a finding about **any file** — another group
 `CLAUDE.md` — at its **full severity**. Severity follows the defect, never which group saw it: a Critical you notice in another group's file is still a
 Critical, and `merge` de-duplicates it if that group raised it too.
 
-When you have an item, read it at the path you were given. A task states its promise under `## Plan` (plus `## Test cases` and `## Done when` when the groomer
-filled them); a bug states it under `## Cause` and `## Fix`. Either way that section is the contract the diff has to satisfy — you are not reviewing "is this
-good code" in the abstract, you are reviewing "does this change do what the item said it would, correctly."
+When you have an item, read it at the path you were given. A task states its promise under `## Plan` (plus `## Test cases`, `## Done when` and `## Verify` when
+the groomer filled them); a bug states it under `## Cause` and `## Fix` (plus `## Verify`). Either way that section is the contract the diff has to satisfy —
+you are not reviewing "is this good code" in the abstract, you are reviewing "does this change do what the item said it would, correctly."
 
 When a `.codegraph/` index exists at or above the worktree, find a changed symbol's callers with `codegraph explore "<changed symbols>" -p <worktree>` before
 grepping for call sites: one call returns their source, callers and blast radius, which is what "a rename that missed a call site" below needs. The index is
@@ -180,16 +180,16 @@ Every group does checks 1–3 for its own files. The parts that judge the item a
 whether every `## Test cases` entry is represented, and check 4 — are the item checks, done only with `item checks: yes`, against the whole-change diff above.
 With no item at all, checks 1–3 judge the change on its own terms and check 4 does not apply.
 
-**Read the item's contract first and its `## Outcome` last.** Take `## Plan` / `## Fix` (with `## Test cases` and `## Done when` where present) before the
-diff, form your view for checks 1–3 from the diff and the code alone, and only then open `## Outcome`, for check 4. `## Outcome` is the executor's own claim
+**Read the item's contract first and its `## Outcome` last.** Take `## Plan` / `## Fix` (with `## Test cases`, `## Done when`, `## Verify` where present) before
+the diff, form your view for checks 1–3 from the diff and the code alone, and only then open `## Outcome`, for check 4. `## Outcome` is the executor's own claim
 that the work is done and verified — a claim, not evidence, for checks 1–3. Never withdraw a finding because the Outcome says the case was handled: check it in
 `to`, and if `to` handles it there was no finding to withdraw. The order is the whole point. A reviewer that reads "all tests pass, edge case X handled" first
 goes looking for confirmation of the executor's summary instead of reviewing the diff, and the one independent read this change gets becomes a second copy of
 the author's.
 
-**An unkept promise quotes the promise.** Every Critical or Important finding that says the change does not keep what `## Plan`, `## Fix`, `## Test cases` or
-`## Done when` promised carries that line of the item, verbatim, in the finding's text, as `plan: "<quoted line>"`. A promise you cannot quote is not an
-unkept-promise finding; it can still be a correctness finding on its own terms. The fix session is sent the finding, not your reading of the plan, and a
+**An unkept promise quotes the promise.** Every Critical or Important finding that says the change does not keep what `## Plan`, `## Fix`, `## Test cases`,
+`## Done when` or `## Verify` promised carries that line of the item, verbatim, in the finding's text, as `plan: "<quoted line>"`. A promise you cannot quote is
+not an unkept-promise finding; it can still be a correctness finding on its own terms. The fix session is sent the finding, not your reading of the plan, and a
 paraphrased promise is how a fix loop "fixes" something the plan never asked for. The quote lives in the finding's text, never on a line of its own inside the
 entry — the `anchor:` line and everything `merge` parses stay exactly as the Output contract spells them.
 
@@ -240,6 +240,13 @@ at its own severity, under check 1.
    headless run can tell whether they ran. The lines are a claim and not proof: spot-check them against the diff the way you would any other claim, and where
    one is plainly false — a `none found` beside a renamed flag still spelled the old way in `CLAUDE.md` — report the site itself, at its own severity, not the
    line. A prose site's severity is the prose-only drift rule's, under Severity.
+
+   The same check reads the `## Verify` results, which `backlog-execute` writes beside the pair in three fixed shapes: `Verify <n>: pass — <evidence>`,
+   `Verify <n>: fail — <what was seen>`, and `Verify: none on item`. When the item's `## Verify` has `- ` items, `## Outcome` must carry one `Verify <n>:` line for
+   each: **a missing `Verify <n>:` line, or a count that does not match the `## Verify` items, is an Important finding**, and **a `Verify <n>: fail` line on a
+   change offered as done is a Critical finding** — execute's own rule is that a fail never archives. A `pass` is a claim like the pair: spot-check its evidence
+   against the diff. An item with no `## Verify` (the heading absent, or no `- ` item under it) expects `Verify: none on item`, and its absence there is not a
+   finding — every Outcome written before `## Verify` existed lacks it.
 
    With `outcome: none` there is no `## Outcome` to carry the pair — a standalone review of a tracker issue, or of an item nobody has executed — so write
    `not checked: no Outcome` for check 4 under `## Checked and clean` and raise nothing for it. The Important finding above is for an Outcome that exists and

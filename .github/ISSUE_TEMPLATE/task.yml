@@ -20,5 +20,7 @@ body:
         ## Test cases
 
         ## Done when
+
+        ## Verify
     validations:
       required: true

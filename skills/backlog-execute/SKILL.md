@@ -66,8 +66,8 @@ long as that marker does:
     from any session but the holder or the claim's own run, so this one would be refused rather than quietly obeyed — the rule is enforced now, not only
     written down.
   - **Write the whole `## Outcome` to the path the marker names** — the same text, in the same shape, the archiving and failure sections below both describe,
-    contract-sweep and red-proof lines included. Write it **whether verification passed or failed**: the run reads that file to decide what happened, and an
-    empty one reads as "the session died".
+    contract-sweep, red-proof and `Verify` lines included. Write it **whether verification passed or failed**: the run reads that file to decide what happened,
+    and an empty one reads as "the session died".
   - `show <n>` is still how to read the item, and the id is the bare issue number the marker gives.
 
 No marker means a human started this session and the user is the channel, as always. Everything below applies either way **except where it names the user as
@@ -325,6 +325,14 @@ the marker section's exception describes. Check the layout, every interaction th
 unit test cannot see. Write what each check showed into `## Outcome`. "Needs a human" for the browser check is acceptable only when no Playwright tool is
 loaded in this session, and the Outcome says that is why (#242).
 
+**When the item has `## Verify`, prove every line of it by running what the line names** — the command, the test file, the CLI call, or the browser check —
+and read the output against what the line says must show. `## Verify` is groom's yes/no checklist (`backlog-groom`, Promote step 4): 3–8 `- ` items, numbered
+by position, line 1 the first `- ` item. "The item has no `## Verify`" means the heading is absent, or has no `- ` item under it (an empty slot capture or the
+issue form left, or prose only). Each line's result goes into `## Outcome` in the fixed shapes Archive step 1 lists, one per Verify line, in order.
+**Any `Verify <n>: fail` means verification failed**: take the "If verification fails, nothing moves" path, never the archive. A Verify line this session
+cannot run — no browser tool loaded, a service that is not up — is a `fail` with that reason — never skipped, never `pass`: an unproved check is exactly what
+the list exists to stop being called done. An item with no `## Verify` executes as before and records the single line `Verify: none on item`.
+
 Verification proves the _work_ does what the item asked. Two further checks prove the _diff_ is finished, and they are here because these two findings dominate
 review: a 2026-09-06 sweep of every fix-verdict review on this machine (29 reviews, four projects) put 14 on "another statement of the old contract left
 standing" and 5 on "a new test that still passes with the change reverted" — 19 of 29, against 8 genuine defects. Both are mechanical checks over a diff this
@@ -382,6 +390,17 @@ picked, and a tracker project does not archive at all — `references/pr-mode.md
 
    Fixed shapes rather than prose, because the reviewer reads these two lines specifically and treats a missing pair as an Important finding. That is the only
    thing standing between the step above and being quietly skipped in a headless run nobody is watching.
+
+   Beside them, the `## Verify` results — one line per Verify item, in order, `<n>` its position — or, for an item with no `## Verify`, the single line below:
+
+   ```
+   Verify <n>: pass — <the evidence: the command and the output line that shows it, or what the browser showed>
+   Verify <n>: fail — <what was seen instead>
+   Verify: none on item
+   ```
+
+   The reviewer counts these against the item's Verify list too: a missing line is an Important finding, and a `fail` on a change offered as done a Critical
+   one. A `fail` never reaches this step at all — it is the failure path below, whose `## Outcome` carries the same lines.
 
 2. Bill the session and clear the phase marker, but keep the record of when it started:
 

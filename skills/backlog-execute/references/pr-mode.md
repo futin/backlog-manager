@@ -178,7 +178,7 @@ the worktree path and the branch.
 - **Files project:** SKILL.md's archive step, unchanged — `## Outcome` appended, `stop <id> --keep-started`, `move <id> done`. Those writes land in `<tree>`
   and so in the commit; the item reaches `done/` on `<base>` only when the PR merges.
 - **Tracker project: nothing is archived here, and there is no `move` at any point.** The issue closes when the PR merges (`Closes #<n>`, §8). Write the whole
-  `## Outcome` — contract-sweep and red-proof lines included — to `<tmp>/outcome.md`. **The claim is held**, heartbeats continuing, through §6-§8; the
+  `## Outcome` — contract-sweep, red-proof and `Verify` lines included — to `<tmp>/outcome.md`. **The claim is held**, heartbeats continuing, through §6-§8; the
   comment and the release come at the end of §8.
 
 **`<tmp>` is this session's own temp directory**, made here in either mode, and every temp file below goes inside it:
@@ -267,7 +267,7 @@ The PR body, written to `<tmp>/pr.md`:
   empty, which would leave an auto-merge PR waiting forever. Where the target repo's `.github/pull_request_template.md` carries its own guide in that
   section's comment, follow it. The section ends at the next `## ` heading, so everything below goes under a `## Outcome` heading;
 - the Outcome summary — what was done, the verification command and the lines of its output that show it passing, the `Contract sweep:` and `Red proof:`
-  lines;
+  lines, and the `Verify <n>:` lines (or `Verify: none on item`);
 - the review verdict, the number of fix rounds, and the one-line summary of every Critical/Important finding the rounds fixed — never a local report path;
 - tracker only: `Closes #<n>` when `<base>` is the repository's default branch, otherwise `Refs #<n>` — GitHub only auto-closes from a PR into the default
   branch. The default branch is `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with its `origin/` prefix stripped (it prints `origin/main`,
