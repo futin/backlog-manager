@@ -12,8 +12,8 @@ export type JiraSessionState = 'starting' | 'plan' | 'permission' | 'reply' | 'a
  * - **Lost contact sits above the row's own state.** §6 says the dashboard "did not answer this tick" and a live entry then keeps nothing but its place: the
  *   rows kept from the last good read are old, so a `working` row from then is not evidence of anything now, and a wait that has since been answered would
  *   keep shouting "needs you". `starting` and `ended` still win over it — neither depends on the dashboard.
- * - **Total.** The reconciler ends a link whose row is `idle`/`incomplete` past the 120 s grace, so a LIVE link whose row is either (with or without `quietSince`
- *   yet), or has no row while the dashboard answers, or carries a status this code has never heard of, is inside the grace or unknown: it reads Quiet, and
+ * - **Total.** The reconciler ends a link whose row has been `idle`/`incomplete` for 120 s, so a LIVE link whose row is either (with or without `quietSince`
+ *   yet), or has no row while the dashboard answers, or carries a status this code has never heard of, is still on its clock or unknown: it reads Quiet, and
  *   Quiet is the one state that never counts toward the badge, so an unknown status cannot raise a false alarm.
  *
  * The three wait flags are read whatever `status` says — they are the row's own statement that a person is wanted, and the dashboard sets them on a session
@@ -42,15 +42,15 @@ export type RunBlockPhrase = 'not seen by the dashboard' | 'waiting on you' | 's
  * The quiet-only Run gate (spec 2026-11-17-jira-quiet-run-gate-design.md, Design → One predicate): `null` when this link would let the next Run on its key
  * start, else the reason it will not, first match wins.
  *
- * A link yields only when ALL of: the reconciler has marked it quiet (`quietSince` — set only past the 2-minute grace, on a row neither `working` nor
- * `question`), the dashboard's latest good read carries a row for it, and `sessionState` reads that row as Quiet. The row requirement is what makes "every
+ * A link yields only when ALL of: the reconciler has marked it quiet (`quietSince` — set on the first tick that reads a row neither `working` nor
+ * `question`, at any age; only an ABSENT row waits out the 2-minute grace), the dashboard's latest good read carries a row for it, and `sessionState` reads that row as Quiet. The row requirement is what makes "every
  * unknown blocks" true. `quietSince` is persisted while the rows are memory only, so straight after a restart a link can carry `quietSince` with no row at all;
  * `sessionState` reads a null row as `quiet` (its totality rule, above) because for a BADGE "unknown" must never raise an alarm — but for a GATE it is the
  * opposite: a link the server knows nothing current about may be mid-turn, so it blocks. The same holds for a row that fell off a full 50-row list, which
  * leaves `quietSince` standing (the reconciler proves nothing from an absent row in a full list). An unreachable dashboard is `lost`, which blocks too.
  *
  * The states that want a person (`plan`, `permission`, `reply`, `answer`) block as `waiting on you`: a second Run there would start beside a session that is
- * only paused for an answer. `quiet` without `quietSince` yet — inside the grace, or idle for less than one reconcile tick — is `not quiet yet`.
+ * only paused for an answer. `quiet` without `quietSince` yet — idle for less than one reconcile tick, or no row inside the grace — is `not quiet yet`.
  */
 export function runBlockPhrase(link: JiraLink, row: DashboardRow | null, reachable: boolean): RunBlockPhrase | null {
   if (!reachable || row === null) return 'not seen by the dashboard';

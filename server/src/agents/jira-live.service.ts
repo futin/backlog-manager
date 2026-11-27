@@ -18,14 +18,15 @@ export const JIRA_RECONCILE_MS = 60_000;
 export const JIRA_RECONCILE_FAST_MS = 15_000;
 
 /**
- * An entry younger than this is never judged: a just-spawned session has no transcript yet, so the dashboard's list (a scan of `~/.claude/projects/`) does not
- * carry it, and "absent" for the first minutes means "not yet", never "gone" (spec §3).
+ * An entry younger than this is never judged on ABSENCE: a just-spawned session has no transcript yet, so the dashboard's list (a scan of `~/.claude/projects/`)
+ * does not carry it, and "absent" for the first minutes means "not yet", never "gone" (spec §3). A row the list DOES carry is judged at any age — an idle one
+ * starts the Quiet clock at once, so the Run gate opens in the same tick the row first reads Quiet (2026-11-27).
  */
 export const JIRA_LIVE_GRACE_MS = 120_000;
 
 /**
- * How long a session must have been Quiet, continuously, before its link ends (spec §5 Detach, §6). The second of two clocks: the entry must ALSO be past
- * JIRA_LIVE_GRACE_MS by `startedAt`, and the later of the two decides. Spec §5's prose says "more than 120 s" and §6 (with the test that predates this) says
+ * How long a session must have been Quiet, continuously, before its link ends (spec §5 Detach, §6). The second of two clocks: `quietSince` is never earlier
+ * than `startedAt`, so no entry ends before it is this old, and an absent one also waits out JIRA_LIVE_GRACE_MS before its clock starts. Spec §5's prose says "more than 120 s" and §6 (with the test that predates this) says
  * "less than 120 s stays", i.e. exactly 120 s ends; this follows §6.
  */
 export const JIRA_QUIET_MS = 120_000;
@@ -56,10 +57,10 @@ const ACTIVE = new Set(['working', 'question']);
  * ## The rule
  *
  * One `GET /api/sessions` per tick, with the dashboard's caps, stored whole in the map (`setRows`). A dashboard that cannot be read marks the map unreachable
- * and ends NOTHING — lost contact is not evidence about any session, and the 8-hour expiry is the floor. For each live entry that holds a session id and is past
- * the grace: a `working` or `question` row clears its Quiet mark; any other row, or no row in a list shorter than the cap (`gone`), is Quiet — marked on the
+ * and ends NOTHING — lost contact is not evidence about any session, and the 8-hour expiry is the floor. For each live entry that holds a session id: a
+ * `working` or `question` row clears its Quiet mark; any other row, at any age, or — past the grace — no row in a list shorter than the cap (`gone`), is Quiet — marked on the
  * first such tick, and ended (`idle`, or `gone`) once that mark is JIRA_QUIET_MS old. A full list proves nothing about an absent session, so it is left alone.
- * Never touched: a `starting` entry (no session id — its own Start settles it) and any entry younger than the grace. Then, C5: an ENDED entry whose row is
+ * Never touched: a `starting` entry (no session id — its own Start settles it) and an entry younger than the grace whose row is absent. Then, C5: an ENDED entry whose row is
  * `working` or `question` again is re-attached — its own entry re-opened, the 8-hour clock restarted — so a session the user resumed comes back without the
  * history growing.
  *
@@ -198,13 +199,16 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
     // Stop-and-restart that landed inside the fetch can never have a verdict about the old session rewrite the new one.
     for (const link of this.live.liveLinks()) {
       const id = link.sessionId;
-      if (id === null || now - Date.parse(link.startedAt) < JIRA_LIVE_GRACE_MS) continue;
+      if (id === null) continue;
       const row = rows.get(id);
       if (row !== undefined && ACTIVE.has(row.status)) {
         this.live.clearQuiet(link.key, id);
         continue;
       }
-      if (row === undefined && answer.full) continue;
+      // The grace covers ABSENCE only — a just-spawned session the list does not carry yet. A row the list does carry, reading idle, is quiet now, whatever the
+      // link's age: holding its `quietSince` back for the grace kept the Run gate shut for up to two minutes while every page already drew the row as Quiet.
+      // The end needs no grace of its own: `quietSince` is never earlier than `startedAt`, so a link cannot end before it is JIRA_QUIET_MS old.
+      if (row === undefined && (answer.full || now - Date.parse(link.startedAt) < JIRA_LIVE_GRACE_MS)) continue;
       const quietSince = link.quietSince ?? new Date(now).toISOString();
       this.live.markQuiet(link.key, id, quietSince);
       if (now - Date.parse(quietSince) >= JIRA_QUIET_MS) this.live.end(link.key, id, row === undefined ? 'gone' : 'idle', now);
