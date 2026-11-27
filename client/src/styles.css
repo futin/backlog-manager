@@ -4527,9 +4527,13 @@ button.rail-count { cursor: pointer }
 .ui-seg-track button:hover:not(:disabled) { background: none }
 .ui-seg-track button.on { background: var(--strip); box-shadow: 0 1px 2px var(--shadow) }
 
-/* Select and NumberField — the other two of the 36 px family (§8.6). */
+/* Select and NumberField — the other two of the 36 px family (§8.6).
+   `max-width: 100%` because a native select is as wide as its longest option, and an option's label is data — Settings' Jira default action lists every run
+   skill by name, and one long name pushed the page sideways at 375 px (#616). A definite max size is the only thing that clamps a flex item's content-based
+   minimum; the control then clips its chosen label in its own box while the open picker still lists full names. Where the container is sized by the select
+   itself (a desktop `.set-control`), the percentage resolves to the select's own width and changes nothing. */
 .ui-select {
-  height: 36px; padding: 0 10px; border-radius: 12px;
+  height: 36px; max-width: 100%; padding: 0 10px; border-radius: 12px;
   font-size: 13px; color: var(--ink);
   background: var(--strip); border: 1px solid var(--hairline2);
 }
