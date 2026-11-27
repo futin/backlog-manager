@@ -429,10 +429,11 @@ item being treated as still in flight. Then continue with the next item; a `need
 Tracker: every `attention` call also comments on the issue, so `--detail` is published text — your own words, never a quote (`references/tracker.md` §3,
 _`attention` becomes a comment_).
 
-**Not answered, `questionMode: decide`** → decide each question yourself, then record what you decided. When a question goes unanswered under `decide`, read
+**Not answered, `questionMode: decide`** → decide everything a follow-up commit can undo, park only for the five stop reasons in `references/questions.md`,
+and record what you decided. When a question goes unanswered under `decide`, read
 `references/questions.md` in full: it answers from the item, the repo's `CLAUDE.md`, its scoped rules and the code, writes each answer into the item through
 "Writing an answer into the item" below (inside the worktree, in step 4), and records the pairs on the queue item with `assume`, which the tool refuses on a
-`park` run. Then continue to the loop and dispatch the item like any other.
+`park` run. Then continue to the loop and dispatch the item like any other — unless a question hit a stop reason, which parks the whole item.
 
 One rule goes with all three outcomes, and it carries its reason because a bare prohibition is exactly what drifts:
 

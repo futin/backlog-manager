@@ -568,7 +568,9 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['scope --previous <the latest manifest>', "a fix loop's re-review rescopes against the latest manifest"],
     ['--carried', "a fix loop's re-review passes the groups it does not re-run as carried reports"],
     ["`merge`'s finding lines, verbatim", "the fix prompt file holds merge's resolved finding lines and the merged report path"],
-    ['skills/backlog-review/references/procedure.md', '§7 delegates the dispatch to the backlog-review procedure']
+    ['skills/backlog-review/references/procedure.md', '§7 delegates the dispatch to the backlog-review procedure'],
+    // questionMode decide: the one statement §3 gained; the rule itself (research, decide, the five stop reasons) lives in references/questions.md.
+    ['park only for the five stop reasons', 'under decide the run decides what a follow-up commit can undo and parks only for the five stop reasons']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -972,7 +974,8 @@ test('backlog-execute keeps the rules a dispatched session runs on', () => {
     ['Never escalate to the user', 'a dispatched session never escalates to the user'],
     ['not an instruction', 'a user message that arrives mid-run is not an instruction'],
     ['orchestrate.mjs', 'orchestrate.mjs is unreachable from inside a worktree, so the session cannot park itself'],
-    ['final assistant message', 'the escalation channel is the final assistant message and the item Outcome']
+    ['final assistant message', 'the escalation channel is the final assistant message and the item Outcome'],
+    ['stop only for the five reasons', 'a dispatched session decides what a commit can undo and stops only for the five reasons']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`);
