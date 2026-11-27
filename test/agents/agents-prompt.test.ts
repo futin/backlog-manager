@@ -234,26 +234,38 @@ const DASHBOARD_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/;
 const DASHBOARD_NAME_CAP = 60;
 
 describe('sessionName', () => {
-  it('labels the dashboard row with project and id', () => {
-    expect(sessionName(fakeItem({ project: 'alpha', id: 'task-12' }))).toBe('bl alpha task-12');
+  it('names the action, the id and the title, so the row and the desktop sidebar say what the work is', () => {
+    expect(sessionName(fakeItem({ id: 'task-12', title: 'Add retry to tracker poller' }), 'execute')).toBe('execute task-12 Add retry to tracker poller');
+  });
+
+  // The regression: `bl <project> #621` failed NAME_RE on the `#`, the dashboard dropped the name, and a tracker groom handed to the desktop app showed
+  // only the folder name.
+  it('drops the # of a tracker id', () => {
+    expect(sessionName(fakeItem({ id: '#621', title: 'Hold all agent work' }), 'groom')).toBe('groom 621 Hold all agent work');
+  });
+
+  it('turns every character outside the dashboard charset into one space', () => {
+    expect(sessionName(fakeItem({ id: '#7', title: 'Fix: the “board” — flickers/über  fast' }), 'groom')).toBe('groom 7 Fix the board flickers ber fast');
   });
 
   it('composes a name the dashboard will actually keep', () => {
-    for (const item of [
-      fakeItem({ project: 'alpha', id: 'task-12' }),
-      fakeItem({ project: 'backlog-manager', id: 'bug-7' }),
-      fakeItem({ project: 'guide.manager_2', id: 'idea-1' })
-    ]) {
-      const name = sessionName(item);
+    for (const [item, action] of [
+      [fakeItem({ id: 'task-12', title: 'plain' }), 'execute'],
+      [fakeItem({ id: '#621', title: 'Hold all agent work while the Claude usage limit is hit' }), 'groom'],
+      [fakeItem({ id: 'oos-3', title: '— leading dash and "quotes" —' }), 'capture'],
+      [fakeItem({ id: 'idea-1', title: '' }), 'groom']
+    ] as const) {
+      const name = sessionName(item, action);
       expect(name).toMatch(DASHBOARD_NAME_RE);
       expect(name.length).toBeLessThanOrEqual(DASHBOARD_NAME_CAP);
     }
   });
 
-  it('stays inside the cap for a project name long enough to blow it', () => {
-    const name = sessionName(fakeItem({ project: 'a'.repeat(80), id: 'task-1' }));
+  it('cuts a long title at the cap and leaves no trailing space', () => {
+    const name = sessionName(fakeItem({ id: '#621', title: 'Hold all agent work while the Claude usage limit is hit and resume after' }), 'groom');
+    expect(name).toBe('groom 621 Hold all agent work while the Claude usage limit');
     expect(name).toMatch(DASHBOARD_NAME_RE);
-    expect(name).toHaveLength(DASHBOARD_NAME_CAP);
+    expect(name.endsWith(' ')).toBe(false);
   });
 });
 

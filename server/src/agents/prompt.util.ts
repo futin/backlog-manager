@@ -121,30 +121,37 @@ function instruction(item: BacklogItem, action: AgentAction): string {
 }
 
 /**
- * The `-n` name the dashboard row is labelled with. Prefixed `bl ` so a row
- * this board started is recognisable among sessions started from a terminal.
+ * The `-n` name an item dispatch's session is labelled with: the action, the id and the item's title — `groom 621 Hold all agent work while the Claude usage
+ * limit` — so the dashboard row and, after a desktop hand-over, the Claude desktop app's sidebar say what the session is working on. The `-n` name becomes the
+ * transcript's `custom-title` record, and the app's `claude://resume` import reads that record from the transcript's tail as the imported session's title; with
+ * no name the app falls back to the folder name, which is all a groom opened in the desktop app used to show.
  *
- * Spaces, not the `bl:<project>/<id>` this used to emit. That spelling was
- * silently discarded on 100% of dispatches: the dashboard's own
- * `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` (`server/lib/spawn.ts`) allows
- * neither `:` nor `/`, and `parseSpawnRequest` drops an invalid name to
- * `undefined` under a documented fail-soft rule rather than rejecting the
- * request. So `-n` never reached the CLI and every row fell back to the bare
- * project name — indistinguishable from a terminal-started session, which is
- * the entire affordance this function exists to buy.
+ * It must pass the dashboard's `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` (`server/lib/spawn.ts`) and its `NAME_CAP` (60), because `parseSpawnRequest` drops
+ * an invalid or over-long name to `undefined` under a documented fail-soft rule rather than rejecting the request — the drop is silent, and the row and the
+ * desktop session are then unnamed. That has bitten twice: the old `bl:<project>/<id>` spelling failed on `:` and `/` for every dispatch, and its
+ * replacement `bl <project> <id>` failed on the `#` of every tracker id (`#621`), so every tracker groom handed to the desktop app showed only
+ * `backlog-manager`. Hence the whole name is sanitised rather than trusting any part of it: the `#` goes, every character outside the charset becomes a
+ * space (an em dash, a quote, a colon or an accented letter in a title), and runs of spaces collapse. A name over the cap is cut at the last word boundary
+ * that fits, so the title never ends on half a word; only a single 60-character token with no space in it is cut mid-word. The action leads, so the name
+ * always starts with a letter whatever the title holds.
  *
- * test/agents/agents-prompt.test.ts asserts the composed name against a copy of that
- * regex, so the cross-app contract is pinned rather than assumed. It is a
- * copy on purpose: importing from a sibling repo would make this repo's tests
- * depend on a checkout of another one.
- *
- * Sliced to that app's `NAME_CAP` (60) for the same reason: over the cap is
- * the same silent drop, and a long project name plus a long id can reach it.
- * A truncated name still reads as ours; no name at all does not.
+ * test/agents/agents-prompt.test.ts asserts the composed name against a copy of that regex, so the cross-app contract is pinned rather than assumed. It is a
+ * copy on purpose: importing from a sibling repo would make this repo's tests depend on a checkout of another one.
  */
-export function sessionName(item: BacklogItem): string {
-  return `bl ${item.project} ${item.id}`.slice(0, 60);
+export function sessionName(item: BacklogItem, action: AgentAction): string {
+  const name = `${action} ${item.id.replace(/^#/, '')} ${item.title}`
+    .replace(/[^A-Za-z0-9 ._-]+/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+  if (name.length <= SESSION_NAME_CAP) return name;
+  // One character past the cap, so a word that ends exactly at the cap is kept whole.
+  const head = name.slice(0, SESSION_NAME_CAP + 1);
+  const space = head.lastIndexOf(' ');
+  return (space > 0 ? head.slice(0, space) : name.slice(0, SESSION_NAME_CAP)).trimEnd();
 }
+
+/** The dashboard's `NAME_CAP` (`server/lib/spawn.ts`): a longer `-n` name is dropped, not cut. */
+const SESSION_NAME_CAP = 60;
 
 /**
  * The `-n` name an orchestrate run's dashboard row is labelled with —

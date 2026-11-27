@@ -135,7 +135,7 @@ person's PATH is guessing at their toolchain, and the leaked variable — not th
 
 The prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and `-n` by whoever opens the dashboard mid-run to see what is happening — the channel follows
 the reader, three times on one line. Without it this was the one session in the whole system with no display name: every other spawn goes through the board's
-own server, which composes one (`orchestrate <project>`, `bl <project> <id>`, `resume <project>`, `watchdog resume <project>`) and posts it to the dashboard,
+own server, which composes one (`orchestrate <project>`, `<action> <id> <title>`, `resume <project>`, `watchdog resume <project>`) and posts it to the dashboard,
 while this line spawns `claude` itself and reached none of that code. An unnamed session's row falls back to the bare project name, so the session actually
 doing the work read exactly like one somebody started in a terminal, identifiable only by opening its transcript.
 
