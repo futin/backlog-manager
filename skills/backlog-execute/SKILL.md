@@ -17,7 +17,7 @@ it refuses and says so.
 
 Look at the words that came with the trigger. The token `[orchestrator-run` appears **anywhere after the id**, never before it — the id is always the first word
 after the trigger, so a rule that expected the marker to come first would never fire. Its presence anywhere in those words means `backlog-orchestrate`
-dispatched this session and owns the item, the worktree, the branch and everything that happens to the work after this session exits. Five rules hold for as
+dispatched this session and owns the item, the worktree, the branch and everything that happens to the work after this session exits. Six rules hold for as
 long as that marker does:
 
 - **Never escalate to the user.** Not "prefer not to" — a message can still arrive through the dashboard, and answering it is the defect this rule exists for.
@@ -43,7 +43,22 @@ long as that marker does:
   closed, before the turn ends. Kill by that recorded pid, never by pattern — `pkill -f` and `killall` match the human's processes too, and the kill-guard
   hook refuses them machine-wide. Tests, typecheck and build stay foreground-only: the exception is for a server the session itself talks to, never for work
   whose result it would wait on.
-- **In a TRACKER project the marker carries a sixth rule, and an `outcome <path>` clause to go with it.** It reads
+- **Decide what a follow-up commit can undo; stop only for the five reasons.** A choice the plan leaves open is not a question to escalate. First look for
+  the answer where it may already be written — the item and its comments, the PRs and issues it links, `CLAUDE.md`, the `.claude/rules/` files scoped to the
+  files in play, `docs/`, the code — and a choice the record settles is followed, not decided. Anything else a follow-up commit can undo — a name, which
+  helper to reuse, the test strategy, where a guard lives, an internal error shape, copy inside an agreed UX, the smaller of two scopes the item allows — you
+  decide, preferring the smallest answer that lets the work proceed. Stop only for one of these five, numbered as `backlog-orchestrate`'s question rule
+  numbers them: **1** irreversible, or acts outside the repo (data deletion, a production write, anything sent to a person); **2** contradicts the item, a
+  recorded decision (a spec, a decision log, an earlier answer on the item) or the repo's rules; **3** wrong premise — it does not reproduce, it is already
+  fixed, or the evidence says the ask makes things worse; **4** a product fork no document settles and users would notice; **5** a step only the owner can
+  take (a credential, an account, an approval, a purchase). Stopping is the verification-failure path below — nothing moves, `## Outcome` is written, the
+  final message says why — and the Outcome's first line says which: for 2 and 3 it is the `Plan no longer holds: <one line>` contract the run already reads
+  and marks the plan stale on; for 1, 4 and 5 it is `Stopped: reason <n> — <one line>`, and the run's existing failure handling retries or parks it. This
+  holds whatever the run's question mode — the marker does not carry one, and this session never escalates in either.
+
+  Every decision made this way goes into `## Outcome` under a `Decided:` list, the one the owner is likeliest to overrule first and the safest last, one line
+  each: the choice — the alternative it beat — why. With no marker none of this applies: a human started the session and the user is the channel.
+- **In a TRACKER project the marker carries a seventh rule, and an `outcome <path>` clause to go with it.** It reads
   `[orchestrator-run <runId> item <n> of <m> branch backlog/<n> outcome <absolute path>: …]`.
   - **Never run `start`, `stop`, `heartbeat`, `move` or `comment` on the item.** The driver holds the issue's claim for the whole item — it claimed before this
     worktree existed and it releases when the item reaches its terminal stage — and it is the driver that closes the issue. A session that ran any of those
@@ -170,7 +185,7 @@ session to.
   archive.
 
 **None of that applies under an `[orchestrator-run` marker.** There, the Outcome goes to the path the marker names and nothing else happens: no `stop`, no
-`move`, no `comment`. The run holds the claim and closes the issue itself — see the marker's own sixth rule above, which is the authority for a tracker item
+`move`, no `comment`. The run holds the claim and closes the issue itself — see the marker's own seventh rule above, which is the authority for a tracker item
 inside a run.
 
 **Heartbeat between long steps.** A claim reads stale after 15 minutes without one, and the next session to contest the item retires it. An execute session that
@@ -434,6 +449,8 @@ whatever time was spent and drops `started` along with it, because there's nothi
 - **If verification fails, nothing moves.** Covered above — restated here because it's a hard limit, not a suggestion: no proof, no archive.
 - **Never escalates to the user while an `[orchestrator-run` marker holds.** Covered above, and a hard limit for the same reason the one above it is: an
   unattended run has nobody to answer, and a session that stops to negotiate keeps the whole queue waiting on a decision the run was going to make by itself.
+  Never escalating means deciding, or stopping through the Outcome for one of the five reasons ("Decide what a follow-up commit can undo" above) — never
+  inventing an answer to a question that hits one of them.
 
 ## Next
 

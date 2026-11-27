@@ -1059,6 +1059,16 @@ replacing, and **the tool refuses it under `park`** — exit `1`, run file byte-
 keeps, because SKILL.md is re-read on every one of a run's several hundred turns and prose drifts where a tool refusal does not. The converse is deliberately
 not enforced: `attention --kind needs-answers` stays legal under `decide`, because `decide` is permission to answer and not an obligation to invent.
 
+**Under `decide` the runner decides anything a follow-up commit can undo and parks only for five reasons** — irreversible or outside the repo; contradicts the
+item, a recorded decision or the repo's rules; a wrong premise; a product fork no document settles; a step only the owner can take — after first researching
+the item, its comments, the repo's rules, `docs/` and the code for an answer already written down. The mechanism's one home is
+`skills/backlog-orchestrate/references/questions.md`; a dispatched `backlog-execute` session carries the same five reasons in its marker rules, in either
+mode, because it never escalates. `park` is unchanged: it never answers, and still records every question verbatim. **The order of the `assumptions` array is
+the overrule ranking** — likeliest-to-be-overruled first, each answer one line naming the choice, the alternative it beat and why — and the schema did not
+change: `RunQueueItem.assumptions` stays `{ question, answer }[]` and the run drawer already renders it in order. Why: `decide` without a rule parked on
+trivia and answered questions it should never have answered alone, and the assumptions it recorded arrived unranked, so a reviewer could not tell which one to
+check first (#623, #626).
+
 **No fourth `ATTENTION_KIND`** — that list stays the closed set of three and means "a human must look at this item", which a decided-and-merged item does not
 warrant; the same precedent a classifier denial already set, one section above.
 
