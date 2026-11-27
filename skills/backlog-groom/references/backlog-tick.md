@@ -21,9 +21,11 @@ Nobody is there to answer, and an unanswered question parks the whole tick.
 - Do not invoke `superpowers:brainstorming` or `superpowers:writing-plans`, on either verdict. Where SKILL.md says to brainstorm "only if the fix needs design
   work" or to settle a promote's open questions with the user, settle each one inline instead: pick the most conservative answer the code supports, and write it
   down.
-- **Every open question you settled is listed, with the answer you chose, under a `## Assumptions (unattended)` heading** — the last heading of the body, after
-  `## Fix` (bug) or `## Done when` (task). It is what the person approving the plan reads first. The heading is always written: with no open questions it holds
-  the single line `None.`, so a reviewer never has to wonder whether the section was forgotten.
+- **The unattended groom writes `## Verify` too**, to SKILL.md's contract (Promote step 4): after `## Fix` on a bug, after `## Done when` on a task, in the
+  same write as the plan — so the person approving the plan also approves the checklist the execute session will prove.
+- **Every open question you settled is listed, with the answer you chose, under a `## Assumptions (unattended)` heading** — the last heading of the body,
+  after `## Verify`. It is what the person approving the plan reads first. The heading is always written: with no open questions it holds the single line
+  `None.`, so a reviewer never has to wonder whether the section was forgotten.
 - A promote's `## Plan` is written straight from what you settled — the "small change" route in Promote step 2, never the "project with a written design" one
   that writes a spec and invokes `superpowers:writing-plans`. It must still be real and substantive: `backlog-execute` refuses a placeholder, and under a
   tick that refusal is a wasted PR slot.
@@ -37,7 +39,7 @@ is exactly what an orchestrator run or an execute session treats as ready.
 | Verdict | Files project | Tracker project |
 | --- | --- | --- |
 | Plan a bug's fix | add `plan-review: true` to the bug's own frontmatter in the same edit that fills `## Cause` and `## Fix` | `--plan-review` on the one `body` call that writes the plan |
-| Promote a refactor | the new task's printed frontmatter block is kept exactly as printed **plus** one `plan-review: true` line, in the one write that adds the four headings — carved out the way `runner-fix: true` already is in Promote step 4 | `--plan-review` on the `new tasks … --from #<n>` call |
+| Promote a refactor | the new task's printed frontmatter block is kept exactly as printed **plus** one `plan-review: true` line, in the one write that adds the five headings — carved out the way `runner-fix: true` already is in Promote step 4 | `--plan-review` on the `new tasks … --from #<n>` call |
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt> --plan-review

@@ -178,6 +178,23 @@ describe('deriveGroomed', () => {
     expect(deriveGroomed('tasks', '## Goal\n\ng\n\n## Plan\n\n## Test cases\n')).toBe(false);
   });
 
+  // #627: groom now writes a `## Verify` checklist, and it is deliberately NOT part of groomed-ness — requiring it would flip every item groomed before it
+  // existed to ungroomed and make the orchestrator gate skip them. Regression pins, green before and after: each fixture carries a filled Verify (two list
+  // items), so together they prove Verify neither grants groomed-ness to an unplanned item nor is read when deciding it.
+  const VERIFY = '## Verify\n\n- `pnpm test` exits 0\n- `grep -n x y` prints one line\n';
+
+  it('task with a Plan and a filled ## Verify is groomed', () => {
+    expect(deriveGroomed('tasks', `## Goal\n\ng\n\n## Plan\n\n1. do it\n\n## Done when\n\nd\n\n${VERIFY}`)).toBe(true);
+  });
+
+  it('task with an empty Plan is not groomed, however filled its ## Verify', () => {
+    expect(deriveGroomed('tasks', `## Goal\n\ng\n\n## Plan\n\n## Done when\n\nd\n\n${VERIFY}`)).toBe(false);
+  });
+
+  it('bug with unknown Cause and Fix is not groomed, however filled its ## Verify', () => {
+    expect(deriveGroomed('bugs', `## Cause\n\nunknown\n\n## Fix\n\nunknown\n\n${VERIFY}`)).toBe(false);
+  });
+
   it('ideas and out-of-scope have no groomed state', () => {
     expect(deriveGroomed('ideas', 'anything')).toBeNull();
     expect(deriveGroomed('out-of-scope', 'anything')).toBeNull();

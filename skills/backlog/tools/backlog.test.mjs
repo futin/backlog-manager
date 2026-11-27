@@ -3041,6 +3041,90 @@ test('backlog-reviewer reads both lines and calls a missing pair Important', () 
   )
 })
 
+// --- #627: the `## Verify` checklist groom writes and execute proves line by line ----------------------------------------------------------------------------
+// The three line shapes are the contract between the skill that writes them into `## Outcome` and the agent that reads them, pinned from one table both sides
+// iterate — the OUTCOME_LINES shape above, for the same reason: neither side can be re-worded alone.
+const VERIFY_LINES = ['Verify <n>: pass', 'Verify <n>: fail', 'Verify: none on item']
+const GROOM_TICK_MD = fileURLToPath(new URL('../../backlog-groom/references/backlog-tick.md', import.meta.url))
+const VERIFY_CAPTURE_MD = fileURLToPath(new URL('../../backlog-capture/SKILL.md', import.meta.url))
+
+test('backlog-execute writes one Verify line per ## Verify item, in the three fixed shapes', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  for (const line of VERIFY_LINES) {
+    assert.ok(text.includes(line), `backlog-execute/SKILL.md lost the \`${line}\` Outcome line`)
+  }
+})
+
+test('backlog-reviewer reads the Verify lines: a missing one is Important, a fail on a change offered as done is Critical', () => {
+  const text = flat(REVIEWER_MD)
+  for (const line of VERIFY_LINES) {
+    assert.ok(text.includes(line), `backlog-reviewer.md no longer names the \`${line}\` line`)
+  }
+  assert.ok(
+    /missing `Verify <n>:` line, or a count that does not match the `## Verify` items, is an Important finding/.test(text),
+    'backlog-reviewer.md no longer calls a missing or miscounted Verify line Important',
+  )
+  assert.ok(
+    /`Verify <n>: fail` line on a change offered as done is a Critical finding/.test(text),
+    'backlog-reviewer.md no longer calls a failed Verify line on a change offered as done Critical',
+  )
+  assert.ok(
+    text.includes('`Verify: none on item`, and its absence there is not a finding'),
+    'backlog-reviewer.md no longer excuses an Outcome written before Verify existed',
+  )
+  // The contract-first paragraph and the unkept-promise rule both name the sections a promise can come from; Verify has to be one of them, or a reviewer could
+  // not quote an unproved Verify line as the promise it breaks.
+  const raw = fs.readFileSync(REVIEWER_MD, 'utf8')
+  const start = raw.indexOf('\n## What you check, in this order\n')
+  assert.ok(start !== -1, 'backlog-reviewer.md lost its `## What you check, in this order` section')
+  const contract = raw.slice(start, raw.indexOf('\n## ', start + 1)).replace(/\s+/g, ' ')
+  assert.ok(contract.includes('`## Done when`, `## Verify`'), 'the contract-first paragraph no longer reads `## Verify` before the diff')
+  assert.ok(contract.includes('`## Done when` or `## Verify` promised'), 'the unkept-promise rule no longer lets a `## Verify` line be quoted')
+})
+
+test('backlog-execute treats any failed or unrunnable Verify line as failed verification', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  const RULES = [
+    ['Any `Verify <n>: fail` means verification failed', 'a fail line takes the verification-failed path, never the archive'],
+    ['Verify line this session cannot run', 'an unrunnable Verify line is named as a case'],
+    ['is a `fail` with that reason — never skipped, never `pass`', 'an unrunnable Verify line is a fail, never skipped or passed'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
+test('backlog-groom writes a 3–8 line ## Verify that is not part of groomed-ness, and the tick puts Assumptions after it', () => {
+  const groom = flat(GROOM_SKILL_MD)
+  const RULES = [
+    ['## Verify', 'groom writes a `## Verify` section'],
+    ['3–8 lines', 'the 3–8 line bound'],
+    ['`## Verify` is not part of groomed-ness', 'Verify never decides groomed-ness'],
+    ['`## Goal`, `## Plan`, `## Test cases`, `## Done when`, `## Verify`', 'a promoted task gets all five headings'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(groom.includes(needle), `backlog-groom/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+  assert.ok(!/all four task headings|all four answered/.test(groom), 'backlog-groom/SKILL.md still speaks of four task headings')
+  const tick = flat(GROOM_TICK_MD)
+  assert.ok(
+    tick.includes('the last heading of the body, after `## Verify`'),
+    'backlog-groom/references/backlog-tick.md no longer puts `## Assumptions (unattended)` after `## Verify`',
+  )
+})
+
+test('backlog-capture gives a task the ## Verify slot after ## Done when, and a bug none', () => {
+  const text = flat(VERIFY_CAPTURE_MD)
+  assert.ok(
+    text.includes('| task | `## Goal`, `## Plan`, `## Test cases`, `## Done when`, `## Verify` |'),
+    'backlog-capture/SKILL.md task row no longer lists `## Verify` after `## Done when`',
+  )
+  assert.ok(
+    text.includes('| bug | `## Symptom`, `## Repro`, `## Affects`, `## Cause`, `## Fix` |'),
+    'backlog-capture/SKILL.md bug row changed — a fresh bug gets its Verify from groom, not capture',
+  )
+})
+
 test('backlog-reviewer demotes prose-only drift to a tagged Minor, except where something acts on the text', () => {
   // #559: 23 of 62 measured fix loops were forced only by stale prose nothing acts on. The rule is scoped to the Severity section, because that is the
   // section the verdict is derived from — the same words anywhere else in the file would not decide a severity.
@@ -4031,7 +4115,7 @@ test('each issue form pre-applies its type label and carries its section heading
   const expected = {
     'bug.yml': { label: 'type:bug', headings: ['## Symptom', '## Repro', '## Affects', '## Cause', '## Fix'] },
     'idea.yml': { label: 'type:idea', headings: ['## Problem', '## Rough shape', '## Open questions'] },
-    'task.yml': { label: 'type:task', headings: ['## Goal', '## Plan', '## Test cases', '## Done when'] },
+    'task.yml': { label: 'type:task', headings: ['## Goal', '## Plan', '## Test cases', '## Done when', '## Verify'] },
     'refactor.yml': { label: 'type:refactor', headings: ['## What exists today', '## Why it should change', '## Rough shape'] },
   }
   for (const [file, { label, headings }] of Object.entries(expected)) {

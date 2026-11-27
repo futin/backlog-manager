@@ -309,9 +309,24 @@ exactly one such place, step 1's headings.
    from step 2, whether or not writing-plans was the one that produced it.
 
 4. Write that file: keep the printed frontmatter block exactly as printed — the only lines added to it are the mark lines, `runner-fix: true` below and, under
-   `[backlog-tick]`, `plan-review: true` — then add all four task headings — `## Goal`, `## Plan`, `## Test cases`,
-   `## Done when` — filled in for real. `## Plan` is the one heading `backlog-execute` gates on, but a task that's actually executable needs all four answered,
-   not just that one.
+   `[backlog-tick]`, `plan-review: true` — then add the five task headings — `## Goal`, `## Plan`, `## Test cases`, `## Done when`, `## Verify` — filled in
+   for real. `## Plan` is the one heading `backlog-execute` gates on, but a task that's actually executable needs every one of them answered, not just that one.
+
+   **`## Verify` is the checklist execute proves line by line** — the contract below, shared with a bug's (Plan the fix, step 2). It is a separate heading
+   rather than a stricter `## Done when` because `## Done when` already has a machine reader: the orchestrator's `verify` stage runs the fenced commands in it,
+   behind the tracker allowlist snapshot, and reshaping it into a checklist would tangle with both. `## Done when` keeps exactly that meaning; nothing in the
+   orchestrator reads `## Verify`. `backlog-execute` records one `Verify <n>:` line per item in `## Outcome`, and the reviewer checks them off.
+
+   - Spelled exactly `## Verify`, level two. On a task it follows `## Done when`; on a bug it follows `## Fix`.
+   - 3–8 lines, each a markdown list item (`- `), numbered by position: line 1 is the first `- ` item.
+   - Each line is a yes/no check answered by running something: a named command or test file and what its output must show, a CLI invocation and its exit
+     code, or — for anything user-visible when the project's `.mcp.json` configures a browser MCP server — a line starting with the literal
+     `In the browser (playwright MCP tools):`, then the page, the action and the expected result.
+   - Never a judgement line ("code is clean", "matches the style", "works correctly"): if running something cannot answer it, it is not a Verify line.
+
+   **`## Verify` is not part of groomed-ness.** A bug is still groomed on Cause and Fix, a task on Plan, and an item without `## Verify` executes exactly as it
+   did before this section existed — requiring it would flip every item groomed earlier to ungroomed and make the orchestrator skip them. So a groom that
+   cannot write a real one still produces an executable item; write it anyway, every time.
 
    On a project whose backlog lives in a tracker rather than in files, this body becomes the issue's body, rendered outside the repo — so cite a repo document
    by a commit-pinned permalink (`https://github.com/<owner>/<repo>/blob/<sha>/<path>`), never by a relative path and never by pasting the document in. A
@@ -319,12 +334,12 @@ exactly one such place, step 1's headings.
    body's length (GitHub: 65,536 characters), so a long design document pasted in is a body that fails to save. The plan a promote produces still goes in
    `## Plan` as prose either way — the permalink is how that prose cites a standalone spec, not a replacement for it.
 
-   `## Test cases` and `## Done when` are read by a headless `backlog-execute` session — under the orchestrator that session has no interactive browser pane and
-   nobody watching the screen, so every check must be one it can run itself. When the change is user-visible in the browser (client code, anything rendered) and
-   the project's `.mcp.json` configures a browser MCP server — this repo's is Playwright — write the browser check as an executable test case that begins with
-   the literal words `In the browser (playwright MCP tools):` followed by the page to open, the action to take, and the thing that must be visible. The prefix
-   is what tells the executing session which tool the check runs on; a check phrased for a human ("visual inspection", "verify manually") is a check that
-   session skips.
+   `## Test cases`, `## Done when` and `## Verify` are read by a headless `backlog-execute` session — under the orchestrator that session has no interactive
+   browser pane and nobody watching the screen, so every check must be one it can run itself. When the change is user-visible in the browser (client code,
+   anything rendered) and the project's `.mcp.json` configures a browser MCP server — this repo's is Playwright — write the browser check as an executable test
+   case that begins with the literal words `In the browser (playwright MCP tools):` followed by the page to open, the action to take, and the thing that must be
+   visible. The prefix is what tells the executing session which tool the check runs on; a check phrased for a human ("visual inspection", "verify manually") is
+   a check that session skips.
 
    **If executing this task would change `backlog-orchestrate`'s SKILL.md, its CLI (`skills/backlog-orchestrate/tools/orchestrate.mjs`), the reviewer agent
    (`agents/backlog-reviewer.md`) or the dispatch route (`server/src/agents/`), add `runner-fix: true` to the new task's frontmatter** — that exact key
@@ -368,6 +383,10 @@ one.
    the browser check that proves the defect gone, beginning with the literal words `In the browser (playwright MCP tools):` followed by the page to open, the
    action to take, and the expected result. Same reason a task's `## Test cases` carries one — the headless session that executes this fix can drive that
    browser, and it only will if the fix names the tool.
+
+   Write `## Verify` after `## Fix`, in the same edit that fills Cause and Fix — on a tracker project, the same `body` call. Its contract is Promote step 4's:
+   3–8 `- ` lines, each a yes/no check answered by running something, a browser one carrying the same prefix. It is not part of groomed-ness either, so a bug
+   without it still executes; write it anyway.
 
    **If fixing this bug would change `backlog-orchestrate`'s SKILL.md, its CLI (`skills/backlog-orchestrate/tools/orchestrate.mjs`), the reviewer agent
    (`agents/backlog-reviewer.md`) or the dispatch route (`server/src/agents/`), add `runner-fix: true` to the bug's own frontmatter** — that exact key spelling,

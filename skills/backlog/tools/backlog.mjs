@@ -634,7 +634,9 @@ const ISSUE_FORMS = [
     description: 'Future work whose plan is already known',
     label: 'type:task',
     field: 'Task',
-    headings: ['Goal', 'Plan', 'Test cases', 'Done when'],
+    // `Verify` last (#627): the yes/no checklist `backlog-execute` proves line by line. It is never read by `deriveGroomed` — a task is groomed on its Plan
+    // alone — so a task filed with the slot left empty is exactly as executable as one filed before the slot existed.
+    headings: ['Goal', 'Plan', 'Test cases', 'Done when', 'Verify'],
     prefilled: {},
   },
   {

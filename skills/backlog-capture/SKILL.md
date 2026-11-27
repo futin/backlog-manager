@@ -159,13 +159,17 @@ created: 2026-08-23
 | ------------ | ---------------------------------------------------------------------------- |
 | bug          | `## Symptom`, `## Repro`, `## Affects`, `## Cause`, `## Fix`                 |
 | idea         | `## Problem`, `## Rough shape`, `## Open questions`                          |
-| task         | `## Goal`, `## Plan`, `## Test cases`, `## Done when`                        |
+| task         | `## Goal`, `## Plan`, `## Test cases`, `## Done when`, `## Verify`           |
 | refactor     | `## What exists today`, `## Why it should change`, `## Rough shape`          |
 | out-of-scope | `## What was proposed`, `## Why rejected`, `## What would change the answer` |
 
 A refactor's headings are not an idea's with different words. `## What exists today` names the code as it actually is — a `file:line` or two, the way a bug's
 `## Affects` does — because a refactor that doesn't say what it's refactoring cannot be picked up months later. `## Why it should change` is the cost being paid
 now, not the benefit imagined later.
+
+A task gets `## Verify` as its fifth heading because a task captured directly has its plan known, so the yes/no checks that prove it are known too — the
+contract is `backlog-groom`'s (Promote step 4). A bug's row has none on purpose: its checks cannot be written before its cause is, and the groom that fills
+`## Cause` and `## Fix` appends `## Verify` after them.
 
 `## Affects` holds a `file:line` list. On a freshly captured bug it's normal for `## Cause` and `## Fix` to both say `unknown` — that's exactly what makes the
 bug ungroomed, and `backlog-execute` will refuse to work it until `backlog-groom` fills them in. A Cause or Fix that is deliberately deferred — known
