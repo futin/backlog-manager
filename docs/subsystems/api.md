@@ -5,10 +5,11 @@ them (the files on disk, or a polled GitHub repo), reading the orchestrator's ru
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), polling the merge requests of the GitLab projects those boards' mapped repos name
 (`gitlab/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
-file and no run file; the only bytes it owns are ten files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
+file and no run file; the only bytes it owns are eleven files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
 `tracker-sync.json`, since Jira phase 2 `jira.json`, since the Jira sessions work its link store `jira-links.json`, for the tick breaker `tick.json`, for
 the machine list `dashboards.json` and, for the board's one
-time zone, `timezone.json`, for the reviewer, `review.json`, and for the GitLab poller's cadence, `gitlab-sync.json` (all `settings/`). Its writes to
+time zone, `timezone.json`, for the reviewer, `review.json`, for the GitLab poller's cadence, `gitlab-sync.json`, and for the orchestrator's plugin allowlist,
+`headless.json` (all `settings/`). Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
@@ -572,6 +573,23 @@ client's pickers, the launch routes' `review` override and this route share: exa
 that failed, file untouched. As with `timezone.json`, a file that cannot be read is replaced by the next write: it holds one value and the write replaces it
 whole. The review STATE `review.mjs` keeps per branch is a different directory, `~/.backlog-manager/reviews/` (`$BM_REVIEW_HOME`), which the server neither
 reads nor writes. Not an outbound-calling module.
+
+### `settings/` — the orchestrator's plugin allowlist
+
+`GET /api/settings/headless` answers the plugin allowlist an orchestrator run's per-item sessions are launched with (#625; `shared/types.ts`'s
+`HeadlessSetting`): `config: { enabled, plugins }` plus `source` — `file`, `default` (no file: `DEFAULT_HEADLESS_PLUGINS`, `backlog-manager` and `superpowers`,
+switched on) or `unreadable` (the file exists but does not parse or fails `parseHeadlessConfig`; the defaults are shown, and runs trim nothing). It reads
+`~/.backlog-manager/settings/headless.json` (`$BM_HEADLESS_FILE` to override) fresh on every call through `readHeadless`, which never throws. The server is
+not the file's only reader: `orchestrate.mjs headless-settings <id>` reads the same path, honouring the same variable, at every per-item launch, and writes the
+one settings file that session is handed (`skills/backlog-orchestrate/references/rationale.md`, "Why a per-item session loads only an allowlist of plugins").
+
+`POST /api/settings/headless` takes a whole `HeadlessConfig`, is behind `SameOriginPostGuard`, answers `200` with the config as written (duplicates dropped),
+and is the file's one writer (`writeHeadless`, through `writeJsonAtomic`); the tool only reads it. The body is checked by `parseHeadlessConfig`
+(`shared/agent.ts`), whose hand twin in `orchestrate.mjs` is pinned by `test/guards/headless-twin.test.ts`: exactly the two keys, `enabled` a boolean,
+`plugins` at most 32 names of the shape `name` or `name@marketplace`. Anything else is a `400` `{ error: "invalid headless config: <member>" }`, file
+untouched. Unlike `review.json`, a file that exists but cannot be read is NOT replaced: the write is a `409` naming the file, which a person fixes or removes
+by hand — the tool reads such a file as "trim nothing", and a board write over it would silently turn trimming back on with a list nobody chose. Not an
+outbound-calling module.
 
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 

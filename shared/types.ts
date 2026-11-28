@@ -4039,6 +4039,25 @@ export interface ReviewConfig {
 export type ReviewSetting = ReviewConfig & { fileError?: true };
 
 /**
+ * What `~/.backlog-manager/settings/headless.json` holds (`/api/settings/headless`): whether an orchestrator run's per-item sessions are launched with only
+ * the plugins in `plugins` (by bare name, `caveman`, or full id, `caveman@caveman`) and every other enabled one switched off. `backlog-manager` and every
+ * `@builtin` plugin are kept whatever the list says. Validated by `parseHeadlessConfig` (`shared/agent.ts`), whose twin `orchestrate.mjs` reads the file with.
+ */
+export interface HeadlessConfig {
+  enabled: boolean;
+  plugins: string[];
+}
+
+/**
+ * `GET /api/settings/headless`: the config in force and where it came from — `file`, `default` (no file yet) or `unreadable` (a file that exists but is not
+ * a valid config: the defaults are what is shown, the tool trims NOTHING while it stays, and a POST is refused 409 rather than overwrite it).
+ */
+export interface HeadlessSetting {
+  config: HeadlessConfig;
+  source: 'file' | 'default' | 'unreadable';
+}
+
+/**
  * A merge request's pipeline folded to the five states the board draws (GitLab connection spec §6.3). `none` covers both "no pipeline" and every status the
  * board has no word for (`skipped`, `manual`, `scheduled`, a status GitLab adds later) — an unknown status must read as absent, never as passing.
  */

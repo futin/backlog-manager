@@ -94,7 +94,9 @@ and a byte ratchet on the model-invocable total (4,911 B before #557, 2,398 B af
   the project's, not the machine's. Since task-50 it also carries `import github [owner/repo] [--no-forms]`, which moves a files project's items onto issues
   through the local API and deletes the files last. Since task-46 it has **two modes**, chosen by that marker and nothing else (see below).
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer. Since task-47 it has two modes of its
-  own, chosen by the same committed marker `backlog.mjs` reads (see below).
+  own, chosen by the same committed marker `backlog.mjs` reads (see below). Since #625 its `headless-settings <id>` verb writes the one settings file each per-item
+  session is launched with — the main tree's `settings.local.json` plus `enabledPlugins: false` for every enabled plugin `settings/headless.json`'s allowlist
+  does not name — and every way it can fail prints nothing, so the launch falls back to `settings.local.json` alone.
 - `skills/backlog-tick/tools/tick.mjs` — `backlog-tick`'s own CLI, and the tick home's only writer (through `tick-state.mjs`, the one file that writes). Four
   subcommands: `decide [--dry-run | --peek]` (`--peek` is the scheduler's pre-spawn gate and exits `10` for `idle`/`busy`; reads the project and prints ONE
   JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first two), `record <id> ok|failed --kind groom|execute` (the

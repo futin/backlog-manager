@@ -48,7 +48,7 @@ Seven artefacts hold everything, and the single-writer column is the load-bearin
 | `~/.backlog-manager/registry.json`                   | `skills/backlog/tools/backlog.mjs`                 | the server, per request, never cached                                                                       |
 | each project's `backlog/**/*.md`                     | the skills                                         | the server's scan; the client renders it                                                                    |
 | `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request                                                               |
-| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config and the tracker sync intervals it wrote, and — for the control file — `orchestrate.mjs`, and — for `tick.json` — `tick.mjs`, and — for `review.json` — `review.mjs` |
+| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config and the tracker sync intervals it wrote, and — for the control file — `orchestrate.mjs`, and — for `tick.json` — `tick.mjs`, and — for `review.json` — `review.mjs`, and — for `headless.json` — `orchestrate.mjs` |
 | `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record of the same scope                    |
 | `~/.backlog-manager/tick/`                           | `skills/backlog-tick/tools/tick.mjs`               | the server's `tick/` module, read-only, for `GET /api/ticks`                                                |
 | `~/.backlog-manager/reviews/`                        | `skills/backlog-review/tools/review.mjs`           | `review.mjs` alone, the next `scope` on the same branch, for an incremental re-review                      |
@@ -64,6 +64,8 @@ server → tool like the control file: the server writes it through two guarded 
 Last, `timezone.json`, the board's one shared time zone, which the server alone reads and writes through `POST /api/settings/timezone`; every reading
 of it is the client's, and no skill reads it. In `settings/` too sits `review.json`, which model and effort review a change, written by the server alone
 through `POST /api/settings/review` and read by `review.mjs` — server → tool, like `tick.json` ([subsystems/api.md](subsystems/api.md#settings--the-reviewer)).
+And `headless.json`, the plugin allowlist an orchestrator run's per-item sessions load, written by the server alone through `POST /api/settings/headless`
+and read by `orchestrate.mjs headless-settings` at every launch — server → tool too ([subsystems/api.md](subsystems/api.md#settings--the-orchestrators-plugin-allowlist)).
 In `settings/` too sits `jira-links.json`, which links each Jira ticket to the agent sessions working it: the
 server alone
 reads and writes it, whole and atomically, and no skill reads it ([subsystems/jira.md](subsystems/jira.md#the-link-store)).
@@ -127,7 +129,8 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`settings/`** — `GET` and a guarded `POST /api/settings/timezone`, the reader and writer of `settings/timezone.json`, the zone every clock, day group
   and date on the board is drawn in (#241). The server only stores, validates and canonicalises the IANA id; it never formats a date itself. Not an
   outbound-calling module. Beside it, `GET` and a guarded `POST /api/settings/review`, the reader and writer of `settings/review.json` — which model and
-  effort review a change, read by `review.mjs` too.
+  effort review a change, read by `review.mjs` too. And `GET` and a guarded `POST /api/settings/headless`, the reader and writer of `settings/headless.json`,
+  the orchestrator's plugin allowlist, read by `orchestrate.mjs` too.
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot
   pass.
@@ -200,7 +203,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's version chip — read-only, git only — not an
   outbound-calling module), `tick/` (`tick.json`'s reader/writer and the three `/api/ticks` routes — read-only on `~/.backlog-manager/tick/`, not an
   outbound-calling module either), `settings/` (`settings/timezone.json`'s reader/writer and `GET`/`POST /api/settings/timezone`, the board's one shared
-  time zone, and `settings/review.json`'s through `GET`/`POST /api/settings/review`, the reviewer),
+  time zone, `settings/review.json`'s through `GET`/`POST /api/settings/review`, the reviewer, and `settings/headless.json`'s through
+  `GET`/`POST /api/settings/headless`, the orchestrator's plugin allowlist),
   `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
   route is gated by), `origin.guard.ts` (`SameOriginPostGuard`, the content-type and origin check every module's POSTs carry),
   `git-run.util.ts` (`runGit`, the one way this server runs git), `atomic-write.util.ts`

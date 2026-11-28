@@ -54,11 +54,17 @@ describe('skills/ spell the plugin root the way Claude Code substitutes it', () 
     expect(body).toMatch(/node "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/[a-z-]+\/tools\/[a-z-]+\.mjs"/);
   });
 
-  // The verify launcher hands the root to its child through `env`, inside single quotes the outer shell must not expand (SKILL.md §8). Once the root is
-  // substituted into the text, the assignment is a literal path — which is exactly what it must still read as.
-  it("step 8's verify launcher assigns BM_PLUGIN_ROOT from the braced root", () => {
+  // The verify launcher and the three per-item session launchers (execute, retry, fix — each calls `orchestrate.mjs headless-settings` before its `cd`)
+  // hand the root to their child through `env`, inside single quotes the outer shell must not expand (SKILL.md §5, §7, §8). Once the root is substituted
+  // into the text, the assignment is a literal path — which is exactly what it must still read as. The fix line is indented under its list item, hence
+  // the trim.
+  it('every launcher that runs a tool assigns BM_PLUGIN_ROOT from the braced root', () => {
     const body = readFileSync(join(SKILLS_ROOT, 'backlog-orchestrate', 'SKILL.md'), 'utf8');
-    const launcher = body.split('\n').find((line) => line.startsWith('nohup env BM_PLUGIN_ROOT='));
-    expect(launcher).toContain('BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"');
+    const launchers = body
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('nohup env BM_PLUGIN_ROOT='));
+    expect(launchers).toHaveLength(4);
+    for (const launcher of launchers) expect(launcher).toContain('BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"');
   });
 });

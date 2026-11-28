@@ -11,6 +11,7 @@ import { DashboardsPage } from './DashboardsPage';
 import { TickGroup } from './TickGroup';
 import { TimeZoneGroup } from './TimeZoneGroup';
 import { ReviewerGroup } from './ReviewerGroup';
+import { HeadlessPluginsGroup } from './HeadlessPluginsGroup';
 import { SourcesGroup } from './SourcesGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useJiraContext } from '../../hooks/JiraContext';
@@ -186,6 +187,7 @@ function SharedPage({
       <TickGroup />
       <TimeZoneGroup />
       <ReviewerGroup />
+      <HeadlessPluginsGroup />
     </div>
   );
 }

@@ -523,7 +523,7 @@ title over a 13 px line that says where the page saves, the same band every othe
 above borderless `--strip` cards at 16 px radius and 24 px padding, each a title with a scope pill. `SettingsGroup` takes `title` and `pill` separately, because
 the pill answers a different question from the name — whether changing this setting affects anybody but the person changing it — and it now sits on the card,
 where a card that wrote somewhere else would say so, rather than once in the band. Local's four cards are `Display`, `Board`, `Orchestrator` and `Dispatch`,
-each `this browser`; Shared's four are `Sources`, `Orchestrator watchdog`, `Backlog tick` and `Time zone`, each `this machine`. `WatchdogGroup.tsx`'s card is a
+each `this browser`; Shared's six are `Sources`, `Orchestrator watchdog`, `Backlog tick`, `Time zone`, `Reviewer` and `Orchestrator plugins`, each `this machine`. `WatchdogGroup.tsx`'s card is a
 distinct card from `Orchestrator` beside it on the other page, not a second rendering of it, and is rendered from its own file. The redesign restyles the cards,
 not what they group.
 
@@ -543,7 +543,7 @@ each, in `MERGE_MODES` order), because a choice that changes what a run does is 
 **One column.** Local and Shared each draw one readable `.set-col`, top to bottom at every width (spec §4.10): the two hand-balanced columns and their 1100 px
 fold are gone, because a row is a label, a one-line description and a control, and a single column of those reads the same on a phone and a desktop. Local runs
 `Display`, `Board`, `Orchestrator`, `Dispatch`; Shared runs `Sources` first — the one report, which every card after it presumes — then `Orchestrator watchdog`,
-`Backlog tick` and `Time zone`. The reading order that carried meaning in the columns is kept: the watchdog follows the orchestrator pair's subject (what a run
+`Backlog tick`, `Time zone`, `Reviewer` and `Orchestrator plugins`. The reading order that carried meaning in the columns is kept: the watchdog follows the orchestrator pair's subject (what a run
 is started with, then what happens to one that has crashed), now across two pages. The two-column `.set-cols` that folds at 1100 px survives where a page has
 two cards that read side by side — GitHub › Settings and Jira › Setup — and nowhere on Settings itself.
 

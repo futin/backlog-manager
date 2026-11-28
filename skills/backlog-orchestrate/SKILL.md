@@ -587,7 +587,7 @@ dispatch line onto that same worktree — `references/recovery.md` names the sha
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'unset COREPACK_ROOT; LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, before the turn ends. Anything you cannot resolve goes in your final message, not to a person.]" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup env BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" BM_RUN_DIR="<dir>" sh -c 'unset COREPACK_ROOT; S=$(node "$BM_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" headless-settings <id> 2>>"$BM_RUN_DIR/logs/<id>.headless.err") || S=; [ -f "$S" ] || { S="$PWD/.claude/settings.local.json"; [ -f "$S" ] || S=; }; cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, before the turn ends. Anything you cannot resolve goes in your final message, not to a person.]" ${S:+--settings "$S"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -611,10 +611,11 @@ and goes to the `.jsonl` that `watch` reads; stderr goes to its own file, so a w
 **`--model opus` stays on the line, and on the retry and fix-loop lines too.** A bare `claude -p` takes whatever model the host's CLI defaults to, and `--resume`
 does not promise to carry one forward (`references/rationale.md`, §4).
 
-**`${LOCAL:+--settings "$LOCAL"}` hands the session the main tree's `.claude/settings.local.json`, because the worktree has none.** `LOCAL` is resolved
-**before** the `cd`, while `$PWD` is still the project root, and emptied when the file does not exist, so a project without one gets no flag at all. The
-expansion is unquoted on purpose and correct only because the body runs under `sh` — never run this body under zsh. It is a flag, never a copy or a link into
-the worktree. **The retry line carries it too**, and so does every fix loop, resumed or fresh (`references/rationale.md`, §4).
+**`${S:+--settings "$S"}` hands the session ONE settings file: the path `orchestrate.mjs headless-settings <id>` printed, else the main tree's
+`.claude/settings.local.json`, because the worktree has none.** `S` is resolved **before** the `cd`, while `$PWD` is still the project root, and emptied
+when neither exists, so a project without one gets no flag at all. The expansion is unquoted on purpose and correct only because the body runs under `sh` —
+never run this body under zsh. It is a flag, never a copy or a link into the worktree, and never a second `--settings` beside it: the verb's file already
+carries `settings.local.json` merged in. **The retry line carries it too**, and so does every fix loop, resumed or fresh (`references/rationale.md`, §4).
 
 **`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the prompt marker by another spelling.** It tells the machine's `Stop` hook that a run
 owns the process, so the hook does not hold the finished turn open for a dashboard answer nobody will give. Substitute `<runId>` from this run, and put the
@@ -751,7 +752,7 @@ retry is the session most tempted to background, and a headless `-p` session tha
 (`references/rationale.md`, §4).
 
 ```bash
-nohup sh -c 'unset COREPACK_ROOT; LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup env BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" BM_RUN_DIR="<dir>" sh -c 'unset COREPACK_ROOT; S=$(node "$BM_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" headless-settings <id> 2>>"$BM_RUN_DIR/logs/<id>.headless.err") || S=; [ -f "$S" ] || { S="$PWD/.claude/settings.local.json"; [ -f "$S" ] || S=; }; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" ${S:+--settings "$S"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -867,7 +868,7 @@ report path. That stdout is the review's whole result in this session: never rea
   prompt is exactly the context this mode exists to avoid, and the findings name `file:line`, which is what a narrow read needs. Then launch:
 
   ```bash
-  nohup sh -c 'unset COREPACK_ROOT; LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-fix-<n>.txt" && BM_ORCH_RUN=<runId> exec claude -p "$(cat "<dir>/prompts/<id>-fix-<n>.txt")" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> fix <n>"' > "<dir>/logs/<id>-fix-<n>.jsonl" 2> "<dir>/logs/<id>-fix-<n>.err" &
+  nohup env BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" BM_RUN_DIR="<dir>" sh -c 'unset COREPACK_ROOT; S=$(node "$BM_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" headless-settings <id> 2>>"$BM_RUN_DIR/logs/<id>.headless.err") || S=; [ -f "$S" ] || { S="$PWD/.claude/settings.local.json"; [ -f "$S" ] || S=; }; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-fix-<n>.txt" && BM_ORCH_RUN=<runId> exec claude -p "$(cat "<dir>/prompts/<id>-fix-<n>.txt")" ${S:+--settings "$S"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> fix <n>"' > "<dir>/logs/<id>-fix-<n>.jsonl" 2> "<dir>/logs/<id>-fix-<n>.err" &
   echo $! > "<dir>/logs/<id>.pid"
   ```
 

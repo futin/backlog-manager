@@ -524,6 +524,11 @@ test('the body keeps the rules whose stories moved to references/', () => {
     // the body kept.
     ['`--model opus` stays on the line', 'every launch line carries --model opus, the retry and fix-loop lines included'],
     ['never run this body under zsh', 'the --settings expansion is correct only under sh'],
+    [
+      'the path `orchestrate.mjs headless-settings <id>` printed, else the main tree',
+      'a per-item session gets ONE --settings: the allowlist file the verb printed, else settings.local.json'
+    ],
+    ['never a second `--settings` beside it', 'the allowlist rides the one --settings flag, because claude keeps only the last'],
     ['never in front of `nohup`', 'BM_ORCH_RUN is a prefix on exec inside the sh -c body'],
     ['**`unset COREPACK_ROOT;` opens the `sh -c \'…\'` body of every launch line', 'every launch line unsets COREPACK_ROOT inside its sh -c body'],
     ['and no `:` or `/` in it', "the session's -n name is the item id, with a space separator and no : or /"],
@@ -1234,7 +1239,7 @@ test('the fresh fix launcher takes its prompt from the fix prompt file, behind a
     fresh.includes('> "<dir>/logs/<id>-fix-<n>.jsonl" 2> "<dir>/logs/<id>-fix-<n>.err"'),
     `the fresh fixer writes somewhere usage will not look: ${fresh}`
   );
-  for (const flag of ['--output-format stream-json', '--verbose', '--permission-mode auto', '--model opus', '${LOCAL:+--settings "$LOCAL"}']) {
+  for (const flag of ['--output-format stream-json', '--verbose', '--permission-mode auto', '--model opus', '${S:+--settings "$S"}']) {
     assert.ok(fresh.includes(flag), `the fresh fix launcher dropped ${flag}: ${fresh}`);
   }
 });
@@ -1417,7 +1422,12 @@ test('an absent or empty prompt file spawns nothing', (t) => {
 // SKILL.md for the same reason bug-31's cases are: "this splits into two argv
 // words and keeps a spaced path whole" is a property of sh, and zsh — the
 // shell a person would retype the line into — gets it wrong.
-function launchHarness(t, line, { settingsLocal }) {
+//
+// `verb` stubs `orchestrate.mjs headless-settings` under a fake plugin root handed in as `CLAUDE_PLUGIN_ROOT` — the variable the line's `env
+// BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"` reads once the skill text is substituted. `'path'` prints a file it wrote (under the spaced root),
+// `'empty'` prints nothing, `'fail'` exits 1 with a stderr line, `'missing'` prints a path that does not exist. Omitted, no plugin root is set at all,
+// so the `node` call fails and the line must fall back exactly as before the verb existed.
+function launchHarness(t, line, { settingsLocal, verb }) {
   // A space in the root, so a path that word-split would show up as a third argv word rather than passing by luck.
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch settings-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1442,6 +1452,26 @@ function launchHarness(t, line, { settingsLocal }) {
   fs.writeFileSync(stub, `#!/bin/sh\n: > "${argvFile}"\nfor a in "$@"; do printf '%s\\0' "$a" >> "${argvFile}"; done\n`);
   fs.chmodSync(stub, 0o755);
 
+  const env = { ...process.env };
+  delete env.CLAUDE_PLUGIN_ROOT;
+  const trimmed = path.join(root, 'orch home', 'headless', 'bug-1.json');
+  const verbArgvFile = path.join(root, 'verb-argv');
+  if (verb) {
+    const pluginRoot = path.join(root, 'plugin root');
+    const tool = path.join(pluginRoot, 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs');
+    fs.mkdirSync(path.dirname(tool), { recursive: true });
+    fs.mkdirSync(path.dirname(trimmed), { recursive: true });
+    fs.writeFileSync(trimmed, '{"enabledPlugins":{"caveman@caveman":false}}\n');
+    const body = {
+      path: `console.log(${JSON.stringify(trimmed)});`,
+      empty: '',
+      fail: "console.error('headless-settings: stubbed failure'); process.exitCode = 1;",
+      missing: `console.log(${JSON.stringify(path.join(root, 'nowhere.json'))});`
+    }[verb];
+    fs.writeFileSync(tool, `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(verbArgvFile)}, JSON.stringify(process.argv.slice(2)));\n${body}\n`);
+    env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+  }
+
   const composed = line
     .replaceAll('<dir>', dir)
     .replaceAll('<id>', 'bug-1')
@@ -1450,9 +1480,11 @@ function launchHarness(t, line, { settingsLocal }) {
     .replaceAll('<n>', '1')
     .replaceAll('<m>', '1')
     .replace('exec claude ', `exec "${stub}" `);
-  const result = spawnSync('sh', ['-c', `${composed}\nwait`], { cwd, encoding: 'utf8' });
+  const result = spawnSync('sh', ['-c', `${composed}\nwait`], { cwd, encoding: 'utf8', env });
   const argv = fs.existsSync(argvFile) ? fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1) : null;
-  return { argv, local, result };
+  const verbArgv = fs.existsSync(verbArgvFile) ? JSON.parse(fs.readFileSync(verbArgvFile, 'utf8')) : null;
+  const headlessErr = path.join(dir, 'logs', 'bug-1.headless.err');
+  return { argv, local, result, trimmed, verbArgv, headlessErr: fs.existsSync(headlessErr) ? fs.readFileSync(headlessErr, 'utf8') : null };
 }
 
 test("every launcher passes the main tree's settings.local.json to the worktree session", (t) => {
@@ -1476,6 +1508,54 @@ test('a project with no settings.local.json gets no --settings flag at all', (t)
     // Absent, not `--settings ""` and not the worktree's copy found after the `cd`.
     assert.ok(!argv.includes('--settings'), `a --settings flag was passed with no local file at the project root: ${JSON.stringify(argv)}`);
     assert.ok(argv.includes('--permission-mode'), 'the stub did not receive the rest of the line');
+  }
+});
+
+// --- the plugin allowlist file replaces settings.local.json on the --settings flag ---------------------------------------------------------------------
+// `orchestrate.mjs headless-settings <id>` prints the ONE settings file the session gets (settings.local.json merged with the deny map), or nothing. The
+// flag stays single because claude keeps only the last `--settings`: a second flag beside the first would drop the person's local permissions.
+
+test('12. every launcher passes the path the headless-settings verb printed, whole, as its one --settings', (t) => {
+  const lines = execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'));
+  assert.equal(lines.length, 3, 'expected exactly 3 headless dispatch lines');
+  for (const line of lines) {
+    for (const settingsLocal of [true, false]) {
+      const { argv, result, trimmed, verbArgv, headlessErr } = launchHarness(t, line, { settingsLocal, verb: 'path' });
+      assert.ok(argv, `the launcher spawned nothing: ${result.stderr}`);
+      assert.deepEqual(verbArgv, ['headless-settings', 'bug-1'], 'the verb was not asked for this item');
+      assert.equal(argv.filter((a) => a === '--settings').length, 1, JSON.stringify(argv));
+      assert.equal(argv[argv.indexOf('--settings') + 1], trimmed);
+      assert.equal(headlessErr, '', `the verb's stderr file holds something: ${headlessErr}`);
+    }
+  }
+});
+
+test('13–14. a verb that prints nothing leaves the settings.local.json fallback exactly as before', (t) => {
+  for (const line of execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'))) {
+    const withLocal = launchHarness(t, line, { settingsLocal: true, verb: 'empty' });
+    assert.ok(withLocal.argv, `the launcher spawned nothing: ${withLocal.result.stderr}`);
+    assert.equal(withLocal.argv.filter((a) => a === '--settings').length, 1);
+    assert.equal(withLocal.argv[withLocal.argv.indexOf('--settings') + 1], withLocal.local);
+
+    const without = launchHarness(t, line, { settingsLocal: false, verb: 'empty' });
+    assert.ok(without.argv, `the launcher spawned nothing: ${without.result.stderr}`);
+    assert.ok(!without.argv.includes('--settings'), JSON.stringify(without.argv));
+  }
+});
+
+test('15. a verb that fails, or prints a path that does not exist, falls back the same way, its stderr in logs/<id>.headless.err', (t) => {
+  for (const line of execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'))) {
+    for (const verb of ['fail', 'missing']) {
+      const withLocal = launchHarness(t, line, { settingsLocal: true, verb });
+      assert.ok(withLocal.argv, `${verb}: the launcher spawned nothing: ${withLocal.result.stderr}`);
+      assert.equal(withLocal.argv.filter((a) => a === '--settings').length, 1, `${verb}: ${JSON.stringify(withLocal.argv)}`);
+      assert.equal(withLocal.argv[withLocal.argv.indexOf('--settings') + 1], withLocal.local, verb);
+      if (verb === 'fail') assert.match(withLocal.headlessErr ?? '', /stubbed failure/, "the verb's stderr did not reach logs/<id>.headless.err");
+
+      const without = launchHarness(t, line, { settingsLocal: false, verb });
+      assert.ok(without.argv, `${verb}: the launcher spawned nothing: ${without.result.stderr}`);
+      assert.ok(!without.argv.includes('--settings'), `${verb}: ${JSON.stringify(without.argv)}`);
+    }
   }
 });
 
