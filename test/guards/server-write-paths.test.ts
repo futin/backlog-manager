@@ -9,6 +9,7 @@ import { jiraLinksFile } from '../../server/src/jira/links.store';
 import { jiraMentionsFile } from '../../server/src/jira/mentions.store';
 import { controlHome } from '../../server/src/orchestrator/pause-control.util';
 import { watchdogFile } from '../../server/src/orchestrator/watchdog-config.util';
+import { headlessFile } from '../../server/src/settings/headless-config.util';
 import { reviewFile } from '../../server/src/settings/review-config.util';
 import { timeZoneFile } from '../../server/src/settings/timezone-config.util';
 import { tickFile } from '../../server/src/tick/tick-breaker.util';
@@ -36,6 +37,7 @@ const WRITERS: Record<string, string[]> = {
   'orchestrator/pause-control.util.ts': [join(controlHome({}), 'some-project.json')],
   'orchestrator/watchdog-config.util.ts': [watchdogFile({})],
   'settings/review-config.util.ts': [reviewFile({})],
+  'settings/headless-config.util.ts': [headlessFile({})],
   'settings/timezone-config.util.ts': [timeZoneFile({})],
   'tick/tick-breaker.util.ts': [tickFile({})],
   'tracker/sync-config.util.ts': [syncConfigFile({})]

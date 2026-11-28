@@ -5,6 +5,7 @@ import type {
   ExecuteFinish,
   FinishAction,
   FinishFlags,
+  HeadlessConfig,
   MachineHealth,
   MergeMode,
   OrchestratorRunsPayload,
@@ -1139,6 +1140,40 @@ export function parseReviewConfig(value: unknown): { ok: true; config: ReviewCon
   const n = value.smallMaxLines;
   if (typeof n !== 'number' || !Number.isInteger(n) || n < REVIEW_SMALL_MAX_LINES_MIN || n > REVIEW_SMALL_MAX_LINES_MAX) return { ok: false, member: 'smallMaxLines' };
   return { ok: true, config: { mode: value.mode, same: pairs.same, big: pairs.big, small: pairs.small, smallMaxLines: n } };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// Headless plugin allowlist (`~/.backlog-manager/settings/headless.json`). `skills/backlog-orchestrate/tools/orchestrate.mjs` carries the hand twin of
+// DEFAULT_HEADLESS_PLUGINS, HEADLESS_PLUGIN_SHAPE, HEADLESS_PLUGINS_MAX and parseHeadlessConfig (`HEADLESS_DEFAULT_PLUGINS`, …, `parseHeadlessConfigTwin`) —
+// a skill's tools import nothing from `shared/` — and `test/guards/headless-twin.test.ts` imports both and fails when they drift. Change both or neither.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/** What a per-item session keeps when nobody has set the list: the plugin its own `/backlog-execute` lives in, and the one its skills name. */
+export const DEFAULT_HEADLESS_PLUGINS: readonly string[] = ['backlog-manager', 'superpowers'];
+/** A bare plugin name or a `name@marketplace` id — shell- and path-inert, so a stored entry can never become a flag or a path. */
+export const HEADLESS_PLUGIN_SHAPE = /^[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?$/;
+/** Counted before duplicates are dropped, so a body over the cap is refused however many of its entries repeat. */
+export const HEADLESS_PLUGINS_MAX = 32;
+
+export const defaultHeadlessConfig = (): HeadlessConfig => ({ enabled: true, plugins: [...DEFAULT_HEADLESS_PLUGINS] });
+
+/**
+ * Validates a headless.json body or a POSTed config: exactly `enabled` (a boolean) and `plugins` (at most HEADLESS_PLUGINS_MAX strings of
+ * HEADLESS_PLUGIN_SHAPE), duplicates dropped in first-seen order. Strict for the reason `parseReviewConfig` is — a lenient parser would let the board store
+ * what the tool's twin then refuses, and a refused file trims nothing. `member` names the first failure: `headless` for the object itself, `enabled`,
+ * `plugins`, or `plugins[<i>]` for one bad entry.
+ */
+export function parseHeadlessConfig(value: unknown): { ok: true; config: HeadlessConfig } | { ok: false; member: string } {
+  if (!isPlainObject(value) || !hasExactKeys(value, ['enabled', 'plugins'])) return { ok: false, member: 'headless' };
+  if (typeof value.enabled !== 'boolean') return { ok: false, member: 'enabled' };
+  const list = value.plugins;
+  if (!Array.isArray(list) || list.length > HEADLESS_PLUGINS_MAX) return { ok: false, member: 'plugins' };
+  const plugins: string[] = [];
+  for (const [i, name] of list.entries()) {
+    if (typeof name !== 'string' || !HEADLESS_PLUGIN_SHAPE.test(name)) return { ok: false, member: `plugins[${i}]` };
+    if (!plugins.includes(name)) plugins.push(name);
+  }
+  return { ok: true, config: { enabled: value.enabled, plugins } };
 }
 
 /** The `--review-*` flags that hand `c` to a skill, in the spelling `review.mjs config` takes; `default` is how a flag says "unset". A `null` config is `default`. */

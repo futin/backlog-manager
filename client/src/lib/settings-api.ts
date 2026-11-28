@@ -1,6 +1,6 @@
 import { unwrap } from './agents';
-import { parseReviewConfig } from '../../../shared/agent';
-import type { ReviewConfig, ReviewSetting, TimeZoneSetting } from '../../../shared/types';
+import { parseHeadlessConfig, parseReviewConfig } from '../../../shared/agent';
+import type { HeadlessConfig, HeadlessSetting, ReviewConfig, ReviewSetting, TimeZoneSetting } from '../../../shared/types';
 
 /**
  * settings-api.ts — the board-wide display settings stored on the API host (#241). Today one: the shared time zone, `settings/timezone.json`.
@@ -61,5 +61,32 @@ export async function updateReviewSetting(config: ReviewConfig): Promise<ReviewC
   );
   const parsed = parseReviewConfig(data);
   if (!parsed.ok) throw new Error('malformed /api/settings/review response');
+  return parsed.config;
+}
+
+/**
+ * `GET /api/settings/headless` (#625) — the plugin allowlist an orchestrator run's per-item sessions are launched with, `settings/headless.json` on the API
+ * host, plus where it came from. Validated with the strict `parseHeadlessConfig` the server and the tool's twin use, so a body the board cannot read as a
+ * config fails the read rather than drawing chips over a shape nobody wrote.
+ */
+export async function fetchHeadlessSetting(): Promise<HeadlessSetting> {
+  const data = await unwrap<unknown>(await fetch('/api/settings/headless'));
+  if (typeof data !== 'object' || data === null) throw new Error('malformed /api/settings/headless response');
+  const { config, source } = data as Record<string, unknown>;
+  const parsed = parseHeadlessConfig(config);
+  if (!parsed.ok || (source !== 'file' && source !== 'default' && source !== 'unreadable')) throw new Error('malformed /api/settings/headless response');
+  return { config: parsed.config, source };
+}
+
+/**
+ * `POST /api/settings/headless` — the card's one write path. A refusal rejects with the server's own `error` sentence (`invalid headless config: <member>`,
+ * or the 409's `… fix or remove it by hand`), and the answer is the config the server wrote — `updateReviewSetting`'s contract.
+ */
+export async function updateHeadlessSetting(config: HeadlessConfig): Promise<HeadlessConfig> {
+  const data = await unwrap<unknown>(
+    await fetch('/api/settings/headless', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(config) })
+  );
+  const parsed = parseHeadlessConfig(data);
+  if (!parsed.ok) throw new Error('malformed /api/settings/headless response');
   return parsed.config;
 }

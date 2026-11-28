@@ -2708,8 +2708,8 @@ Since #461 the mount is pinned rather than remembered: `test/guards/server-write
 most specific `docker-compose.yml` mount covering it is read-write, and fails on any `server/src` module that writes a file without a row in its table. It
 exists because `jira-links.json` once defaulted outside `settings/`, in the read-only mount, and every save failed into a log line until #460 moved it.
 
-Two things under `settings/` are now read by a skill's tool as well: `settings/orchestrator-control/`, the pause request (task-17, see "A pause request is a file
-the server writes and the tool reads" above), and `settings/review.json` (#507, below). Each is still written only by this server — the exception is to the
+Three things under `settings/` are now read by a skill's tool as well: `settings/orchestrator-control/`, the pause request (task-17, see "A pause request is a file
+the server writes and the tool reads" above), `settings/review.json` (#507, below) and `settings/headless.json` (#625, below). Each is still written only by this server — the exception is to the
 "nothing under here is ever read by a skill" half of the sentence, not to the single-writer half.
 
 The third file is `settings/tracker-sync.json` (#17, `server/src/tracker/sync-config.util.ts`), each connected repo's sync interval on this machine. It joins
@@ -2739,6 +2739,15 @@ unusable, so the Settings card can say it was ignored), one writer (`writeReview
 `parseReviewConfig` refuses with a 400 and writes nothing), written through `writeJsonAtomic`, and replaced rather than refused when it does not parse. It
 departs on one point: a skill reads it. `skills/backlog-review/tools/review.mjs` reads the same file (both honour `BM_REVIEW_FILE`) when a launch passes no
 `--review-*` flag, and warns and falls back to the same defaults on a bad one, so the board and the skill agree on what is in force; it never writes it.
+
+`settings/headless.json` (#625, `server/src/settings/headless-config.util.ts`) holds the plugin allowlist an orchestrator run's per-item sessions load. It
+follows `review.json` — read fresh, never cached, one writer (`writeHeadless`, reached only from `POST /api/settings/headless`, which answers a body
+`parseHeadlessConfig` refuses with a 400 and writes nothing), written through `writeJsonAtomic`, and read by a skill's tool:
+`orchestrate.mjs headless-settings` reads the same file (both honour `BM_HEADLESS_FILE`) at every per-item launch and never writes it. It departs from
+`review.json` on the unreadable file, both ways: the tool reads it as "trim nothing" rather than as the defaults, because guessing which plugins a person meant
+to keep is how a run loses one it needed; and the writer refuses it with a 409 rather than replacing it, because a board write over a file the tool is
+ignoring would silently switch trimming back on. The default list, the name shape and the cap are a hand twin in the tool — a skill's `tools/` imports
+nothing from `shared/` — pinned by `test/guards/headless-twin.test.ts`.
 
 Two switches guard `watchdog.json`, and they answer different questions. `WatchdogConfig.enabled` (the file's own field, read fresh on every tick) is the
 _user's_ switch: a disabled watchdog still arms, ticks and reports the crashed run it would have resumed — it only withholds the spawn, which is what keeps the

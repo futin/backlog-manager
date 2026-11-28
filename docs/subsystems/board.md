@@ -513,8 +513,16 @@ flips (#534) — and sends a `review` override only when the pick differs from t
 it valid, so leaving PR, picking `Same for all groups` or stepping back from the modes step unlocks the sheet. The Runs detail sheet's facts show who reviewed a run as one line, `Reviewer: …` (`reviewerLabel`, `shared/agent.ts`),
 from the config the run recorded at `init`; a run recorded before the setting existed, or a value that fails `parseReviewConfig`, reads `Reviewer: default`.
 
-The watchdog card is one of six places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two
-caps, the `Time zone` card's zone (#241), the `Reviewer` card's config (#507), and the Dashboards page's four `POST /api/dashboards/*` writes —
+The `Orchestrator plugins` card (`HeadlessPluginsGroup`, #625) follows it, with the same pill: which plugins an orchestrator run's per-item sessions still
+load. A `Trim plugins in orchestrator sessions` switch, the kept plugins as a wrapping row of chips — `backlog-manager` first and locked, since the tool keeps
+it whatever the list says; each other chip removes its plugin — and an add field checked against `HEADLESS_PLUGIN_SHAPE` before anything is sent (a bad name
+turns the field red with one inline line and posts nothing). It reads and writes `settings/headless.json` through `GET`/`POST /api/settings/headless`
+(`useHeadlessSetting`), saving on every change; unlike the Reviewer it keeps no optimistic copy — its controls are disabled while a save is out, so one POST is
+in flight at most and the card always shows the server's answer. An `unreadable` answer disables every control and names the file, because the server
+refuses to write over it (409). The derivations — chip order, add, remove — are `lib/headless-plugins.ts`.
+
+The watchdog card is one of seven places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two
+caps, the `Time zone` card's zone (#241), the `Reviewer` card's config (#507), the `Orchestrator plugins` card's allowlist (#625), and the Dashboards page's four `POST /api/dashboards/*` writes —
 four knobs that live in `settings/watchdog.json`
 beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it
 writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it

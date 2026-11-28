@@ -1048,6 +1048,10 @@ button.rail-count { cursor: pointer }
 .reviewer-limit { width: 96px }
 /* The launch sheets' Reviewer section is its own column of controls under the finish rows; the stretch lets its wrapping row use the sheet's width. */
 .reviewer-fields { align-self: stretch }
+/* The Orchestrator plugins card (#625): its kept plugins are a wrapping row of 28 px chips under the label, and the add row is the field beside its button,
+   `.jira-skill-add`'s shape without the prompt. Layout only — the chips and the field keep their own styling. */
+.set-plugins { display: flex; flex-wrap: wrap; gap: 8px }
+.set-plugins-add { flex-direction: row; flex-wrap: wrap; gap: 8px; align-items: center }
 /* One rule for both the anchor (the dashboard link) and the button (the
    watchdog card's `Live view`): the two differ only in whether the destination
    is a URL, and a reader should not be able to tell them apart by looking. */

@@ -92,7 +92,9 @@ Three ways to close it were weighed:
 
 - **`--settings <root>/.claude/settings.local.json` on the launch line — chosen.** The CLI loads the file as an additional settings source; nothing is written
   into the worktree, so there is no file for §6's `add -A` to commit in a repo whose `.gitignore` happens not to list it, and no new entry for §4's exclude
-  list. The path is resolved before the `cd` and the flag is omitted when the file is absent.
+  list. The path is resolved before the `cd` and the flag is omitted when the file is absent. Since #625 the flag names the plugin-allowlist file
+  `orchestrate.mjs headless-settings` printed whenever it printed one — that file already carries `settings.local.json` merged in — and falls back to this
+  path otherwise ("Why a per-item session loads only an allowlist of plugins", below).
 - **Copy it in after `worktree add`.** Works, but it is one more runner-written file inside the net `add -A` casts, protected only by an exclude line — the
   exact shape bug-37 was.
 - **Symlink it in**, the `node_modules` idiom. The same exposure, plus the symlink-blob behaviour bug-37 already paid for once.
@@ -101,6 +103,35 @@ Probed on this machine: a headless `claude -p --permission-mode auto` under `sh 
 `{"permissions":{"deny":["Bash(echo bmprobe:*)"]}}`, reported the `echo bmprobe hello` call in `permission_denials`; the identical line without the flag ran it.
 So the file's rules are live in exactly the mode this skill dispatches under. The same probe typed straight into zsh failed with `unknown option '--settings
 <path>'`, because zsh does not split an unquoted `${VAR:+word}` — the line is only correct inside the `sh -c` body it lives in.
+
+### Why a per-item session loads only an allowlist of plugins
+
+#625, from #622, 2026-11-26. A per-item session loaded every plugin enabled on the machine — its skills listing, its agents, its SessionStart hooks — and a
+headless execute uses almost none of them: across 51 orchestrator transcripts of the 40 days before, the only skills invoked were two `superpowers` ones and
+`/backlog-execute` itself, no subagent type, and no MCP but `playwright`. Measured on this machine (`claude -p` haiku, one turn, two repeats each), trimming
+to `backlog-manager` + `superpowers` took the per-turn preamble from **50.1k to 41.9k input tokens** (skills listed 92 → 67, plugins 19 → 7, the caveman and
+superpowers SessionStart output gone) — paid again on every one of an execute's turns.
+
+What the probes settled, and why the launch lines have the shape they do:
+
+- **`--settings` does not stack: only the LAST flag applies.** A file disabling one plugin followed by a JSON string disabling another left the first one on.
+  So the allowlist cannot ride a second flag beside the `settings.local.json` one (the section above) — that would silently drop the person's local
+  permissions. `orchestrate.mjs headless-settings <id>` writes ONE file, `settings.local.json` with `enabledPlugins: { <plugin>: false }` merged in, and the
+  line passes that file in place of the local one.
+- **`enabledPlugins: { "<id>": false }` in a `--settings` source switches a plugin off headless** for every scope seen — user marketplace plugins, `@inline`
+  (`CLAUDE_CODE_PLUGIN_DIRS`), `@synced` and `@builtin` — and a disabled plugin's SessionStart hooks stop firing.
+- **`@builtin` plugins are never denied** (the desktop app's security, privacy and telemetry plugins). `claude plugin list --json` does not even list them
+  today, so the rule is defensive; it is keyed on the id suffix because that is the one thing `init.plugins` and the inventory would agree on.
+- **`backlog-manager` is always kept**, whatever the list says: the session's first command is `/backlog-execute`, which lives in it.
+- **The verb never fails a launch.** The setting off, an unreadable allowlist, a failing or hung `claude plugin list`, nothing to disable — each prints
+  nothing, and the line falls back to `settings.local.json` alone, which is the session it launched before. A misread allowlist trims nothing rather than
+  falling back to the default list: guessing which plugins a person meant to keep is how a run loses one it needed. The verb's stderr goes to
+  `logs/<id>.headless.err`.
+- **The allowlist is `~/.backlog-manager/settings/headless.json`, written only by the server** (`POST /api/settings/headless`, Settings › Shared) and only read
+  by the tool, the relationship `review.json` has. A tool's `tools/` imports nothing from `shared/`, so the default list, the name shape and the cap are a hand
+  twin, pinned by `test/guards/headless-twin.test.ts`.
+- **Orchestrator per-item sessions only, for now.** Sessions spawned through the dashboard's `/api/spawn` — board dispatch, Jira runs, ticks, `pr-resolve`
+  and the driver itself — pass no `--settings` at all today; trimming them is a follow-up in that repo.
 
 ### Why `--model opus` is spelled on every launch line
 

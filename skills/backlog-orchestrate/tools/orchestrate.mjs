@@ -7230,6 +7230,192 @@ function cmdPrDraft(argv) {
   return 0;
 }
 
+// --- headless-settings: the plugin allowlist for a per-item session ----------------------------------------------------------------------------------
+// Every per-item session SKILL.md launches (the execute, retry and fix lines) used to load every plugin enabled on the machine, which is a preamble of
+// skills, hooks and agents a headless execute never uses — paid again on every turn. This verb writes the ONE settings file such a session is handed:
+// the main tree's `.claude/settings.local.json` (which the worktree has no copy of) plus `enabledPlugins: { <plugin>: false }` for every enabled plugin
+// the allowlist does not name. One file, never a second `--settings` flag beside the first, because `claude` keeps only the LAST `--settings` it is
+// given — a separate allowlist file would silently drop the person's local permissions. The measurements and the probe that found that are in
+// `references/rationale.md` ("Why a per-item session loads only an allowlist of plugins").
+//
+// The allowlist is `~/.backlog-manager/settings/headless.json`, written only by the server (`POST /api/settings/headless`) and only read here. The
+// default list, the name shape and the cap below are a hand TWIN of `DEFAULT_HEADLESS_PLUGINS`, `HEADLESS_PLUGIN_SHAPE` and `HEADLESS_PLUGINS_MAX` in
+// `shared/agent.ts` — a skill's tools import nothing from `shared/` — and `test/guards/headless-twin.test.ts` imports this module and fails when the
+// two drift. Change both or neither.
+//
+// The verb never fails a launch. Every way it can go wrong — the setting off, the file unreadable, `claude plugin list` failing or slow, nothing to
+// disable, the write refused — prints nothing on stdout and exits 0, and the launcher falls back to `settings.local.json` alone, which is exactly the
+// session it launched before this verb existed. A misread allowlist trims NOTHING rather than falling back to the default list: guessing which plugins
+// a person meant to keep is how a run loses one it needed. Each failure leaves one stderr line, which the launcher sends to `logs/<id>.headless.err`.
+// The one non-zero exit is the linked-worktree refusal every verb but `init` shares (exit 1) — the launcher reads it like an empty answer.
+//
+// Synchronous throughout (`spawnSync`, `fs.*Sync`), so the `process.exitCode = main(...)` rule at the bottom of this file still holds.
+
+export const HEADLESS_DEFAULT_PLUGINS = ['backlog-manager', 'superpowers'];
+export const HEADLESS_PLUGIN_SHAPE = /^[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?$/;
+export const HEADLESS_PLUGINS_MAX = 32;
+// Always kept, whatever the list says: the session's own skill (`/backlog-execute`) lives in this plugin, so trimming it would launch a session that
+// cannot run the one command its prompt starts with.
+const HEADLESS_ALWAYS_KEPT = 'backlog-manager';
+// The id suffix of the desktop app's own plugins (security, privacy, telemetry). Never switched off, recognised by the id rather than by `scope`,
+// because `claude plugin list --json` does not report them at all today — this rule is defensive, for the day it does.
+const HEADLESS_BUILTIN_SUFFIX = '@builtin';
+// The item id is substituted into a file name, so it is held to a shell- and path-inert shape: no `/`, no leading `-` or `.`.
+const HEADLESS_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const HEADLESS_LIST_TIMEOUT_MS = 15000;
+const HEADLESS_USAGE = 'usage: orchestrate.mjs headless-settings <itemId>';
+
+// `$BM_HEADLESS_FILE` when set — the variable the server's `headlessFile()` reads, so one test points both at one temp file — else the default path.
+export function headlessFile() {
+  return process.env.BM_HEADLESS_FILE || path.join(os.homedir(), '.backlog-manager', 'settings', 'headless.json');
+}
+
+// The twin of `parseHeadlessConfig` (shared/agent.ts): exactly the two keys, `enabled` a boolean, `plugins` at most HEADLESS_PLUGINS_MAX strings of
+// the shape, duplicates dropped in first-seen order. Returns `{ ok, config }` or `{ ok: false, member }`, the shared parser's own answer.
+export function parseHeadlessConfigTwin(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return { ok: false, member: 'headless' };
+  const keys = Object.keys(value);
+  if (keys.length !== 2 || !Object.hasOwn(value, 'enabled') || !Object.hasOwn(value, 'plugins')) return { ok: false, member: 'headless' };
+  if (typeof value.enabled !== 'boolean') return { ok: false, member: 'enabled' };
+  const list = value.plugins;
+  if (!Array.isArray(list) || list.length > HEADLESS_PLUGINS_MAX) return { ok: false, member: 'plugins' };
+  const plugins = [];
+  for (const [i, name] of list.entries()) {
+    if (typeof name !== 'string' || !HEADLESS_PLUGIN_SHAPE.test(name)) return { ok: false, member: `plugins[${i}]` };
+    if (!plugins.includes(name)) plugins.push(name);
+  }
+  return { ok: true, config: { enabled: value.enabled, plugins } };
+}
+
+// Which enabled plugins to switch off: every `enabled: true` entry of the inventory whose id is not `@builtin`, not `backlog-manager`, and matched by no
+// allowlist entry — an entry matching by the full id (`caveman@caveman`) or by the bare name before the `@` (`caveman`). A plugin already disabled is
+// not written: the file only ever ADDS `false`, so it can never turn something on the person turned off.
+export function headlessDenyMap(inventory, allow) {
+  const deny = {};
+  for (const entry of inventory) {
+    if (entry === null || typeof entry !== 'object' || entry.enabled !== true || typeof entry.id !== 'string') continue;
+    const id = entry.id;
+    if (id.endsWith(HEADLESS_BUILTIN_SUFFIX)) continue;
+    const name = id.includes('@') ? id.slice(0, id.indexOf('@')) : id;
+    if (name === HEADLESS_ALWAYS_KEPT) continue;
+    if (allow.includes(id) || allow.includes(name)) continue;
+    deny[id] = false;
+  }
+  return deny;
+}
+
+// The allowlist in force, or `null` when nothing should be trimmed (the setting off, or the file unreadable — the latter with its stderr line).
+function readHeadlessAllowlist() {
+  const file = headlessFile();
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return [...HEADLESS_DEFAULT_PLUGINS];
+    console.error(`headless-settings: ${file} could not be read (${e.code ?? e.message}) — trimming nothing`);
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = parseHeadlessConfigTwin(JSON.parse(text));
+  } catch {
+    parsed = { ok: false, member: 'headless' };
+  }
+  if (!parsed.ok) {
+    console.error(`headless-settings: ${file} is not a valid headless config (${parsed.member}) — trimming nothing`);
+    return null;
+  }
+  return parsed.config.enabled ? parsed.config.plugins : null;
+}
+
+// `claude plugin list --json`, or `null` with one stderr line. Bounded: a CLI that hangs must not hold a launch, so the child is SIGKILLed at the
+// timeout (`BM_HEADLESS_LIST_TIMEOUT_MS` shortens it, for the test that proves the bound).
+function readPluginInventory(cwd) {
+  const timeout = Number(process.env.BM_HEADLESS_LIST_TIMEOUT_MS) > 0 ? Number(process.env.BM_HEADLESS_LIST_TIMEOUT_MS) : HEADLESS_LIST_TIMEOUT_MS;
+  const r = spawnSync('claude', ['plugin', 'list', '--json'], { cwd, encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    const why = r.error?.code === 'ETIMEDOUT' ? `timed out after ${timeout} ms` : r.error ? r.error.message : `exited ${r.status ?? r.signal}`;
+    console.error(`headless-settings: claude plugin list --json ${why} — trimming nothing`);
+    return null;
+  }
+  let list;
+  try {
+    list = JSON.parse(r.stdout);
+  } catch {
+    list = null;
+  }
+  if (!Array.isArray(list)) {
+    console.error('headless-settings: claude plugin list --json did not print a JSON array — trimming nothing');
+    return null;
+  }
+  return list;
+}
+
+// The main tree's `settings.local.json` as an object: absent is `{}` silently, anything that is not a JSON object is `{}` with a stderr line (the
+// deny map is still worth writing — the launch would otherwise have passed that same broken file, and claude would have refused it either way).
+function readLocalSettings(root) {
+  const file = path.join(root, '.claude', 'settings.local.json');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error(`headless-settings: ${file} could not be read (${e.code ?? e.message}) — writing the plugin list alone`);
+    return {};
+  }
+  try {
+    const value = JSON.parse(text);
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value;
+  } catch {
+    // fall through to the one stderr line below
+  }
+  console.error(`headless-settings: ${file} is not a JSON object — writing the plugin list alone`);
+  return {};
+}
+
+/**
+ * `headless-settings <itemId>` — print the path of the settings file SKILL.md's launch lines hand a per-item session, or nothing. See the section
+ * comment above for why every failure is "print nothing, exit 0".
+ *
+ * Written to `<dir>/headless/<id>.json` (overwritten each launch, archived with the run as an ordinary sidecar), temp + rename in that directory, mode
+ * 0600 — it is a copy of `settings.local.json`, which can carry an `env` block with secrets in it.
+ */
+function cmdHeadlessSettings(argv) {
+  if (argv.length !== 1 || !HEADLESS_ID_SHAPE.test(argv[0])) throw new OrchestrateError(HEADLESS_USAGE, 1);
+  const itemId = argv[0];
+  const root = resolveProjectRoot();
+
+  const allow = readHeadlessAllowlist();
+  if (allow === null) return 0;
+  const inventory = readPluginInventory(root);
+  if (inventory === null) return 0;
+  const deny = headlessDenyMap(inventory, allow);
+  if (Object.keys(deny).length === 0) return 0;
+
+  const settings = structuredClone(readLocalSettings(root));
+  const local = settings.enabledPlugins;
+  if (local !== undefined && (local === null || typeof local !== 'object' || Array.isArray(local))) {
+    console.error('headless-settings: settings.local.json carries an enabledPlugins that is not an object — replaced by the plugin list');
+  }
+  const kept = local !== null && typeof local === 'object' && !Array.isArray(local) ? local : {};
+  // A deny always wins; an allowlisted plugin keeps whatever the local file said about it.
+  settings.enabledPlugins = { ...kept, ...deny };
+
+  const outDir = path.join(projectDir(orchHome(), root), 'headless');
+  const target = path.join(outDir, `${itemId}.json`);
+  const tmp = path.join(outDir, `.${itemId}.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    console.error(`headless-settings: could not write ${target} (${e.code ?? e.message}) — trimming nothing`);
+    return 0;
+  }
+  console.log(target);
+  return 0;
+}
+
 // spec §4 step 3. Records the PR's URL on the run — the one piece of `gh` output that ever reaches a tool argument, and
 // only through PR_URL_PATTERN. Validated before the run is read, like every "a problem with THIS call" check. A run not in
 // `pr` mode is refused too: `prUrl` is `null` under `merge`/`branch` by contract, and this is its only writer.
@@ -7286,6 +7472,7 @@ commands:
   reconcile    read-only crash-recovery report
   pr-draft     compose a pr-mode run's pull request title and body (writes only <dir>/pr/body.md)
   pr           record the pull request's url on a pr-mode run (pr --url <url>)
+  headless-settings  write the settings file a per-item session is launched with (prints its path, or nothing)
   abort        tear down worktrees/branches and end the run`;
 
 // --- CLI dispatch --------------------------------------------------------
@@ -7395,6 +7582,7 @@ export function main(argv) {
     if (cmd === 'reconcile') return cmdReconcile(rest);
     if (cmd === 'pr-draft') return cmdPrDraft(rest);
     if (cmd === 'pr') return cmdPr(rest);
+    if (cmd === 'headless-settings') return cmdHeadlessSettings(rest);
     if (cmd === 'abort') return cmdAbort();
     console.error(`unknown command: ${cmd ?? '(none)'}\n\n${USAGE}`);
     return 1;
